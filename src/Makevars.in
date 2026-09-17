@@ -1,0 +1,40 @@
+# Generated into src/Makevars by ./configure (and src/Makevars.win by
+# ./configure.win). Do not edit the generated file: it is .gitignore'd and
+# rewritten on every install.
+#
+# The include paths for <expat.h> and <miniz.h> are NOT set here. R adds
+# <pkg>/include for every LinkingTo package to CLINK_CPPFLAGS, so declaring
+# zuxml and zukomp there is what puts the headers on the path. If a build
+# fails with "expat.h: No such file or directory", the LinkingTo line in
+# DESCRIPTION is what is wrong, not this file.
+#
+# The two static archives have no such mechanism, which is why configure
+# exists: it resolves system.file("lib", package = ...) for each and
+# substitutes the results below.
+#
+#   BUILD_XLSXIO   xlsxio builds its own sources rather than consuming an
+#                  installed libxlsxio
+#   USE_MINIZ      selects the ZIP backend added by
+#                  tools/patches/xlsxio/0001-miniz-zip-backend.patch
+#   XML_STATIC     required on Windows: expat_external.h would otherwise mark
+#                  every declaration __declspec(dllimport) and the link fails
+#   MINIZ_NO_ZLIB_COMPATIBLE_NAMES
+#                  required everywhere, and required to match how
+#                  libzukomp.a was built: miniz.h would otherwise #define
+#                  compress/crc32/adler32 over every translation unit here,
+#                  colliding with the zlib R itself links
+PKG_CPPFLAGS = -DBUILD_XLSXIO -DUSE_MINIZ -DXML_STATIC \
+  -DMINIZ_NO_ZLIB_COMPATIBLE_NAMES \
+  -Ivendor/xlsxio/include -Ivendor/xlsxio/lib
+
+PKG_LIBS = @ZUXML_LIB@/libzuxml.a @ZUKOMP_LIB@/libzukomp.a
+
+# Listed explicitly rather than via $(wildcard ...): R only auto-compiles
+# src/*.c, xlsxio lives in a subdirectory, and a GNU make wildcard would force
+# SystemRequirements: GNU make. Only the reader is built; xlsxio_write.c is
+# deliberately not vendored.
+OBJECTS = \
+  init.o \
+  zuxlsx.o \
+  vendor/xlsxio/lib/xlsxio_read.o \
+  vendor/xlsxio/lib/xlsxio_read_sharedstrings.o

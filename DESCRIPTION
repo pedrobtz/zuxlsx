@@ -8,7 +8,14 @@ License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 8.0.0
+LinkingTo: 
+    zukomp,
+    zuxml
 Suggests: 
-    testthat (>= 3.0.0)
+    testthat (>= 3.0.0),
+    withr
 Config/testthat/edition: 3
 URL: https://pedrobtz.github.io/zuxlsx/
+Remotes: 
+    pedrobtz/zukomp@feat/expose-miniz-zip-for-linkingto,
+    pedrobtz/zuxml@feat/expose-expat-for-linkingto
