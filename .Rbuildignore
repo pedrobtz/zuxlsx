@@ -3,3 +3,8 @@
 ^_pkgdown\.yml$
 ^docs$
 ^pkgdown$
+^CLAUDE\.md$
+^\.agents$
+^\.DS_Store$
+^src/.*\.o$
+^src/.*\.(so|dll)$

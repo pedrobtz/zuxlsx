@@ -1,0 +1,35 @@
+zuxlsx bundles third-party source code under src/vendor/. Provenance for every
+bundled source -- upstream repository, release tag, license and the local
+patches applied -- is recorded in tools/vendor/manifest.tsv, with per-file
+checksums of the copy as committed in tools/vendor/checksums.sha256.
+
+-------------------------------------------------------------------------------
+xlsxio (src/vendor/xlsxio/)
+-------------------------------------------------------------------------------
+
+Upstream:  https://github.com/brechtsanders/xlsxio
+Release:   0.2.36
+License:   MIT, reproduced verbatim in src/vendor/xlsxio/LICENSE.txt
+
+  Copyright (c) 2016 Brecht Sanders
+
+Only the XLSX *reader* is bundled: xlsxio_read.c, xlsxio_read_sharedstrings.c
+and their headers. The writer (xlsxio_write.c) is deliberately not bundled --
+writing workbooks is out of scope (design section 21).
+
+The bundled copy carries one local patch, in tools/patches/xlsxio/:
+
+  0001-miniz-zip-backend.patch  adds a USE_MINIZ backend beside the existing
+                                USE_MINIZIP / USE_MINIZIP_NG / libzip ones,
+                                so the reader drives miniz's ZIP reader
+                                (mz_zip_reader_init_file, _locate_file_v2,
+                                _extract_iter_new/_read/_free) instead of
+                                requiring system minizip or libzip. Upstream
+                                has no miniz backend.
+
+The patch was written in the utopp/pkg-xlsx prototype, not by upstream, and is
+reproduced here unchanged. It applies cleanly to the pristine 0.2.36
+xlsxio_read.c and reproduces the committed copy byte for byte.
+
+Line endings are CRLF, as shipped by upstream. They are deliberately not
+normalised, so the committed bytes still match the release archive.
