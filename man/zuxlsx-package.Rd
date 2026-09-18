@@ -4,23 +4,30 @@
 \name{zuxlsx-package}
 \alias{zuxlsx}
 \alias{zuxlsx-package}
-\title{zuxlsx: What the Package Does (One Line, Title Case)}
+\title{zuxlsx: Read 'xlsx' Workbooks Without System Dependencies}
 \description{
-What the package does (one paragraph).
+Reads spreadsheet data from 'xlsx' workbooks using a bundled copy of the 'xlsxio' reader (\url{https://github.com/brechtsanders/xlsxio}), so that no system XML or ZIP library is required. The 'Expat' parser and the 'miniz' ZIP reader are linked statically at install time from the 'zuxml' and 'zukomp' packages, which means there is no run-time dependency on either of them. Worksheets are read as a stream, so a workbook does not have to be held in memory in full. Writing workbooks is out of scope.
 }
 \seealso{
 Useful links:
 \itemize{
+  \item \url{https://github.com/pedrobtz/zuxlsx}
   \item \url{https://pedrobtz.github.io/zuxlsx/}
+  \item Report bugs at \url{https://github.com/pedrobtz/zuxlsx/issues}
 }
 
 }
 \author{
-\strong{Maintainer}: First Last \email{first.last@example.com}
+\strong{Maintainer}: Pedro Baltazar \email{pedrobtz@gmail.com} [copyright holder]
 
 Authors:
 \itemize{
-  \item First Last \email{first.last@example.com}
+  \item Pedro Baltazar \email{pedrobtz@gmail.com} [copyright holder]
+}
+
+Other contributors:
+\itemize{
+  \item Brecht Sanders (xlsxio, bundled in src/vendor/xlsxio) [copyright holder]
 }
 
 }
