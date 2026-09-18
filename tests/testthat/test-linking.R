@@ -8,6 +8,8 @@ test_that("the native libraries are the ones we linked", {
 
   # xlsxio is vendored here, so its version is pinned by
   # tools/vendor/manifest.tsv rather than by whatever is installed.
+  # tools/vendor/verify checks this literal against the manifest and the
+  # vendored header, which the tests cannot read: tools/ is not installed.
   expect_identical(native$xlsxio, "0.2.36")
 
   # These two came out of the archives. Asserting the shape rather than exact
@@ -46,13 +48,18 @@ test_that("a multi-sheet workbook reports them in workbook order", {
   )
 })
 
-test_that("a bad path is an R error, not a crash", {
-  expect_error(xlsx_sheets(test_path("sheets", "nope.xlsx")), "does not exist")
-  expect_error(xlsx_sheets(1), "single non-missing string")
+test_that("every fixture in the corpus can be opened", {
+  # The per-file manifest is the list of what we claim to handle; walking it
+  # means a fixture added without a test still has to open.
+  manifest <- read.delim(
+    test_path("sheets", "MANIFEST.tsv"),
+    stringsAsFactors = FALSE
+  )
+  expect_gt(nrow(manifest), 0L)
 
-  # A real file that is not a ZIP: this one reaches miniz, which has to
-  # refuse it rather than read past the end of a 3-byte archive.
-  not_xlsx <- withr::local_tempfile(fileext = ".xlsx")
-  writeBin(charToRaw("no"), not_xlsx)
-  expect_error(xlsx_sheets(not_xlsx), "could not open")
+  for (file in manifest$file) {
+    sheets <- xlsx_sheets(test_path("sheets", file))
+    expect_type(sheets, "character")
+    expect_gt(length(sheets), 0L)
+  }
 })

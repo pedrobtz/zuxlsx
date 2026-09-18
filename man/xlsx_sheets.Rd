@@ -10,7 +10,8 @@ xlsx_sheets(path)
 \item{path}{Path to an \code{.xlsx} file.}
 }
 \value{
-A character vector of worksheet names, in workbook order.
+A character vector of worksheet names, in workbook order. A workbook
+always has at least one.
 }
 \description{
 List the worksheets in an xlsx workbook
@@ -18,4 +19,7 @@ List the worksheets in an xlsx workbook
 \examples{
 path <- system.file("extdata", "two-sheets.xlsx", package = "zuxlsx")
 if (nzchar(path)) xlsx_sheets(path)
+}
+\seealso{
+\link{zuxlsx-conditions} for the errors this can raise.
 }
