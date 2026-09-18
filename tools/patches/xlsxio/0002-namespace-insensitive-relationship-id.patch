@@ -1,0 +1,42 @@
+Match a worksheet's relationship id regardless of XML namespace prefix.
+
+xlsx_sheets() worked on every fixture, but opening a worksheet by name did
+not on all of them: main_sheet_get_relid_expat_callback_element_start looked
+the relationship id up as the literal attribute name "r:id".
+
+The prefix is not fixed. ECMA-376 binds the relationship attribute to the
+namespace http://schemas.openxmlformats.org/officeDocument/2006/relationships,
+and a producer may bind that URI to any prefix it likes. The readxl fixture
+nonstandard-xml-ns-prefix.xlsx declares it as "ns", so its <sheet> elements
+carry ns:id and the lookup returned NULL, leaving sheetrelid unset and the
+worksheet unreachable.
+
+xlsxio already has the tool for this. It parses without namespace processing
+(XML_ParserCreate(NULL)) and compares names with XML_Char_icmp_ins(), which
+matches a bare name against any "prefix:name", and get_expat_attr_by_name()
+uses that comparison. Asking for "id" therefore matches r:id, ns:id and a
+bare id alike; asking for "r:id" only ever matches the one spelling.
+
+Note this is the attribute-name arm of a fix upstream already made for the
+element name on the same line of reasoning, and it is the same lookup the
+adjacent list-sheets callback has carried commented out since 0.2.36.
+
+Limitation, unchanged by this patch: because parsing is prefix-based rather
+than namespace-aware, a workbook that binds "r" to some other URI would still
+match. Nothing in the corpus does, and fixing it properly means turning on
+namespace processing across the whole reader, which is an upstream change.
+
+Origin: written for zuxlsx. Not upstream.
+Applies to xlsxio 0.2.36 with 0001-miniz-zip-backend.patch already applied.
+
+--- a/lib/xlsxio_read.c
++++ b/lib/xlsxio_read.c
+@@ -903,7 +903,7 @@
+   if (XML_Char_icmp_ins(name, X("sheet")) == 0) {
+     const XML_Char* sheetname;
+     if ((sheetname = get_expat_attr_by_name(atts, X("name"))) != NULL && (!data->sheetname || XML_Char_icmp(sheetname, data->sheetname) == 0)) {
+-      const XML_Char* relid = get_expat_attr_by_name(atts, X("r:id"));
++      const XML_Char* relid = get_expat_attr_by_name(atts, X("id"));
+       if (relid && *relid) {
+         data->sheetrelid = XML_Char_dup(relid);
+         XML_StopParser(data->xmlparser, XML_FALSE);

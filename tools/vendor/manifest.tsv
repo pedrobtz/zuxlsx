@@ -1,2 +1,2 @@
 source	repo	tag	commit	version_string	archive	archive_sha256	license	defines	patches
-xlsxio	https://github.com/brechtsanders/xlsxio	0.2.36	unrecorded	0.2.36	https://github.com/brechtsanders/xlsxio/archive/refs/tags/0.2.36.tar.gz	unverified	MIT	BUILD_XLSXIO,USE_MINIZ,XML_STATIC	0001-miniz-zip-backend.patch
+xlsxio	https://github.com/brechtsanders/xlsxio	0.2.36	a9016eb2eb46dcd613a68fcfcd1002b5adf64ae9	0.2.36	https://github.com/brechtsanders/xlsxio/archive/refs/tags/0.2.36.tar.gz	80d3df95a7a108a41f83f0ce4c6706873fd2afafd92424fcccea475a8acbd044	MIT	BUILD_XLSXIO,USE_MINIZ,XML_STATIC,MINIZ_NO_ZLIB_COMPATIBLE_NAMES	0001-miniz-zip-backend.patch,0002-namespace-insensitive-relationship-id.patch

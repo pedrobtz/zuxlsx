@@ -1,14 +1,15 @@
 zuxlsx bundles third-party source code under src/vendor/. Provenance for every
-bundled source -- upstream repository, release tag, license and the local
-patches applied -- is recorded in tools/vendor/manifest.tsv, with per-file
-checksums of the copy as committed in tools/vendor/checksums.sha256.
+bundled source -- upstream repository, release tag, commit, license and the
+local patches applied -- is recorded in tools/vendor/manifest.tsv, with
+per-file checksums of the copy as committed in tools/vendor/checksums.sha256.
+tools/vendor/verify re-checks all of that offline.
 
 -------------------------------------------------------------------------------
 xlsxio (src/vendor/xlsxio/)
 -------------------------------------------------------------------------------
 
 Upstream:  https://github.com/brechtsanders/xlsxio
-Release:   0.2.36
+Release:   0.2.36 (commit a9016eb2eb46dcd613a68fcfcd1002b5adf64ae9)
 License:   MIT, reproduced verbatim in src/vendor/xlsxio/LICENSE.txt
 
   Copyright (c) 2016 Brecht Sanders
@@ -17,19 +18,40 @@ Only the XLSX *reader* is bundled: xlsxio_read.c, xlsxio_read_sharedstrings.c
 and their headers. The writer (xlsxio_write.c) is deliberately not bundled --
 writing workbooks is out of scope (design section 21).
 
-The bundled copy carries one local patch, in tools/patches/xlsxio/:
+The bundled copy carries two local patches, in tools/patches/xlsxio/, applied
+in order. Neither is upstream.
 
-  0001-miniz-zip-backend.patch  adds a USE_MINIZ backend beside the existing
-                                USE_MINIZIP / USE_MINIZIP_NG / libzip ones,
-                                so the reader drives miniz's ZIP reader
-                                (mz_zip_reader_init_file, _locate_file_v2,
-                                _extract_iter_new/_read/_free) instead of
-                                requiring system minizip or libzip. Upstream
-                                has no miniz backend.
+  0001-miniz-zip-backend.patch
+      Adds a USE_MINIZ backend beside the existing USE_MINIZIP /
+      USE_MINIZIP_NG / libzip ones, so the reader drives miniz's ZIP reader
+      (mz_zip_reader_init_file, _locate_file_v2, _extract_iter_new/_read/_free)
+      instead of requiring system minizip or libzip. Upstream has no miniz
+      backend. Written in the utopp/pkg-xlsx prototype.
 
-The patch was written in the utopp/pkg-xlsx prototype, not by upstream, and is
-reproduced here unchanged. It applies cleanly to the pristine 0.2.36
-xlsxio_read.c and reproduces the committed copy byte for byte.
+  0002-namespace-insensitive-relationship-id.patch
+      Looks a worksheet's relationship id up as "id" rather than the literal
+      "r:id", so that a workbook binding the OOXML relationships namespace to
+      some other prefix still resolves. Written for zuxlsx.
 
-Line endings are CRLF, as shipped by upstream. They are deliberately not
-normalised, so the committed bytes still match the release archive.
+Running the two patches in order against the pristine 0.2.36 release archive
+reproduces src/vendor/xlsxio/ byte for byte, including line endings. No other
+modification is made to the bundled code, and it is never edited in place:
+tools/vendor/fetch re-derives it, and tools/vendor/verify checks the result.
+
+Line endings are CRLF, as shipped by upstream, except on the lines the two
+patches introduce. They are deliberately not normalised, so the kept files
+still match the release archive.
+
+-------------------------------------------------------------------------------
+Test fixtures (tests/testthat/sheets/)
+-------------------------------------------------------------------------------
+
+Seven interoperability workbooks are copied from the readxl project and are
+not part of the installed package.
+
+Upstream:  https://github.com/tidyverse/readxl
+Commit:    47f8aeac0a99eee6c6db2d64ead2225e5e3ae4af
+License:   MIT, reproduced in tests/testthat/sheets/LICENSE-readxl.md
+
+Per-file provenance and checksums are in tests/testthat/sheets/MANIFEST.tsv,
+which tools/vendor/verify also checks.
