@@ -1,0 +1,40 @@
+#!/bin/sh
+# Resolves the two static archives that LinkingTo cannot point at.
+#
+# LinkingTo gets the *headers* onto the include path by itself. There is no
+# equivalent for a library, and the alternatives are worse: $(shell ...) in
+# Makevars would force SystemRequirements: GNU make, and an Imports: entry
+# would add a runtime dependency the design does not want -- nothing in
+# zuxlsx calls R code in zuxml or zukomp, and the archives are linked in
+# statically, so neither package needs to be loadable at run time.
+set -eu
+
+: "${R_HOME:?configure must be run by R CMD INSTALL, which sets R_HOME}"
+RSCRIPT="${R_HOME}/bin/Rscript"
+
+lib_dir() {
+  "${RSCRIPT}" --vanilla -e "cat(system.file('lib', package = '$1'))"
+}
+
+fail() {
+  echo "configure: $1/lib/$2 was not found." >&2
+  echo "" >&2
+  echo "  zuxlsx links it statically. It ships with $1 0.1.0.9000 and later;" >&2
+  echo "  an older installed $1 does not have it. Reinstall with:" >&2
+  echo "" >&2
+  echo "    pak::pak(\"pedrobtz/$1\")" >&2
+  exit 1
+}
+
+ZUXML_LIB=$(lib_dir zuxml)
+ZUKOMP_LIB=$(lib_dir zukomp)
+
+[ -n "${ZUXML_LIB}" ] && [ -f "${ZUXML_LIB}/libzuxml.a" ] || fail zuxml libzuxml.a
+[ -n "${ZUKOMP_LIB}" ] && [ -f "${ZUKOMP_LIB}/libzukomp.a" ] || fail zukomp libzukomp.a
+
+sed \
+  -e "s|@ZUXML_LIB@|${ZUXML_LIB}|g" \
+  -e "s|@ZUKOMP_LIB@|${ZUKOMP_LIB}|g" \
+  src/Makevars.in > src/Makevars
+
+echo "configure: linking ${ZUXML_LIB}/libzuxml.a and ${ZUKOMP_LIB}/libzukomp.a"

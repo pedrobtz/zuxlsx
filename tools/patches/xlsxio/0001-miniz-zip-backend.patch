@@ -1,0 +1,391 @@
+Add a miniz ZIP backend to the xlsxio reader.
+
+xlsxio 0.2.36 can drive minizip, minizip-ng or libzip, but not miniz, whose
+ZIP reader has a different shape: there is no "current file" on the archive
+handle, so an entry becomes an explicit extraction iterator. This patch adds
+USE_MINIZ beside the existing backends and leaves them untouched.
+
+  unzOpen()               ->  mz_zip_reader_init_file()
+  unzLocateFile()         ->  mz_zip_reader_locate_file_v2(MZ_ZIP_FLAG_CASE_SENSITIVE)
+  unzOpenCurrentFile()    ->  mz_zip_reader_extract_iter_new()
+  unzReadCurrentFile()    ->  mz_zip_reader_extract_iter_read()
+  unzCloseCurrentFile()   ->  mz_zip_reader_extract_iter_free()
+  unzClose()              ->  mz_zip_reader_end()
+
+Note mz_zip_reader_extract_iter_read() returns a size_t, so the minizip loop
+condition "buflen >= 0" is vacuous for it and the read moves into the loop
+body; a short read still ends the stream via the existing "done" test.
+
+Origin: written in the utopp/pkg-xlsx prototype, reproduced here unchanged.
+Applies to pristine xlsxio 0.2.36 src/vendor/xlsxio/lib/xlsxio_read.c.
+
+--- a/lib/xlsxio_read.c
++++ b/lib/xlsxio_read.c
+@@ -8,7 +8,14 @@
+ #include <string.h>
+ #include <expat.h>
+ 
+-#if defined(USE_MINIZIP) || defined(USE_MINIZIP_NG)
++#if defined(USE_MINIZ)
++#  include "miniz.h"
++#  define ZIPFILETYPE mz_zip_archive
++#  define ZIPFILEENTRYTYPE mz_zip_reader_extract_iter_state
++#  ifdef _WIN32
++#    define fdopen _fdopen
++#  endif
++#elif defined(USE_MINIZIP) || defined(USE_MINIZIP_NG)
+ #  ifdef USE_MINIZIP_NG
+ #    include <minizip-ng/unzip.h>
+ #  else
+@@ -68,11 +75,17 @@
+ {
+   if (!filename || !*filename)
+     return NULL;
+-#ifdef USE_MINIZIP
+-  if (unzLocateFile(archive, filename, 0) != UNZ_OK)
++#ifdef USE_MINIZ
++  mz_uint32 file_index;
++  (void)flags;
++  if (!mz_zip_reader_locate_file_v2(archive, filename, NULL, MZ_ZIP_FLAG_CASE_SENSITIVE, &file_index))
++    return NULL;
++  return mz_zip_reader_extract_iter_new(archive, file_index, 0);
++#elif defined(USE_MINIZIP)
++  if (unzLocateFile(archive, filename, 0) != UNZ_OK)
++    return NULL;
++  if (unzOpenCurrentFile(archive) != UNZ_OK)
+     return NULL;
+-  if (unzOpenCurrentFile(archive) != UNZ_OK)
+-    return NULL;
+   return archive;
+ #else
+   return zip_fopen(archive, filename, flags);
+@@ -120,9 +133,16 @@
+     return NULL;
+   if ((s = chardupXML_Char(filename)) == NULL)
+     return NULL;
+-#ifdef USE_MINIZIP
+-  if (unzLocateFile(archive, s, 0) != UNZ_OK)
+-    result = NULL;
++#ifdef USE_MINIZ
++  mz_uint32 file_index;
++  (void)flags;
++  if (!mz_zip_reader_locate_file_v2(archive, s, NULL, MZ_ZIP_FLAG_CASE_SENSITIVE, &file_index))
++    result = NULL;
++  else
++    result = mz_zip_reader_extract_iter_new(archive, file_index, 0);
++#elif defined(USE_MINIZIP)
++  if (unzLocateFile(archive, s, 0) != UNZ_OK)
++    result = NULL;
+   else if (unzOpenCurrentFile(archive) != UNZ_OK)
+     result = NULL;
+   else
+@@ -160,10 +180,12 @@
+   ZIPFILEENTRYTYPE* zipfile;
+   XML_Parser parser;
+   void* buf;
+-#ifdef USE_MINIZIP
+-  int buflen;
+-#else
+-  zip_int64_t buflen;
++#ifdef USE_MINIZ
++  size_t buflen;
++#elif defined(USE_MINIZIP)
++  int buflen;
++#else
++  zip_int64_t buflen;
+ #endif
+   int done;
+   enum XML_Status status = XML_STATUS_ERROR;
+@@ -177,10 +199,13 @@
+   if (xmlparser)
+     *xmlparser = parser;
+   buf = XML_GetBuffer(parser, PARSE_BUFFER_SIZE);
+-#ifdef USE_MINIZIP
+-    while (buf && (buflen = unzReadCurrentFile(zip, buf, PARSE_BUFFER_SIZE)) >= 0) {
+-#else
+-    while (buf && (buflen = zip_fread(zipfile, buf, PARSE_BUFFER_SIZE)) >= 0) {
++#ifdef USE_MINIZ
++    while (buf) {
++      buflen = mz_zip_reader_extract_iter_read(zipfile, buf, PARSE_BUFFER_SIZE);
++#elif defined(USE_MINIZIP)
++    while (buf && (buflen = unzReadCurrentFile(zip, buf, PARSE_BUFFER_SIZE)) >= 0) {
++#else
++    while (buf && (buflen = zip_fread(zipfile, buf, PARSE_BUFFER_SIZE)) >= 0) {
+ #endif
+       done = buflen < PARSE_BUFFER_SIZE;
+       if ((status = XML_ParseBuffer(parser, (int)buflen, (done ? 1 : 0))) == XML_STATUS_ERROR) {
+@@ -193,10 +218,12 @@
+       buf = XML_GetBuffer(parser, PARSE_BUFFER_SIZE);
+     }
+   XML_ParserFree(parser);
+-#ifdef USE_MINIZIP
+-  unzCloseCurrentFile(zip);
+-#else
+-  zip_fclose(zipfile);
++#ifdef USE_MINIZ
++  mz_zip_reader_extract_iter_free(zipfile);
++#elif defined(USE_MINIZIP)
++  unzCloseCurrentFile(zip);
++#else
++  zip_fclose(zipfile);
+ #endif
+   //return (status == XML_STATUS_ERROR != XML_ERROR_FINISHED ? 1 : 0);
+   return 0;
+@@ -222,17 +249,22 @@
+   if (status == XML_STATUS_ERROR && XML_GetErrorCode(xmlparser) != XML_ERROR_NOT_SUSPENDED)
+     return status;
+   void* buf;
+-#ifdef USE_MINIZIP
+-  int buflen;
+-#else
+-  zip_int64_t buflen;
++#ifdef USE_MINIZ
++  size_t buflen;
++#elif defined(USE_MINIZIP)
++  int buflen;
++#else
++  zip_int64_t buflen;
+ #endif
+   int done;
+   buf = XML_GetBuffer(xmlparser, PARSE_BUFFER_SIZE);
+-#ifdef USE_MINIZIP
+-  while (buf && (buflen = unzReadCurrentFile(zipfile, buf, PARSE_BUFFER_SIZE)) >= 0) {
+-#else
+-  while (buf && (buflen = zip_fread(zipfile, buf, PARSE_BUFFER_SIZE)) >= 0) {
++#ifdef USE_MINIZ
++  while (buf) {
++    buflen = mz_zip_reader_extract_iter_read(zipfile, buf, PARSE_BUFFER_SIZE);
++#elif defined(USE_MINIZIP)
++  while (buf && (buflen = unzReadCurrentFile(zipfile, buf, PARSE_BUFFER_SIZE)) >= 0) {
++#else
++  while (buf && (buflen = zip_fread(zipfile, buf, PARSE_BUFFER_SIZE)) >= 0) {
+ #endif
+     done = buflen < PARSE_BUFFER_SIZE;
+     if ((status = XML_ParseBuffer(xmlparser, (int)buflen, (done ? 1 : 0))) == XML_STATUS_ERROR)
+@@ -372,25 +404,37 @@
+ 
+ ////////////////////////////////////////////////////////////////////////
+ 
+-struct xlsxio_read_struct {
+-  ZIPFILETYPE* zip;
+-};
+-
+-DLL_EXPORT_XLSXIO xlsxioreader xlsxioread_open (const char* filename)
+-{
+-  xlsxioreader result;
+-  if ((result = (xlsxioreader)malloc(sizeof(struct xlsxio_read_struct))) != NULL) {
+-#ifdef USE_MINIZIP
+-    if ((result->zip = unzOpen(filename)) == NULL) {
+-#else
+-    if ((result->zip = zip_open(filename, ZIP_RDONLY, NULL)) == NULL) {
+-#endif
+-      free(result);
+-      return NULL;
+-    }
+-  }
+-  return result;
+-}
++struct xlsxio_read_struct {
++  ZIPFILETYPE* zip;
++  FILE* zip_file;
++  void* zip_data;
++  int zip_freedata;
++};
++
++DLL_EXPORT_XLSXIO xlsxioreader xlsxioread_open (const char* filename)
++{
++  xlsxioreader result;
++  if ((result = (xlsxioreader)calloc(1, sizeof(struct xlsxio_read_struct))) != NULL) {
++#ifdef USE_MINIZ
++    if ((result->zip = (ZIPFILETYPE*)calloc(1, sizeof(ZIPFILETYPE))) == NULL || !mz_zip_reader_init_file(result->zip, filename, 0)) {
++      free(result->zip);
++      free(result);
++      return NULL;
++    }
++#elif defined(USE_MINIZIP)
++    if ((result->zip = unzOpen(filename)) == NULL) {
++      free(result);
++      return NULL;
++    }
++#else
++    if ((result->zip = zip_open(filename, ZIP_RDONLY, NULL)) == NULL) {
++      free(result);
++      return NULL;
++    }
++#endif
++  }
++  return result;
++}
+ 
+ #ifdef USE_MINIZIP
+ struct minizip_io_filehandle_data {
+@@ -461,14 +505,22 @@
+ }
+ #endif
+ 
+-DLL_EXPORT_XLSXIO xlsxioreader xlsxioread_open_filehandle (int filehandle)
+-{
+-  xlsxioreader result;
+-  if ((result = (xlsxioreader)malloc(sizeof(struct xlsxio_read_struct))) != NULL) {
+-#ifdef USE_MINIZIP
+-    zlib_filefunc_def minizip_io_filehandle_functions;
+-    if ((minizip_io_filehandle_functions.opaque = malloc(sizeof(struct minizip_io_filehandle_data))) == NULL) {
+-      free(result);
++DLL_EXPORT_XLSXIO xlsxioreader xlsxioread_open_filehandle (int filehandle)
++{
++  xlsxioreader result;
++  if ((result = (xlsxioreader)calloc(1, sizeof(struct xlsxio_read_struct))) != NULL) {
++#ifdef USE_MINIZ
++    if ((result->zip_file = fdopen(filehandle, "rb")) == NULL || (result->zip = (ZIPFILETYPE*)calloc(1, sizeof(ZIPFILETYPE))) == NULL || !mz_zip_reader_init_cfile(result->zip, result->zip_file, 0, 0)) {
++      if (result->zip_file)
++        fclose(result->zip_file);
++      free(result->zip);
++      free(result);
++      return NULL;
++    }
++#elif defined(USE_MINIZIP)
++    zlib_filefunc_def minizip_io_filehandle_functions;
++    if ((minizip_io_filehandle_functions.opaque = malloc(sizeof(struct minizip_io_filehandle_data))) == NULL) {
++      free(result);
+       return NULL;
+     }
+     minizip_io_filehandle_functions.zopen_file = minizip_io_filehandle_open_file_fn;
+@@ -601,12 +653,24 @@
+ }
+ #endif
+ 
+-DLL_EXPORT_XLSXIO xlsxioreader xlsxioread_open_memory (void* data, uint64_t datalen, int freedata)
+-{
+-  xlsxioreader result;
+-#ifdef USE_MINIZIP
+-  if ((result = (xlsxioreader)malloc(sizeof(struct xlsxio_read_struct))) != NULL) {
+-    zlib_filefunc_def minizip_io_memory_functions;
++DLL_EXPORT_XLSXIO xlsxioreader xlsxioread_open_memory (void* data, uint64_t datalen, int freedata)
++{
++  xlsxioreader result;
++#ifdef USE_MINIZ
++  if ((result = (xlsxioreader)calloc(1, sizeof(struct xlsxio_read_struct))) != NULL) {
++    result->zip_data = data;
++    result->zip_freedata = freedata;
++    if ((result->zip = (ZIPFILETYPE*)calloc(1, sizeof(ZIPFILETYPE))) == NULL || !mz_zip_reader_init_mem(result->zip, data, datalen, 0)) {
++      if (freedata)
++        free(data);
++      free(result->zip);
++      free(result);
++      return NULL;
++    }
++  }
++#elif defined(USE_MINIZIP)
++  if ((result = (xlsxioreader)malloc(sizeof(struct xlsxio_read_struct))) != NULL) {
++    zlib_filefunc_def minizip_io_memory_functions;
+     if ((minizip_io_memory_functions.opaque = malloc(sizeof(struct minizip_io_memory_data))) == NULL) {
+       free(result);
+       return NULL;
+@@ -642,14 +706,21 @@
+   return result;
+ }
+ 
+-DLL_EXPORT_XLSXIO void xlsxioread_close (xlsxioreader handle)
+-{
+-  if (handle) {
+-    //note: no need to call zip_source_free() after successful use in zip_open_from_source()
+-#ifdef USE_MINIZIP
+-    unzClose(handle->zip);
+-#else
+-    zip_close(handle->zip);
++DLL_EXPORT_XLSXIO void xlsxioread_close (xlsxioreader handle)
++{
++  if (handle) {
++    //note: no need to call zip_source_free() after successful use in zip_open_from_source()
++#ifdef USE_MINIZ
++    mz_zip_reader_end(handle->zip);
++    free(handle->zip);
++    if (handle->zip_file)
++      fclose(handle->zip_file);
++    if (handle->zip_freedata)
++      free(handle->zip_data);
++#elif defined(USE_MINIZIP)
++    unzClose(handle->zip);
++#else
++    zip_close(handle->zip);
+ #endif
+     free(handle);
+   }
+@@ -691,10 +762,18 @@
+         XML_Char* filename;
+         size_t filenamelen;
+         size_t extensionlen = XML_Char_len(extension);
+-#ifdef USE_MINIZIP
+-#define UNZIP_FILENAME_BUFFER_STEP 32
+-        char* buf;
+-        size_t buflen;
++#ifdef USE_MINIZ
++        mz_uint i;
++        mz_uint zipnumfiles = mz_zip_reader_get_num_files(data->zip);
++        for (i = 0; i < zipnumfiles; i++) {
++          mz_zip_archive_file_stat filestat;
++          if (!mz_zip_reader_file_stat(data->zip, i, &filestat))
++            continue;
++          filename = XML_Char_dupchar(filestat.m_filename);
++#elif defined(USE_MINIZIP)
++#define UNZIP_FILENAME_BUFFER_STEP 32
++        char* buf;
++        size_t buflen;
+         int status;
+ unz_global_info zipglobalinfo;
+ unzGetGlobalInfo(data->zip, &zipglobalinfo);
+@@ -726,9 +805,9 @@
+           }
+           free(filename);
+         }
+-#ifdef USE_MINIZIP
+-        free(buf);
+-#endif
++#ifdef USE_MINIZIP
++        free(buf);
++#endif
+       }
+     }
+   }
+@@ -1427,13 +1506,15 @@
+ {
+   if (!sheetlisthandle)
+     return;
+-  if (sheetlisthandle->xmlparser)
+-    XML_ParserFree(sheetlisthandle->xmlparser);
+-  if (sheetlisthandle->zipfile)
+-#ifdef USE_MINIZIP
+-    unzCloseCurrentFile(sheetlisthandle->zipfile);
+-#else
+-    zip_fclose(sheetlisthandle->zipfile);
++  if (sheetlisthandle->xmlparser)
++    XML_ParserFree(sheetlisthandle->xmlparser);
++  if (sheetlisthandle->zipfile)
++#ifdef USE_MINIZ
++    mz_zip_reader_extract_iter_free(sheetlisthandle->zipfile);
++#elif defined(USE_MINIZIP)
++    unzCloseCurrentFile(sheetlisthandle->zipfile);
++#else
++    zip_fclose(sheetlisthandle->zipfile);
+ #endif
+   free(sheetlisthandle->nextsheetname);
+   free(sheetlisthandle);
+@@ -1477,11 +1558,13 @@
+   if (sheethandle->processcallbackdata.xmlparser)
+     XML_ParserFree(sheethandle->processcallbackdata.xmlparser);
+   data_sheet_callback_data_cleanup(&sheethandle->processcallbackdata);
+-  if (sheethandle->zipfile)
+-#ifdef USE_MINIZIP
+-    unzCloseCurrentFile(sheethandle->zipfile);
+-#else
+-    zip_fclose(sheethandle->zipfile);
++  if (sheethandle->zipfile)
++#ifdef USE_MINIZ
++    mz_zip_reader_extract_iter_free(sheethandle->zipfile);
++#elif defined(USE_MINIZIP)
++    unzCloseCurrentFile(sheethandle->zipfile);
++#else
++    zip_fclose(sheethandle->zipfile);
+ #endif
+   free(sheethandle);
+ }
