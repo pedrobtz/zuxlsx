@@ -165,8 +165,9 @@ mz_zip_reader_extract_iter_free();
 
 ### Status, 2026-09-17
 
-**Open as pull requests, not merged; this is the one blocking dependency for
-`zuxlsx`.** As shipped at v1, neither package exposes any of the above:
+**Done: both merged on 2026-09-18, and `zuxlsx` builds against them.** What
+follows is kept because it records why two v1 packages were widened. As
+shipped at v1, neither package exposed any of the above:
 
 - `zuxml/inst/include/` holds only `zuxml.h`; there is no `expat.h`, no
   `expat_external.h`, and no `inst/lib/libzuxml.a`. The installed header is
@@ -181,15 +182,19 @@ mz_zip_reader_extract_iter_free();
   `R_GetCCallable()` (`zuxml_api_get()`, `zukomp_api()`).
 
 **Decision: widen the siblings to match this section, rather than changing
-this section.** Both changes are open as pull requests, and `zuxlsx` can have
-a `src/Makevars` once they land:
+this section.** Both changes are merged:
 
-- pedrobtz/zuxml#7 -- ships `inst/lib/libzuxml.a` plus `expat.h` and
-  `expat_external.h`.
-- pedrobtz/zukomp#10 -- ships `inst/lib/libzukomp.a` with miniz's ZIP reader,
-  plus `miniz.h`. It compiles `miniz.c` a second time rather than widening
-  the trim, so `zukomp.so` still exports no `mz_zip_*` symbol and its ABI
-  test is untouched.
+- pedrobtz/zuxml#7 (merged 2026-09-18) -- ships `inst/lib/libzuxml.a` plus
+  `expat.h` and `expat_external.h`.
+- pedrobtz/zukomp#10 (merged 2026-09-18) -- ships `inst/lib/libzukomp.a` with
+  miniz's ZIP reader, plus `miniz.h`. It compiles `miniz.c` a second time
+  rather than widening the trim, so `zukomp.so` still exports no `mz_zip_*`
+  symbol and its ABI test is untouched.
+
+`zuxlsx` therefore has a `configure` + `src/Makevars.in` pair, and
+`DESCRIPTION` pins neither package to a branch. `Remotes:` still names both
+repositories, because they are not on CRAN; it must be dropped before any CRAN
+submission.
 
 Verified against the vendored reader in this repo: xlsxio compiles against
 those installed headers, links both archives, and reads the fixtures in
@@ -260,9 +265,15 @@ workbooks end to end.
 It is *not* isolated behind a separate abstraction as this section asks for:
 it is `#if defined(USE_MINIZ)` arms inline in `xlsxio_read.c`, alongside the
 other backends. That is what keeps the patch upstreamable and re-appliable to
-a future xlsxio release, which is worth more here than the isolation. The
-patch applies cleanly to pristine 0.2.36 and reproduces the committed copy
-byte for byte.
+a future xlsxio release, which is worth more here than the isolation.
+
+There is a **second** patch, `0002-namespace-insensitive-relationship-id.patch`,
+unrelated to ZIP: it looks a worksheet's relationship id up as `id` rather than
+the literal `r:id`, so a workbook that binds the OOXML relationships namespace
+to a different prefix still resolves. The two patches applied in order to
+pristine 0.2.36 reproduce `src/vendor/xlsxio/` byte for byte, and
+`tools/vendor/verify` checks that claim offline against the manifest, the
+checksums and `inst/COPYRIGHTS`.
 
 One detail worth knowing: `mz_zip_reader_extract_iter_read()` returns
 `size_t`, so minizip's `buflen >= 0` loop condition is vacuous for it. The
@@ -648,6 +659,28 @@ zuxlsx_sheet_error
 zuxlsx_type_error
 ```
 
+### Status, 2026-09-18: the mechanism exists, four classes of it
+
+`R/conditions.R` implements the nesting -- every class above is followed by
+`zuxlsx_error`, so `tryCatch(zuxlsx_error = ...)` catches all of them -- and
+conditions carry the offending `path`. Implemented so far:
+
+| Class | Raised when |
+| --- | --- |
+| `zuxlsx_input_error` | `path` is not one usable string, is missing, or is a directory |
+| `zuxlsx_zip_error` | the file will not open as a ZIP archive |
+| `zuxlsx_ooxml_error` | the archive opened but declares no worksheets |
+| `zuxlsx_memory_error` | an allocation failed while reading |
+
+`zuxlsx_input_error` and `zuxlsx_memory_error` are additions to the list
+above; `zuxlsx_xml_error`, `zuxlsx_sheet_error` and `zuxlsx_type_error` arrive
+with the reading API, which is the first thing that can raise them.
+
+The C layer never calls `Rf_error()`. Both entry points return a
+`(status, value)` pair and `zuxlsx_unwrap()` turns a non-`"ok"` status into the
+condition, which is what keeps the longjmp away from the ZIP handle and the
+parser. An unrecognised status is itself an error rather than a `NULL`.
+
 Useful context should include:
 
 - file name
@@ -716,6 +749,15 @@ Relevant cases include:
 Apache POI has a long-lived collection of OOXML regression files and compatibility fixtures.
 
 A curated subset can provide valuable cases that originated from real-world workbook bugs.
+
+### 17.3b Status, 2026-09-18
+
+Seven readxl interoperability workbooks are committed under
+`tests/testthat/sheets/`, with per-file provenance and checksums in
+`MANIFEST.tsv` there; each was verified byte for byte against readxl at commit
+`47f8aeac`. `tools/vendor/verify` checks them alongside the vendored source, and
+a test walks the manifest so that a fixture added without its own test still
+has to open. The generated corpus below is still to be built.
 
 ### 17.4 Generated fixtures
 
