@@ -5,14 +5,14 @@
 <meta charset="utf-8">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-<title>What the Package Does (One Line, Title Case) • zuxlsx</title>
+<title>Read xlsx Workbooks Without System Dependencies • zuxlsx</title>
 <script src="deps/jquery-3.6.0/jquery-3.6.0.min.js"></script><meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
 <link href="deps/bootstrap-5.3.8/bootstrap.min.css" rel="stylesheet">
 <script src="deps/bootstrap-5.3.8/bootstrap.bundle.min.js"></script><link href="deps/font-awesome-6.5.2/css/all.min.css" rel="stylesheet">
 <link href="deps/font-awesome-6.5.2/css/v4-shims.min.css" rel="stylesheet">
-<script src="deps/headroom-0.11.0/headroom.min.js"></script><script src="deps/headroom-0.11.0/jQuery.headroom.min.js"></script><script src="deps/bootstrap-toc-1.0.1/bootstrap-toc.min.js"></script><script src="deps/clipboard.js-2.0.11/clipboard.min.js"></script><script src="deps/search-1.0.0/autocomplete.jquery.min.js"></script><script src="deps/search-1.0.0/fuse.min.js"></script><script src="deps/search-1.0.0/mark.min.js"></script><!-- pkgdown --><script src="pkgdown.js"></script><meta property="og:title" content="What the Package Does (One Line, Title Case)">
-<meta name="description" content="What the package does (one paragraph).">
-<meta property="og:description" content="What the package does (one paragraph).">
+<script src="deps/headroom-0.11.0/headroom.min.js"></script><script src="deps/headroom-0.11.0/jQuery.headroom.min.js"></script><script src="deps/bootstrap-toc-1.0.1/bootstrap-toc.min.js"></script><script src="deps/clipboard.js-2.0.11/clipboard.min.js"></script><script src="deps/search-1.0.0/autocomplete.jquery.min.js"></script><script src="deps/search-1.0.0/fuse.min.js"></script><script src="deps/search-1.0.0/mark.min.js"></script><!-- pkgdown --><script src="pkgdown.js"></script><meta property="og:title" content="Read xlsx Workbooks Without System Dependencies">
+<meta name="description" content="Reads spreadsheet data from xlsx workbooks using a bundled copy of the xlsxio reader (&lt;https://github.com/brechtsanders/xlsxio&gt;), so that no system XML or ZIP library is required. The Expat parser and the miniz ZIP reader are linked statically at install time from the zuxml and zukomp packages, which means there is no run-time dependency on either of them. Worksheets are read as a stream, so a workbook does not have to be held in memory in full. Writing workbooks is out of scope.">
+<meta property="og:description" content="Reads spreadsheet data from xlsx workbooks using a bundled copy of the xlsxio reader (&lt;https://github.com/brechtsanders/xlsxio&gt;), so that no system XML or ZIP library is required. The Expat parser and the miniz ZIP reader are linked statically at install time from the zuxml and zukomp packages, which means there is no run-time dependency on either of them. Worksheets are read as a stream, so a workbook does not have to be held in memory in full. Writing workbooks is out of scope.">
 </head>
 <body>
     <a href="#main" class="visually-hidden-focusable">Skip to contents</a>
@@ -38,6 +38,7 @@
 <li class="nav-item"><form class="form-inline" role="search">
  <input class="form-control" type="search" name="search-input" id="search-input" autocomplete="off" aria-label="Search site" placeholder="Search for" data-search-index="search.json">
 </form></li>
+<li class="nav-item"><a class="external-link nav-link" href="https://github.com/pedrobtz/zuxlsx/" aria-label="GitHub"><span class="fa fab fa-github fa-lg"></span></a></li>
       </ul>
 </div>
 
@@ -50,25 +51,57 @@
 </h1></div>
 <!-- badges: start -->
 
-<p>The goal of zuxlsx is to …</p>
+<p>Read <code>.xlsx</code> workbooks from R with no system XML or ZIP library required.</p>
+<p>zuxlsx bundles the <a href="https://github.com/brechtsanders/xlsxio" class="external-link">xlsxio</a> reader and links the Expat parser and the miniz ZIP reader statically at install time, out of the sibling packages <a href="https://github.com/pedrobtz/zuxml" class="external-link">zuxml</a> and <a href="https://github.com/pedrobtz/zukomp" class="external-link">zukomp</a>. Those are <code>LinkingTo</code> dependencies only: the archives end up inside <code>zuxlsx.so</code>, so neither package has to be installed or loadable once zuxlsx is built.</p>
+<p>Writing workbooks is out of scope.</p>
+<div class="section level2">
+<h2 id="status">Status<a class="anchor" aria-label="anchor" href="#status"></a>
+</h2>
+<p><strong>Early. This is a build slice, not the reading API.</strong></p>
+<p>Two functions exist so far, and they are there mainly so that a broken native build fails a test rather than being discovered later:</p>
+<div class="sourceCode" id="cb1"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://github.com/pedrobtz/zuxlsx" class="external-link">zuxlsx</a></span><span class="op">)</span></span>
+<span></span>
+<span><span class="fu"><a href="reference/xlsx_sheets.html">xlsx_sheets</a></span><span class="op">(</span><span class="va">path</span><span class="op">)</span>   <span class="co"># worksheet names, in workbook order</span></span>
+<span><span class="fu"><a href="reference/zuxlsx_native.html">zuxlsx_native</a></span><span class="op">(</span><span class="op">)</span>     <span class="co"># the xlsxio, Expat and miniz versions actually linked in</span></span></code></pre></div>
+<p><code>read_xlsx()</code>, the cell reader and the column builders are not written yet. The design they will follow is in <code>.agents/design-zuxlsx.md</code>.</p>
+</div>
 <div class="section level2">
 <h2 id="installation">Installation<a class="anchor" aria-label="anchor" href="#installation"></a>
 </h2>
-<p>You can install the development version of zuxlsx from <a href="https://github.com/" class="external-link">GitHub</a> with:</p>
-<div class="sourceCode" id="cb1"><pre class="downlit sourceCode r">
+<p>zuxlsx needs <code>zuxml</code> and <code>zukomp</code> at build time, and its <code>configure</code> script will stop with an explanatory message if their static archives are missing. <code>pak</code> picks them up from the <code>Remotes:</code> field:</p>
+<div class="sourceCode" id="cb2"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># install.packages("pak")</span></span>
 <span><span class="fu">pak</span><span class="fu">::</span><span class="fu"><a href="https://pak.r-lib.org/reference/pak.html" class="external-link">pak</a></span><span class="op">(</span><span class="st">"pedrobtz/zuxlsx"</span><span class="op">)</span></span></code></pre></div>
 </div>
 <div class="section level2">
-<h2 id="example">Example<a class="anchor" aria-label="anchor" href="#example"></a>
+<h2 id="errors">Errors<a class="anchor" aria-label="anchor" href="#errors"></a>
 </h2>
-<p>This is a basic example which shows you how to solve a common problem:</p>
-<div class="sourceCode" id="cb2"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://pedrobtz.github.io/zuxlsx/">zuxlsx</a></span><span class="op">)</span></span>
-<span><span class="co">## basic example code</span></span></code></pre></div>
+<p>Every error carries a condition class, so calling code can tell a corrupt archive from a missing file without matching on message text:</p>
+<div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/conditions.html" class="external-link">tryCatch</a></span><span class="op">(</span></span>
+<span>  <span class="fu"><a href="reference/xlsx_sheets.html">xlsx_sheets</a></span><span class="op">(</span><span class="st">"broken.xlsx"</span><span class="op">)</span>,</span>
+<span>  zuxlsx_zip_error   <span class="op">=</span> <span class="kw">function</span><span class="op">(</span><span class="va">e</span><span class="op">)</span> <span class="st">"not a readable ZIP archive"</span>,</span>
+<span>  zuxlsx_ooxml_error <span class="op">=</span> <span class="kw">function</span><span class="op">(</span><span class="va">e</span><span class="op">)</span> <span class="st">"a ZIP, but not a workbook"</span>,</span>
+<span>  zuxlsx_error       <span class="op">=</span> <span class="kw">function</span><span class="op">(</span><span class="va">e</span><span class="op">)</span> <span class="st">"something else went wrong"</span></span>
+<span><span class="op">)</span></span></code></pre></div>
+<p>See <code><a href="reference/zuxlsx-conditions.html">?"zuxlsx-conditions"</a></code> for the full list.</p>
+</div>
+<div class="section level2">
+<h2 id="third-party-code">Third-party code<a class="anchor" aria-label="anchor" href="#third-party-code"></a>
+</h2>
+<p>The bundled xlsxio reader is MIT licensed and is never edited in place. It is re-derived from the pristine 0.2.36 release archive plus the patches in <code>tools/patches/xlsxio/</code>, and <code>tools/vendor/verify</code> checks offline that the committed tree, the manifests and the attribution all still agree.</p>
 </div>
 </div>
-  </main><aside class="col-md-3"><div class="license">
+  </main><aside class="col-md-3"><div class="links">
+<h2 data-toc-skip>Links</h2>
+<ul class="list-unstyled">
+<li><a href="https://github.com/pedrobtz/zuxlsx/" class="external-link">Browse source code</a></li>
+<li><a href="https://github.com/pedrobtz/zuxlsx/issues" class="external-link">Report a bug</a></li>
+</ul>
+</div>
+
+<div class="license">
 <h2 data-toc-skip>License</h2>
 <ul class="list-unstyled">
 <li><a href="LICENSE.html">Full license</a></li>
@@ -87,7 +120,8 @@
 <div class="developers">
 <h2 data-toc-skip>Developers</h2>
 <ul class="list-unstyled">
-<li>First Last <br><small class="roles"> Author, maintainer </small>   </li>
+<li>Pedro Baltazar <br><small class="roles"> Author, maintainer, copyright holder </small>   </li>
+<li><a href="authors.html">More about authors...</a></li>
 </ul>
 </div>
 
@@ -103,7 +137,7 @@
 
 
     <footer><div class="pkgdown-footer-left">
-  <p>Developed by First Last.</p>
+  <p>Developed by Pedro Baltazar.</p>
 </div>
 
 <div class="pkgdown-footer-right">
