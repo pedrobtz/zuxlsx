@@ -27,7 +27,12 @@ PKG_CPPFLAGS = -DBUILD_XLSXIO -DUSE_MINIZ -DXML_STATIC \
   -DMINIZ_NO_ZLIB_COMPATIBLE_NAMES \
   -Ivendor/xlsxio/include -Ivendor/xlsxio/lib
 
-PKG_LIBS = @ZUXML_LIB@/libzuxml.a @ZUKOMP_LIB@/libzukomp.a
+# Both paths are single-quoted. They come from system.file(), so they sit
+# under the R library, and a library path containing a space -- the norm
+# on Windows, where the user library lives under the profile directory --
+# would otherwise reach the linker as two nonexistent arguments. R quotes
+# the LinkingTo include paths the same way for the same reason.
+PKG_LIBS = '@ZUXML_LIB@/libzuxml.a' '@ZUKOMP_LIB@/libzukomp.a'
 
 # Listed explicitly rather than via $(wildcard ...): R only auto-compiles
 # src/*.c, xlsxio lives in a subdirectory, and a GNU make wildcard would force
