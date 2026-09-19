@@ -8,7 +8,7 @@ is the cell-by-cell view underneath it.
 ## Usage
 
 ``` r
-read_xlsx(path, sheet = 1, col_names = TRUE)
+read_xlsx(path, sheet = 1, col_names = TRUE, range = NULL)
 ```
 
 ## Arguments
@@ -27,11 +27,28 @@ read_xlsx(path, sheet = 1, col_names = TRUE)
   Whether the first row holds column names. When `FALSE`, columns are
   named `X1`, `X2` and so on.
 
+- range:
+
+  An A1-style cell range limiting what is read, or `NULL` for the whole
+  worksheet. Either corner may name a cell, a column or a row, so
+  `"B2:D10"` takes a rectangle, `"A:C"` takes three columns in full, and
+  `"2:10"` takes nine rows in full. The corners may be given in either
+  order. A range is read as its own rectangle: cells outside it are
+  ignored, the top-left becomes the first row and column, and columns
+  the range covers appear even where the worksheet left them empty. When
+  `col_names` is `TRUE` the first row of the range supplies the names.
+
 ## Value
 
 A data frame.
 
 ## Details
+
+A worksheet may leave a row out of its XML rather than write an empty
+one. Such a row is kept, as a row of `NA`, wherever it falls – including
+directly beneath the header. Keeping every blank row is easier to
+predict than keeping only the interior ones, and `range` is the way to
+begin further down the sheet.
 
 Column types are inferred by promotion. A column of blanks is logical,
 one of booleans stays logical, numbers give a double, and anything that
@@ -51,4 +68,5 @@ to list the worksheets.
 ``` r
 path <- system.file("extdata", "two-sheets.xlsx", package = "zuxlsx")
 if (nzchar(path)) read_xlsx(path)
+if (nzchar(path)) read_xlsx(path, range = "A1:B5")
 ```
