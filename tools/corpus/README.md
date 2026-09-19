@@ -13,7 +13,7 @@ every check. What is committed is enough to reproduce the corpus exactly:
 | `sources.tsv` | each upstream, pinned to a commit, with its licence |
 | `checksums.sha256` | every file's sha256; also the list of what to fetch |
 | `expected.tsv` | what the reader currently makes of each file |
-| `fetch` | downloads into `files/`, then verifies against the checksums |
+| `fetch` | downloads whatever is missing or stale into `files/`, then verifies all of it |
 | `run` | reads everything and reports outcomes that **changed** |
 | `sweep.R` | the reader driver behind `run` |
 
@@ -23,6 +23,15 @@ every check. What is committed is enough to reproduce the corpus exactly:
 ./tools/corpus/run             # compare against expected.tsv
 ./tools/corpus/run --record    # rewrite expected.tsv
 ```
+
+`fetch` skips a file only when it is already present *and* its checksum
+matches, so it can be pointed at a partly populated `files/` and will download
+just the difference. CI relies on that: `corpus.yaml` caches `files/` under a
+key derived from `checksums.sha256`, so a run fetches nothing unless the
+corpus itself changed, and an older cache restored through `restore-keys`
+costs only the delta. Testing mere existence would break that, since an
+upstream file rewritten under the same name would be kept and then fail
+verification with no way for a re-run to recover.
 
 ## Why outcomes rather than passes
 

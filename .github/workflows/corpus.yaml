@@ -38,9 +38,22 @@ jobs:
           extra-packages: any::pkgload, any::devtools
           needs: check
 
-      # Fetches into tools/corpus/files and verifies every byte against the
-      # committed checksums, so a moved or rewritten upstream file fails here
-      # rather than silently changing what is being tested.
+      # checksums.sha256 determines the contents of files/ exactly, so it is
+      # the natural cache key: the cache can only be reused when it holds the
+      # corpus that is being asked for. restore-keys lets an older corpus come
+      # back as a starting point, which is safe because fetch re-downloads any
+      # file whose checksum does not already match.
+      - name: Cache corpus
+        uses: actions/cache@v4
+        with:
+          path: tools/corpus/files
+          key: corpus-${{ hashFiles('tools/corpus/checksums.sha256') }}
+          restore-keys: corpus-
+
+      # Fetches anything missing into tools/corpus/files and verifies every
+      # byte against the committed checksums, so a moved or rewritten upstream
+      # file fails here rather than silently changing what is being tested.
+      # On a cache hit this downloads nothing.
       - name: Fetch corpus
         run: ./tools/corpus/fetch
 
