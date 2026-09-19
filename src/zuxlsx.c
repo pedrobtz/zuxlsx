@@ -41,6 +41,8 @@ static const char *const STATUS_NO_SHEETS = "ooxml_no_sheets";
 static const char *const STATUS_MEMORY = "memory";
 static const char *const STATUS_BAD_PATH = "bad_path";
 static const char *const STATUS_NO_SHEET = "sheet_not_found";
+static const char *const STATUS_OLE2 = "format_ole2";
+static const char *const STATUS_XLSB = "format_xlsb";
 
 static SEXP result(const char *status, SEXP value) {
   const char *fields[] = {"status", "value", ""};
@@ -128,6 +130,58 @@ static int collect_sheet(const char *name, void *data) {
   return 0;
 }
 
+/* ------------------------------------------------------------------------ */
+/* Telling "a file we cannot read" from "a broken file".
+ *
+ * Two formats reach this reader looking like failures when they are nothing
+ * of the kind, and reporting them as corruption sends the caller looking for
+ * a problem that is not there.
+ *
+ * An encrypted workbook is not a ZIP at all: password-to-open wraps the
+ * package in an OLE2/CFB container, which is also what a legacy .xls is. The
+ * eight byte signature identifies the container but not which of the two it
+ * holds -- that needs the CFB directory, which is most of the work of reading
+ * one, so the message names both possibilities rather than guessing.
+ *
+ * An .xlsb is a ZIP, and an OPC package, with XML content types and
+ * relationships. Only the workbook and worksheet parts differ: BIFF12 binary
+ * records rather than XML, so xlsxio finds no part of the content type it
+ * wants and the workbook looks empty. Recognising xl/workbook.bin is enough to
+ * say so, and costs nothing on the path where a workbook reads normally. */
+
+static int file_is_ole2(const char *file) {
+  static const unsigned char CFB_MAGIC[8] = {
+    0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1
+  };
+  unsigned char head[8];
+  size_t got;
+  FILE *fp = fopen(file, "rb");
+  if (fp == NULL) {
+    return 0;
+  }
+  got = fread(head, 1, sizeof(head), fp);
+  fclose(fp);
+  return got == sizeof(head) && memcmp(head, CFB_MAGIC, sizeof(head)) == 0;
+}
+
+/* Only asked once a workbook has already failed to declare a worksheet, so
+   the second open costs nothing in the normal case. */
+static int file_is_xlsb(const char *file) {
+  mz_zip_archive zip;
+  mz_uint32 index;
+  int found = 0;
+
+  memset(&zip, 0, sizeof(zip));
+  if (!mz_zip_reader_init_file(&zip, file, 0)) {
+    return 0;
+  }
+  if (mz_zip_reader_locate_file_v2(&zip, "xl/workbook.bin", NULL, 0, &index)) {
+    found = 1;
+  }
+  mz_zip_reader_end(&zip);
+  return found;
+}
+
 SEXP C_xlsx_sheets(SEXP path) {
   const char *file;
   sheet_list *sheets;
@@ -152,6 +206,14 @@ SEXP C_xlsx_sheets(SEXP path) {
   bag = PROTECT(R_MakeExternalPtr(sheets, R_NilValue, R_NilValue));
   R_RegisterCFinalizerEx(bag, sheet_list_finalizer, TRUE);
 
+  /* An OLE2 container will not open as a ZIP, so this has to be asked before
+     the reader is handed the path or the answer is "corrupt archive". */
+  if (file_is_ole2(file)) {
+    sheet_list_finalizer(bag);
+    UNPROTECT(1);
+    return result(STATUS_OLE2, R_NilValue);
+  }
+
   /* No R allocation between here and xlsxioread_close(): while the reader is
      open it owns a miniz archive handle and an Expat parser, and neither is
      reachable from R to be cleaned up if something unwound past them. */
@@ -174,9 +236,10 @@ SEXP C_xlsx_sheets(SEXP path) {
      workbook part, or a workbook with no <sheet> elements. Reporting that as
      an empty character vector would make a wrong file look like an odd one. */
   if (sheets->n == 0) {
+    int xlsb = file_is_xlsb(file);
     sheet_list_finalizer(bag);
     UNPROTECT(1);
-    return result(STATUS_NO_SHEETS, R_NilValue);
+    return result(xlsb ? STATUS_XLSB : STATUS_NO_SHEETS, R_NilValue);
   }
 
   out = PROTECT(Rf_allocVector(STRSXP, (R_xlen_t)sheets->n));
@@ -381,6 +444,12 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet) {
   }
   bag = PROTECT(R_MakeExternalPtr(cells, R_NilValue, R_NilValue));
   R_RegisterCFinalizerEx(bag, cell_list_finalizer, TRUE);
+
+  if (file_is_ole2(file)) {
+    cell_list_finalizer(bag);
+    UNPROTECT(1);
+    return result(STATUS_OLE2, R_NilValue);
+  }
 
   /* No R allocation until xlsxioread_close(). */
   reader = xlsxioread_open(file);

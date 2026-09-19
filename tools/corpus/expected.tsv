@@ -41,6 +41,7 @@ poi/50846-border_colours.xlsx	ok	3 sheets
 poi/50867_with_table.xlsx	ok	3 sheets
 poi/51222.xlsx	ok	3 sheets
 poi/51470.xlsx	ok	1 sheets
+poi/51519.xlsb	zuxlsx_unsupported_format_error	xlsx_sheets
 poi/51519.xlsx	ok	3 sheets
 poi/51585.xlsx	ok	3 sheets
 poi/51626_contact.xlsx	ok	3 sheets
@@ -128,7 +129,7 @@ poi/58106.xlsx	ok	3 sheets
 poi/58315.xlsx	ok	1 sheets
 poi/58325_db.xlsx	ok	2 sheets
 poi/58325_lt.xlsx	ok	1 sheets
-poi/58616.xlsx	zuxlsx_zip_error	xlsx_sheets
+poi/58616.xlsx	zuxlsx_unsupported_format_error	xlsx_sheets
 poi/58648.xlsx	ok	1 sheets
 poi/58731.xlsx	ok	3 sheets
 poi/58747.xlsx	ok	1 sheets
@@ -159,6 +160,7 @@ poi/61652.xlsx	ok	2 sheets
 poi/61869.xlsx	ok	3 sheets
 poi/62272.xlsx	ok	1 sheets
 poi/62629_toMerge.xlsx	ok	1 sheets
+poi/62815.xlsb	zuxlsx_unsupported_format_error	xlsx_sheets
 poi/62834.xlsx	ok	1 sheets
 poi/63934.xlsx	ok	2 sheets
 poi/64450.xlsx	ok	2 sheets
@@ -185,6 +187,7 @@ poi/bug65306.xlsx	ok	1 sheets
 poi/bug65464.xlsx	ok	1 sheets
 poi/bug66215.xlsx	ok	1 sheets
 poi/bug66675.xlsx	ok	2 sheets
+poi/bug66682.xlsb	zuxlsx_unsupported_format_error	xlsx_sheets
 poi/bug66827.xlsx	ok	1 sheets
 poi/bug67784.xlsx	ok	1 sheets
 poi/bug69769.xlsx	ok	1 sheets
@@ -208,6 +211,7 @@ poi/clusterfuzz-testcase-minimized-XLSX2CSVFuzzer-5542865479270400.xlsx	zuxlsx_z
 poi/clusterfuzz-testcase-minimized-XLSX2CSVFuzzer-5636439151607808.xlsx	zuxlsx_zip_error	xlsx_sheets
 poi/clusterfuzz-testcase-minimized-XLSX2CSVFuzzer-6504225896792064.xlsx	zuxlsx_zip_error	xlsx_sheets
 poi/clusterfuzz-testcase-minimized-XLSX2CSVFuzzer-6594557414080512.xlsx	zuxlsx_zip_error	xlsx_sheets
+poi/comments.xlsb	zuxlsx_unsupported_format_error	xlsx_sheets
 poi/comments.xlsx	ok	3 sheets
 poi/commentTest.xlsx	ok	1 sheets
 poi/conditional_formatting_cell_is.xlsx	ok	2 sheets
@@ -216,7 +220,7 @@ poi/conditional_formatting_with_formula_on_second_sheet.xlsx	ok	2 sheets
 poi/ConditionalFormattingSamples.xlsx	ok	18 sheets
 poi/craftonhills.edu_programreview_report.aspx_goalpriorityreport_0011d159-1eeb-4b63-8833-867b0926e5f3.xlsx	ok	1 sheets
 poi/crash-274d6342e4842d61be0fb48eaadad6208ae767ae.xlsx	zuxlsx_zip_error	xlsx_sheets
-poi/crash-9bf3cd4bd6f50a8a9339d363c2c7af14b536865c.xlsx	zuxlsx_zip_error	xlsx_sheets
+poi/crash-9bf3cd4bd6f50a8a9339d363c2c7af14b536865c.xlsx	zuxlsx_unsupported_format_error	xlsx_sheets
 poi/customIndexedColors.xlsx	ok	2 sheets
 poi/CustomXMLMapping-singleattributenamespace.xlsx	ok	3 sheets
 poi/CustomXMLMappings-complex-type.xlsx	ok	3 sheets
@@ -228,6 +232,7 @@ poi/DataValidationEvaluations.xlsx	ok	1 sheets
 poi/DataValidationListTooLong.xlsx	ok	1 sheets
 poi/DataValidations-49244.xlsx	ok	1 sheets
 poi/dataValidationTableRange.xlsx	ok	2 sheets
+poi/date.xlsb	zuxlsx_unsupported_format_error	xlsx_sheets
 poi/DateFormatNumberTests.xlsx	ok	2 sheets
 poi/DateFormatTests.xlsx	ok	2 sheets
 poi/decimal-format.xlsx	ok	3 sheets
@@ -254,6 +259,7 @@ poi/GroupTest.xlsx	ok	1 sheets
 poi/HeaderFooterComplexFormats.xlsx	ok	3 sheets
 poi/headerFooterTest.xlsx	ok	1 sheets
 poi/HsGetVal.xlsx	ok	3 sheets
+poi/hyperlink.xlsb	zuxlsx_unsupported_format_error	xlsx_sheets
 poi/InlineString.xlsx	ok	1 sheets
 poi/InlineStrings.xlsx	ok	3 sheets
 poi/Intersection-52111-xssf.xlsx	ok	3 sheets
@@ -276,7 +282,8 @@ poi/picture.xlsx	ok	3 sheets
 poi/poc-shared-strings.xlsx	ok	1 sheets
 poi/poc-xmlbomb-empty.xlsx	ok	1 sheets
 poi/poc-xmlbomb.xlsx	ok	1 sheets
-poi/protected_passtika.xlsx	zuxlsx_zip_error	xlsx_sheets
+poi/protected_passtika.xlsb	zuxlsx_unsupported_format_error	xlsx_sheets
+poi/protected_passtika.xlsx	zuxlsx_unsupported_format_error	xlsx_sheets
 poi/ref-56737.xlsx	ok	3 sheets
 poi/ref2-56737.xlsx	ok	3 sheets
 poi/reordered_sheets.xlsx	ok	4 sheets
@@ -285,6 +292,7 @@ poi/resize_compare.xlsx	ok	1 sheets
 poi/right-to-left.xlsx	ok	2 sheets
 poi/sample-beta.xlsx	ok	3 sheets
 poi/sample.strict.xlsx	ok	3 sheets
+poi/sample.xlsb	zuxlsx_unsupported_format_error	xlsx_sheets
 poi/sample.xlsx	ok	3 sheets
 poi/SampleSS.strict.xlsx	ok	3 sheets
 poi/SampleSS.xlsx	ok	3 sheets
@@ -296,6 +304,7 @@ poi/SheetTabColors.xlsx	ok	3 sheets
 poi/ShrinkToFit.xlsx	ok	3 sheets
 poi/simple-monthly-budget.xlsx	ok	1 sheets
 poi/simple-table-named-range.xlsx	ok	1 sheets
+poi/Simple.xlsb	zuxlsx_unsupported_format_error	xlsx_sheets
 poi/SimpleMultiCell.xlsx	ok	3 sheets
 poi/SimpleNormal.xlsx	ok	2 sheets
 poi/SimpleScatterChart.xlsx	ok	2 sheets
@@ -315,6 +324,7 @@ poi/test_conditional_formatting.xlsx	ok	1 sheets
 poi/testSharedFormulasRangeSetBlankBug.xlsx	ok	1 sheets
 poi/testSharedFormulasSetBlank.xlsx	ok	3 sheets
 poi/TestShiftRowSharedFormula.xlsx	ok	1 sheets
+poi/testVarious.xlsb	zuxlsx_unsupported_format_error	xlsx_sheets
 poi/TextFormatTests.xlsx	ok	2 sheets
 poi/Themes.xlsx	ok	1 sheets
 poi/Themes2.xlsx	ok	1 sheets
@@ -332,6 +342,7 @@ poi/WithDrawing.xlsx	ok	3 sheets
 poi/WithEmbeded.xlsx	ok	3 sheets
 poi/WithMoreVariousData.xlsx	ok	3 sheets
 poi/WithTable.xlsx	ok	3 sheets
+poi/WithTextBox.xlsb	zuxlsx_unsupported_format_error	xlsx_sheets
 poi/WithTextBox.xlsx	ok	3 sheets
 poi/WithTextBox2.xlsx	ok	2 sheets
 poi/WithThreeCharts.xlsx	ok	3 sheets
