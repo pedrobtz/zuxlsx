@@ -31,6 +31,6 @@ Suggests:
     withr
 Config/testthat/edition: 3
 Remotes: 
-    pedrobtz/zukomp,
-    pedrobtz/zuxml
+    pedrobtz/zukomp@main,
+    pedrobtz/zuxml@main
 Config/roxygen2/version: 8.1.0
