@@ -73,3 +73,38 @@ License:   MIT, reproduced in tests/testthat/sheets/LICENSE-readxl.md
 
 Per-file provenance and checksums are in tests/testthat/sheets/MANIFEST.tsv,
 which tools/vendor/verify also checks.
+
+-------------------------------------------------------------------------------
+Expat and miniz (linked, not bundled)
+-------------------------------------------------------------------------------
+
+Neither library's source is in this package, but both are compiled into it.
+zuxlsx links libzuxml.a and libzukomp.a statically at install time, so an
+installed or binary zuxlsx contains Expat and miniz object code and therefore
+redistributes both. Their licences require the notices below to travel with
+that code, which is why they appear here rather than only in the packages the
+archives come from.
+
+Both are MIT.
+
+  Expat (libexpat), from zuxml
+      Copyright (c) 1998-2000 Thai Open Source Software Center Ltd and
+                              Clark Cooper
+      Copyright (c) 2001-2025 Expat maintainers
+
+      Full text: inst/licenses/expat-LICENSE
+      Upstream:  https://github.com/libexpat/libexpat
+      The source, its pinned release and its checksum are in zuxml; this
+      package carries no copy of it.
+
+  miniz, from zukomp
+      Copyright 2013-2014 RAD Game Tools and Valve Software
+      Copyright 2010-2014 Rich Geldreich and Tenacious Software LLC
+
+      Full text: inst/licenses/miniz-LICENSE
+      Upstream:  https://github.com/richgel999/miniz
+      As above: the source and its provenance live in zukomp.
+
+Only the reader side of each is linked in. Expat contributes its parser;
+miniz contributes DEFLATE and the ZIP reader. Neither library's own tests,
+utilities or build systems are involved.
