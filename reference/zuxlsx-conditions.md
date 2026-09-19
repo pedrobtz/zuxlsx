@@ -21,6 +21,10 @@ stable. Every class below is a subclass of `zuxlsx_error`.
   The ZIP archive opened but is not a workbook. A valid workbook
   declares at least one worksheet.
 
+- `zuxlsx_sheet_error`:
+
+  The workbook opened, but the requested worksheet is not in it.
+
 - `zuxlsx_memory_error`:
 
   An allocation failed while reading.

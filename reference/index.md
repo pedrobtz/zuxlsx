@@ -2,6 +2,8 @@
 
 ## All functions
 
+- [`xlsx_cells()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_cells.md)
+  : Read the cells of a worksheet
 - [`xlsx_sheets()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_sheets.md)
   : List the worksheets in an xlsx workbook
 - [`zuxlsx-conditions`](https://pedrobtz.github.io/zuxlsx/reference/zuxlsx-conditions.md)
