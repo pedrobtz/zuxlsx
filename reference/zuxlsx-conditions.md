@@ -25,6 +25,14 @@ stable. Every class below is a subclass of `zuxlsx_error`.
 
   The workbook opened, but the requested worksheet is not in it.
 
+- `zuxlsx_unsupported_format_error`:
+
+  The file is a spreadsheet, but not one zuxlsx can read: an `.xlsb`,
+  whose worksheets are binary rather than XML, or an OLE2 file, which is
+  either a legacy `.xls` or an encrypted workbook. Raised in preference
+  to reporting such a file as corrupt, which is what it otherwise looks
+  like.
+
 - `zuxlsx_memory_error`:
 
   An allocation failed while reading.

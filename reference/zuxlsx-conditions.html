@@ -63,6 +63,13 @@ A valid workbook declares at least one worksheet.</p></dd>
 <dd><p>The workbook opened, but the requested
 worksheet is not in it.</p></dd>
 
+<dt><code>zuxlsx_unsupported_format_error</code></dt>
+<dd><p>The file is a spreadsheet, but
+not one zuxlsx can read: an <code>.xlsb</code>, whose worksheets are binary rather
+than XML, or an OLE2 file, which is either a legacy <code>.xls</code> or an
+encrypted workbook. Raised in preference to reporting such a file as
+corrupt, which is what it otherwise looks like.</p></dd>
+
 <dt><code>zuxlsx_memory_error</code></dt>
 <dd><p>An allocation failed while reading.</p></dd>
 
