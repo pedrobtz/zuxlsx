@@ -53,7 +53,7 @@
 <li>
 <code>DESCRIPTION</code> has <code>LinkingTo: zukomp, zuxml</code> and <strong>no <code>Imports:</code></strong>, which is what design §3 asks for.</li>
 <li>
-<strong><code>Remotes:</code> names <code>pedrobtz/zuxml</code> and <code>pedrobtz/zukomp</code> unpinned</strong>, since neither is on CRAN. Both PR branches were deleted when they merged, so a <code>@branch</code> suffix here is a 404 and breaks installation. Drop <code>Remotes:</code> entirely before any CRAN submission.</li>
+<strong><code>Remotes:</code> tracks <code>pedrobtz/zuxml@main</code> and <code>pedrobtz/zukomp@main</code></strong>, since neither is on CRAN. <code>@main</code> is deliberate and is not a version pin: the three packages are developed together, so zuxlsx builds against what the siblings actually are, and a sibling release that breaks this package is a bug to fix in the sibling rather than a version to freeze away from. That has real cost — a zukomp release broke Windows here on 2026-09-19 — and it is the cost being chosen. Do not pin a <em>feature</em> branch: those are deleted on merge and the ref then 404s. Drop <code>Remotes:</code> entirely before any CRAN submission.</li>
 <li>
 <code>src/Makevars</code> is generated and <code>.gitignore</code>d. <code>cleanup</code> removes it.</li>
 </ul><p>Vendored and copied from the working <code>utopp/pkg-xlsx</code> prototype at <code>/Users/pbtz/Documents/repos/gh/utopp/pkg-xlsx</code>:</p>
@@ -95,7 +95,7 @@
 </div>
 <div class="section level2">
 <h2 id="commands">Commands<a class="anchor" aria-label="anchor" href="#commands"></a></h2>
-<p>Nothing native builds until <code>zuxml</code> and <code>zukomp</code> are installed <strong>from GitHub</strong> — the CRAN-style released versions have no <code>inst/lib/*.a</code>, and <code>./configure</code> stops with a message saying so. Do not add a <code>@branch</code> suffix: the two PR branches were deleted on merge.</p>
+<p>Nothing native builds until <code>zuxml</code> and <code>zukomp</code> are installed <strong>from GitHub</strong> — the CRAN-style released versions have no <code>inst/lib/*.a</code>, and <code>./configure</code> stops with a message saying so. <code>@main</code> is fine and is what <code>DESCRIPTION</code> asks for; a <em>feature</em> branch suffix is not, since those are deleted on merge.</p>
 <div class="sourceCode" id="cb1"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a><span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'pak::pak(c("pedrobtz/zuxml", "pedrobtz/zukomp"))'</span></span></code></pre></div>
 <div class="sourceCode" id="cb2"><pre class="sourceCode sh"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a><span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'devtools::document()'</span>      <span class="co"># roxygen -&gt; NAMESPACE + man/</span></span>
 <span id="cb2-2"><a href="#cb2-2" tabindex="-1"></a><span class="ex">Rscript</span> <span class="at">-e</span> <span class="st">'devtools::load_all()'</span>      <span class="co"># compile + load for interactive work</span></span>

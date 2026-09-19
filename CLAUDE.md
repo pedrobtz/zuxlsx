@@ -47,10 +47,16 @@ The build:
   statically.
 - `DESCRIPTION` has `LinkingTo: zukomp, zuxml` and **no `Imports:`**,
   which is what design §3 asks for.
-- **`Remotes:` names `pedrobtz/zuxml` and `pedrobtz/zukomp` unpinned**,
-  since neither is on CRAN. Both PR branches were deleted when they
-  merged, so a `@branch` suffix here is a 404 and breaks installation.
-  Drop `Remotes:` entirely before any CRAN submission.
+- **`Remotes:` tracks `pedrobtz/zuxml@main` and
+  `pedrobtz/zukomp@main`**, since neither is on CRAN. `@main` is
+  deliberate and is not a version pin: the three packages are developed
+  together, so zuxlsx builds against what the siblings actually are, and
+  a sibling release that breaks this package is a bug to fix in the
+  sibling rather than a version to freeze away from. That has real cost
+  — a zukomp release broke Windows here on 2026-09-19 — and it is the
+  cost being chosen. Do not pin a *feature* branch: those are deleted on
+  merge and the ref then 404s. Drop `Remotes:` entirely before any CRAN
+  submission.
 - `src/Makevars` is generated and `.gitignore`d. `cleanup` removes it.
 
 Vendored and copied from the working `utopp/pkg-xlsx` prototype at
@@ -180,8 +186,9 @@ well (compiles today, but duplicates the siblings and contradicts
 
 Nothing native builds until `zuxml` and `zukomp` are installed **from
 GitHub** — the CRAN-style released versions have no `inst/lib/*.a`, and
-`./configure` stops with a message saying so. Do not add a `@branch`
-suffix: the two PR branches were deleted on merge.
+`./configure` stops with a message saying so. `@main` is fine and is
+what `DESCRIPTION` asks for; a *feature* branch suffix is not, since
+those are deleted on merge.
 
 ``` sh
 Rscript -e 'pak::pak(c("pedrobtz/zuxml", "pedrobtz/zukomp"))'
