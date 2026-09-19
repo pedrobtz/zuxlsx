@@ -50,6 +50,13 @@ jobs:
           key: corpus-${{ hashFiles('tools/corpus/checksums.sha256') }}
           restore-keys: corpus-
 
+      # inst/extdata/two-sheets.xlsx is committed but generated. The package's
+      # own tests assert what it contains; this asserts that the committed
+      # bytes are still what the generator produces, which tools/ being
+      # uninstalled keeps a test from doing.
+      - name: Check generated fixtures are reproducible
+        run: Rscript tools/fixtures/make-extdata.R --check
+
       # Fetches anything missing into tools/corpus/files and verifies every
       # byte against the committed checksums, so a moved or rewritten upstream
       # file fails here rather than silently changing what is being tested.

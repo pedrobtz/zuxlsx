@@ -18,7 +18,7 @@ List the worksheets in an xlsx workbook
 }
 \examples{
 path <- system.file("extdata", "two-sheets.xlsx", package = "zuxlsx")
-if (nzchar(path)) xlsx_sheets(path)
+xlsx_sheets(path)
 }
 \seealso{
 \link{zuxlsx-conditions} for the errors this can raise.

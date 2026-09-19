@@ -8,7 +8,7 @@
 #' @seealso [zuxlsx-conditions] for the errors this can raise.
 #' @examples
 #' path <- system.file("extdata", "two-sheets.xlsx", package = "zuxlsx")
-#' if (nzchar(path)) xlsx_sheets(path)
+#' xlsx_sheets(path)
 xlsx_sheets <- function(path) {
   path <- check_path(path)
   zuxlsx_unwrap(.Call(C_xlsx_sheets, path), path = path)

@@ -26,7 +26,12 @@ file whose header is several rows deep.
 }
 \examples{
 path <- system.file("extdata", "two-sheets.xlsx", package = "zuxlsx")
-if (nzchar(path)) xlsx_rows(path)
+rows <- xlsx_rows(path)
+
+# One character vector per row, every one as wide as the widest, with no
+# type inference: a number is its text.
+rows[[1]]
+rows[[2]]
 }
 \seealso{
 \code{\link[=xlsx_cells]{xlsx_cells()}} for typed cells, \code{\link[=read_xlsx]{read_xlsx()}} for a data frame.

@@ -17,7 +17,12 @@
 #' @seealso [xlsx_cells()] for typed cells, [read_xlsx()] for a data frame.
 #' @examples
 #' path <- system.file("extdata", "two-sheets.xlsx", package = "zuxlsx")
-#' if (nzchar(path)) xlsx_rows(path)
+#' rows <- xlsx_rows(path)
+#'
+#' # One character vector per row, every one as wide as the widest, with no
+#' # type inference: a number is its text.
+#' rows[[1]]
+#' rows[[2]]
 xlsx_rows <- function(path, sheet = 1) {
   cells <- xlsx_cells(path, sheet)
   if (nrow(cells) == 0L) {
