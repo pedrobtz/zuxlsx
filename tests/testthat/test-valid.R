@@ -5,14 +5,22 @@
 # string tables and awkward text.
 
 test_that("each numeric form is parsed to the same double R would parse", {
-  literals <- c("0", "-1", "2.5", "-3.75E-8", "1e300", "0.1", "123456789012345")
-  path <- withr::local_tempfile(fileext = ".xlsx")
-  write_workbook(path, styled_workbook_parts(c(
-    list(txt("A1", "v")),
-    lapply(seq_along(literals), function(i) num(paste0("A", i + 1L), literals[i]))
-  )))
+  # Ordinary magnitudes must match R's own parser bit for bit: a cell holding
+  # 0.1 has to be the same double as as.numeric("0.1"), or arithmetic on a
+  # column silently disagrees with the same arithmetic on a literal.
+  literals <- c("0", "-1", "2.5", "-3.75E-8", "0.1", "123456789012345", "1e-300")
+  expect_identical(read_literals(literals), as.numeric(literals))
+})
 
-  expect_identical(read_xlsx(path)$v, as.numeric(literals))
+test_that("a value near the top of double range is parsed within an ulp", {
+  # Not expect_identical. R's parser and the platform strtod() are different
+  # implementations, and at extreme exponents they can round to adjacent
+  # doubles: on one macOS runner "1e300" came back one ulp below what
+  # as.numeric() gives, while Linux and Windows agreed. Which of the two is
+  # nearer the decimal value is a property of the C library, not something
+  # this package chooses or should assert.
+  literals <- c("1e300", "1.7976931348623157e308")
+  expect_equal(read_literals(literals), as.numeric(literals), tolerance = 1e-15)
 })
 
 test_that("a formula cell reports its cached value", {

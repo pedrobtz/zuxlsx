@@ -299,3 +299,14 @@ num <- function(ref, v, s = NULL) {
     "><v>", v, "</v></c>"
   )
 }
+
+
+# Reads a single column of numeric literals back out of a workbook.
+read_literals <- function(literals) {
+  path <- withr::local_tempfile(fileext = ".xlsx", .local_envir = parent.frame())
+  write_workbook(path, styled_workbook_parts(c(
+    list(txt("A1", "v")),
+    lapply(seq_along(literals), function(i) num(paste0("A", i + 1L), literals[i]))
+  )))
+  read_xlsx(path)$v
+}
