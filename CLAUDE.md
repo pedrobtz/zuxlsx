@@ -19,7 +19,7 @@ The build:
 
 - [configure](configure) / [configure.win](configure.win) resolve `system.file("lib", package = ...)` for `zuxml` and `zukomp` and substitute them into [src/Makevars.in](src/Makevars.in). `LinkingTo` puts the *headers* on the path by itself (`CLINK_CPPFLAGS`); there is no equivalent for a library, and the alternatives are worse — `$(shell …)` would force `SystemRequirements: GNU make`, and an `Imports:` entry would add a runtime dependency that nothing needs, since the archives are linked statically.
 - `DESCRIPTION` has `LinkingTo: zukomp, zuxml` and **no `Imports:`**, which is what design §3 asks for.
-- **`Remotes:` names `pedrobtz/zuxml` and `pedrobtz/zukomp` unpinned**, since neither is on CRAN. Both PR branches were deleted when they merged, so a `@branch` suffix here is a 404 and breaks installation. Drop `Remotes:` entirely before any CRAN submission.
+- **`Remotes:` tracks `pedrobtz/zuxml@main` and `pedrobtz/zukomp@main`**, since neither is on CRAN. `@main` is deliberate and is not a version pin: the three packages are developed together, so zuxlsx builds against what the siblings actually are, and a sibling release that breaks this package is a bug to fix in the sibling rather than a version to freeze away from. That has real cost — a zukomp release broke Windows here on 2026-09-19 — and it is the cost being chosen. Do not pin a *feature* branch: those are deleted on merge and the ref then 404s. Drop `Remotes:` entirely before any CRAN submission.
 - `src/Makevars` is generated and `.gitignore`d. `cleanup` removes it.
 
 Vendored and copied from the working `utopp/pkg-xlsx` prototype at `/Users/pbtz/Documents/repos/gh/utopp/pkg-xlsx`:
@@ -62,7 +62,7 @@ Rejected alternatives, for the record: vendoring Expat and miniz here as well (c
 
 ## Commands
 
-Nothing native builds until `zuxml` and `zukomp` are installed **from GitHub** — the CRAN-style released versions have no `inst/lib/*.a`, and `./configure` stops with a message saying so. Do not add a `@branch` suffix: the two PR branches were deleted on merge.
+Nothing native builds until `zuxml` and `zukomp` are installed **from GitHub** — the CRAN-style released versions have no `inst/lib/*.a`, and `./configure` stops with a message saying so. `@main` is fine and is what `DESCRIPTION` asks for; a *feature* branch suffix is not, since those are deleted on merge.
 
 ```sh
 Rscript -e 'pak::pak(c("pedrobtz/zuxml", "pedrobtz/zukomp"))'
