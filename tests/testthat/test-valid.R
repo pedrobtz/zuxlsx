@@ -8,19 +8,29 @@ test_that("each numeric form is parsed to the same double R would parse", {
   # Ordinary magnitudes must match R's own parser bit for bit: a cell holding
   # 0.1 has to be the same double as as.numeric("0.1"), or arithmetic on a
   # column silently disagrees with the same arithmetic on a literal.
-  literals <- c("0", "-1", "2.5", "-3.75E-8", "0.1", "123456789012345", "1e-300")
+  literals <- c("0", "-1", "2.5", "-3.75E-8", "0.1", "123456789012345")
   expect_identical(read_literals(literals), as.numeric(literals))
 })
 
-test_that("a value near the top of double range is parsed within an ulp", {
-  # Not expect_identical. R's parser and the platform strtod() are different
-  # implementations, and at extreme exponents they can round to adjacent
-  # doubles: on one macOS runner "1e300" came back one ulp below what
-  # as.numeric() gives, while Linux and Windows agreed. Which of the two is
-  # nearer the decimal value is a property of the C library, not something
-  # this package chooses or should assert.
-  literals <- c("1e300", "1.7976931348623157e308")
-  expect_equal(read_literals(literals), as.numeric(literals), tolerance = 1e-15)
+test_that("values at the edges of double range are not lost", {
+  # Deliberately not compared against as.numeric(). R's string-to-double
+  # conversion is a different implementation from the C library's strtod(),
+  # and at the edges of the range it is the less accurate of the two: on a
+  # macOS runner as.numeric("1.7976931348623157e308") returned Inf, where the
+  # reader returned the finite maximum, and it put "1e-300" an ulp further
+  # from the decimal value than the reader did.
+  #
+  # So R cannot be the oracle here. These assert the properties that matter --
+  # no overflow to Inf, no underflow to zero, magnitude preserved -- against
+  # .Machine, whose constants are compiled in rather than parsed from text.
+  out <- read_literals(c("1.7976931348623157e308", "1e300", "1e-300", "5e-324"))
+
+  expect_identical(out[1], .Machine$double.xmax)
+  expect_true(all(is.finite(out[1:3])))
+  expect_equal(log10(out[2]), 300, tolerance = 1e-12)
+  expect_equal(log10(out[3]), -300, tolerance = 1e-12)
+  # The smallest subnormal must not collapse to zero.
+  expect_gt(out[4], 0)
 })
 
 test_that("a formula cell reports its cached value", {
