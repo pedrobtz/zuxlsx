@@ -22,6 +22,11 @@
 #'     A valid workbook declares at least one worksheet.}
 #'   \item{`zuxlsx_sheet_error`}{The workbook opened, but the requested
 #'     worksheet is not in it.}
+#'   \item{`zuxlsx_unsupported_format_error`}{The file is a spreadsheet, but
+#'     not one zuxlsx can read: an `.xlsb`, whose worksheets are binary rather
+#'     than XML, or an OLE2 file, which is either a legacy `.xls` or an
+#'     encrypted workbook. Raised in preference to reporting such a file as
+#'     corrupt, which is what it otherwise looks like.}
 #'   \item{`zuxlsx_memory_error`}{An allocation failed while reading.}
 #' }
 #'
@@ -62,6 +67,23 @@ zuxlsx_unwrap <- function(res, path = NULL, call = sys.call(-1L)) {
         "Cannot open '", path, "' as an xlsx workbook.\n",
         "The file is not a readable ZIP archive. It may be truncated, ",
         "corrupt, or not an xlsx file at all."
+      )
+    ),
+    format_ole2 = list(
+      class = "zuxlsx_unsupported_format_error",
+      message = paste0(
+        "'", path, "' is an OLE2 file, not an xlsx workbook.\n",
+        "That is either a legacy .xls workbook or an encrypted, ",
+        "password-protected workbook. zuxlsx reads neither: it reads xlsx, ",
+        "and it cannot decrypt."
+      )
+    ),
+    format_xlsb = list(
+      class = "zuxlsx_unsupported_format_error",
+      message = paste0(
+        "'", path, "' is an xlsb workbook, not an xlsx workbook.\n",
+        "An xlsb stores its worksheets as binary records rather than XML. ",
+        "zuxlsx reads xlsx only."
       )
     ),
     sheet_not_found = list(

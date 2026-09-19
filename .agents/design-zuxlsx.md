@@ -968,11 +968,8 @@ Matching tolerantly also widens what counts as a duplicate: two members
 differing only in case, or only in which slash they use, now collide where
 they did not before. Those resolve by position as well, and are tested.
 
-**Encrypted workbooks deserve their own error.** Three files are
-password-protected, which makes them OLE2 containers rather than ZIPs, so they
-surface as `zuxlsx_zip_error` -- true but unhelpful, since it reads as
-corruption. A `zuxlsx_encrypted_error`, recognised from the CFB signature,
-would tell the caller what is actually wrong.
+**Encrypted workbooks needed their own error, and so did xlsb.** Both are now
+`zuxlsx_unsupported_format_error`; see section 21a.
 
 ### 17.3b Status, 2026-09-18
 
@@ -1245,6 +1242,59 @@ Out of scope initially:
 
 Formula cells can expose the cached value and optionally the formula text, but `zuxlsx` should not evaluate formulas.
 
+### 21a. Formats that are not broken files
+
+Two kinds of real spreadsheet reached this reader and were reported as
+damage. Both now raise `zuxlsx_unsupported_format_error`, which exists to
+separate "zuxlsx cannot read this" from "this file is corrupt".
+
+**Encrypted workbooks.** Password-to-open does not protect a ZIP; it wraps the
+package in an OLE2/CFB container, so nothing that opens ZIPs can even see the
+workbook. Detected from the eight byte compound-file signature before the file
+is handed to the reader, since afterwards the only available answer is
+"corrupt archive".
+
+That signature identifies the container, not what is inside it: a legacy .xls
+is also OLE2. Distinguishing the two means reading the CFB directory and
+looking for an `EncryptionInfo` stream, which is most of the work of reading a
+CFB, so the message names both possibilities rather than guessing at one.
+
+**xlsb.** An `.xlsb` is a genuine OPC package -- a ZIP, with XML content types
+and relationships. Only the workbook and worksheet parts differ, holding BIFF12
+binary records instead of XML, so xlsxio finds no part of the content type it
+wants and the workbook appears to declare no worksheets. Recognised by the
+presence of `xl/workbook.bin`, checked only once a workbook has already failed
+to declare a worksheet, so a file that reads normally pays nothing.
+
+### 21b. Decryption: deferred, 2026-09-19
+
+Reading an encrypted workbook was costed and deliberately left for later.
+
+It needs four things, and only the last is small: a CFB container reader
+(sector chains, FAT and miniFAT, directory tree -- 600 to 900 lines, all new);
+AES-128 and AES-256 in ECB and CBC, plus SHA-1 and SHA-512, none of which this
+package links today; both schemes, since standard encryption (Office 2007,
+AES-128 ECB, SHA-1) and agile encryption (Office 2010 onward and the default
+since 2013, usually AES-256 CBC with SHA-512) share nothing but a container;
+and the glue that hands the decrypted bytes to miniz. Roughly 2000 to 2500
+lines.
+
+The obstacle is section 3 rather than the size. Depending on the `openssl` R
+package would require system libssl and contradict the no-system-dependency
+premise outright, so the consistent route is a fourth sibling -- `zucrypt`,
+vendoring a small AES and SHA the way `zuxml` vendors Expat -- which roughly
+doubles the surface of the project.
+
+Three consequences worth recording. Decryption cannot stream: the whole
+package must be decrypted before the ZIP is readable, so section 9's promise
+would need qualifying for encrypted files. A password passed from R cannot be
+wiped, since R strings are immutable and may be copied or cached, which is
+documentable rather than fixable. And correctness needs known-answer vectors
+for AES and SHA, because "it decrypted something" proves nothing.
+
+Of the three main R readers -- readxl, openxlsx and openxlsx2 -- none supports
+this, and all three fail less informatively than detection alone achieves. If
+it is built, agile should come first, since that is what current Excel writes.
 ### Status, 2026-09-19: 10 of 11
 
 Done: 1 open the archive, 2 enumerate sheets, 3 parse relationships, 4 parse

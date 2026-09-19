@@ -18,6 +18,11 @@ It is missing, unreadable, truncated, or not a ZIP at all.}
 A valid workbook declares at least one worksheet.}
 \item{\code{zuxlsx_sheet_error}}{The workbook opened, but the requested
 worksheet is not in it.}
+\item{\code{zuxlsx_unsupported_format_error}}{The file is a spreadsheet, but
+not one zuxlsx can read: an \code{.xlsb}, whose worksheets are binary rather
+than XML, or an OLE2 file, which is either a legacy \code{.xls} or an
+encrypted workbook. Raised in preference to reporting such a file as
+corrupt, which is what it otherwise looks like.}
 \item{\code{zuxlsx_memory_error}}{An allocation failed while reading.}
 }
 

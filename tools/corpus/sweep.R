@@ -40,7 +40,7 @@ outcome_of <- function(path) {
   c("ok", paste(length(sheets), "sheets"))
 }
 
-files <- sort(list.files(root, pattern = "[.]xlsx$", recursive = TRUE))
+files <- sort(list.files(root, pattern = "[.]xls[xb]$", recursive = TRUE))
 con <- stdout()
 writeLines("file\toutcome\tdetail", con)
 for (rel in files) {
