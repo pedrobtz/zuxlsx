@@ -78,9 +78,11 @@ Rscript -e 'devtools::check()'         # target 0 errors / 0 warnings / 0 notes
 
 To check the link itself rather than trust it — which archive was used, and whether anything was left undefined:
 
+`configure` refuses to run without `R_HOME` (it needs it to find the *same* R whose library holds the two archives), so pass it explicitly when running the script by hand rather than through `R CMD INSTALL`. That regenerates `src/Makevars`, so this is a build input being rewritten, not a read-only check; `./cleanup` removes it.
+
 ```sh
 Rscript -e 'zuxlsx::zuxlsx_native()'   # versions actually linked in
-./configure && grep PKG_LIBS src/Makevars
+R_HOME="$(Rscript -e 'cat(R.home())')" ./configure && grep PKG_LIBS src/Makevars
 nm -gu src/zuxlsx.so | grep -E 'XML_|mz_zip'   # must print nothing
 ./tools/vendor/verify                  # vendored tree + fixtures vs their manifests
 ```
