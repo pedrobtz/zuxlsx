@@ -30,7 +30,17 @@ CELL_TYPES <- c("blank", "number", "string", "boolean", "error", "date")
 #'   for the errors this can raise.
 #' @examples
 #' path <- system.file("extdata", "two-sheets.xlsx", package = "zuxlsx")
-#' if (nzchar(path)) xlsx_cells(path)
+#' cells <- xlsx_cells(path)
+#' head(cells)
+#'
+#' # The type is the cell's own, before any column is built from it. A date is
+#' # reported as a date and its serial number given unconverted, because the
+#' # epoch belongs to the workbook rather than to the cell.
+#' table(cells$type)
+#' attr(cells, "date1904")
+#'
+#' # The second worksheet, by name rather than by position.
+#' xlsx_cells(path, "notes")
 xlsx_cells <- function(path, sheet = 1) {
   path <- check_path(path)
   sheet <- resolve_sheet(path, sheet)

@@ -47,8 +47,18 @@ carries a time of day.
 }
 \examples{
 path <- system.file("extdata", "two-sheets.xlsx", package = "zuxlsx")
-if (nzchar(path)) read_xlsx(path)
-if (nzchar(path)) read_xlsx(path, range = "A1:B5")
+
+# Each column takes the type its cells support.
+readings <- read_xlsx(path)
+readings
+vapply(readings, function(x) class(x)[1], character(1))
+
+# A worksheet by name, and part of one by range.
+read_xlsx(path, "notes")
+read_xlsx(path, range = "B1:C3")
+
+# Without a header row, columns are named by position.
+read_xlsx(path, range = "A2:B4", col_names = FALSE)
 }
 \seealso{
 \code{\link[=xlsx_cells]{xlsx_cells()}} for the cells themselves, and \code{\link[=xlsx_sheets]{xlsx_sheets()}} to
