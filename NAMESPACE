@@ -2,6 +2,7 @@
 
 export(read_xlsx)
 export(xlsx_cells)
+export(xlsx_read_cells)
 export(xlsx_rows)
 export(xlsx_sheets)
 export(zuxlsx_native)
