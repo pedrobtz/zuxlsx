@@ -59,5 +59,30 @@ for the errors this can raise.
 
 ``` r
 path <- system.file("extdata", "two-sheets.xlsx", package = "zuxlsx")
-if (nzchar(path)) xlsx_cells(path)
+cells <- xlsx_cells(path)
+head(cells)
+#>   row col   type   value number
+#> 1   1   1 string station     NA
+#> 2   1   2 string reading     NA
+#> 3   1   3 string checked     NA
+#> 4   1   4 string   taken     NA
+#> 5   2   1 string   north     NA
+#> 6   2   2 number    12.5   12.5
+
+# The type is the cell's own, before any column is built from it. A date is
+# reported as a date and its serial number given unconverted, because the
+# epoch belongs to the workbook rather than to the cell.
+table(cells$type)
+#> 
+#>   blank  number  string boolean   error    date 
+#>       0       3       7       3       0       3 
+attr(cells, "date1904")
+#> [1] FALSE
+
+# The second worksheet, by name rather than by position.
+xlsx_cells(path, "notes")
+#>   row col   type                 value number
+#> 1   1   1 string                  note     NA
+#> 2   2   1 string calibrated in January     NA
+#> 3   3   1 string                 µg/m³     NA
 ```

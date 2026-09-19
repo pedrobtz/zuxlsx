@@ -67,6 +67,32 @@ to list the worksheets.
 
 ``` r
 path <- system.file("extdata", "two-sheets.xlsx", package = "zuxlsx")
-if (nzchar(path)) read_xlsx(path)
-if (nzchar(path)) read_xlsx(path, range = "A1:B5")
+
+# Each column takes the type its cells support.
+readings <- read_xlsx(path)
+readings
+#>   station reading checked      taken
+#> 1   north   12.50    TRUE 2024-02-02
+#> 2   south    9.75   FALSE 2024-02-03
+#> 3    east   14.25    TRUE 2024-02-04
+vapply(readings, function(x) class(x)[1], character(1))
+#>     station     reading     checked       taken 
+#> "character"   "numeric"   "logical"      "Date" 
+
+# A worksheet by name, and part of one by range.
+read_xlsx(path, "notes")
+#>                    note
+#> 1 calibrated in January
+#> 2                 µg/m³
+read_xlsx(path, range = "B1:C3")
+#>   reading checked
+#> 1   12.50    TRUE
+#> 2    9.75   FALSE
+
+# Without a header row, columns are named by position.
+read_xlsx(path, range = "A2:B4", col_names = FALSE)
+#>      X1    X2
+#> 1 north 12.50
+#> 2 south  9.75
+#> 3  east 14.25
 ```

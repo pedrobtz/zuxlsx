@@ -43,5 +43,12 @@ for a data frame.
 
 ``` r
 path <- system.file("extdata", "two-sheets.xlsx", package = "zuxlsx")
-if (nzchar(path)) xlsx_rows(path)
+rows <- xlsx_rows(path)
+
+# One character vector per row, every one as wide as the widest, with no
+# type inference: a number is its text.
+rows[[1]]
+#> [1] "station" "reading" "checked" "taken"  
+rows[[2]]
+#> [1] "north" "12.5"  "1"     "45324"
 ```

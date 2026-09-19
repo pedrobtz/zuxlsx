@@ -103,8 +103,34 @@ list the worksheets.</p></div>
     <div class="section level2">
     <h2 id="ref-examples">Examples<a class="anchor" aria-label="anchor" href="#ref-examples"></a></h2>
     <div class="sourceCode"><pre class="sourceCode r"><code><span class="r-in"><span><span class="va">path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"two-sheets.xlsx"</span>, package <span class="op">=</span> <span class="st">"zuxlsx"</span><span class="op">)</span></span></span>
-<span class="r-in"><span><span class="kw">if</span> <span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/nchar.html" class="external-link">nzchar</a></span><span class="op">(</span><span class="va">path</span><span class="op">)</span><span class="op">)</span> <span class="fu">read_xlsx</span><span class="op">(</span><span class="va">path</span><span class="op">)</span></span></span>
-<span class="r-in"><span><span class="kw">if</span> <span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/nchar.html" class="external-link">nzchar</a></span><span class="op">(</span><span class="va">path</span><span class="op">)</span><span class="op">)</span> <span class="fu">read_xlsx</span><span class="op">(</span><span class="va">path</span>, range <span class="op">=</span> <span class="st">"A1:B5"</span><span class="op">)</span></span></span>
+<span class="r-in"><span></span></span>
+<span class="r-in"><span><span class="co"># Each column takes the type its cells support.</span></span></span>
+<span class="r-in"><span><span class="va">readings</span> <span class="op">&lt;-</span> <span class="fu">read_xlsx</span><span class="op">(</span><span class="va">path</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="va">readings</span></span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   station reading checked      taken</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 1   north   12.50    TRUE 2024-02-02</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 2   south    9.75   FALSE 2024-02-03</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 3    east   14.25    TRUE 2024-02-04</span>
+<span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/lapply.html" class="external-link">vapply</a></span><span class="op">(</span><span class="va">readings</span>, <span class="kw">function</span><span class="op">(</span><span class="va">x</span><span class="op">)</span> <span class="fu"><a href="https://rdrr.io/r/base/class.html" class="external-link">class</a></span><span class="op">(</span><span class="va">x</span><span class="op">)</span><span class="op">[</span><span class="fl">1</span><span class="op">]</span>, <span class="fu"><a href="https://rdrr.io/r/base/character.html" class="external-link">character</a></span><span class="op">(</span><span class="fl">1</span><span class="op">)</span><span class="op">)</span></span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>     station     reading     checked       taken </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> "character"   "numeric"   "logical"      "Date" </span>
+<span class="r-in"><span></span></span>
+<span class="r-in"><span><span class="co"># A worksheet by name, and part of one by range.</span></span></span>
+<span class="r-in"><span><span class="fu">read_xlsx</span><span class="op">(</span><span class="va">path</span>, <span class="st">"notes"</span><span class="op">)</span></span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>                    note</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 1 calibrated in January</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 2                 µg/m³</span>
+<span class="r-in"><span><span class="fu">read_xlsx</span><span class="op">(</span><span class="va">path</span>, range <span class="op">=</span> <span class="st">"B1:C3"</span><span class="op">)</span></span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   reading checked</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 1   12.50    TRUE</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 2    9.75   FALSE</span>
+<span class="r-in"><span></span></span>
+<span class="r-in"><span><span class="co"># Without a header row, columns are named by position.</span></span></span>
+<span class="r-in"><span><span class="fu">read_xlsx</span><span class="op">(</span><span class="va">path</span>, range <span class="op">=</span> <span class="st">"A2:B4"</span>, col_names <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>      X1    X2</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 1 north 12.50</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 2 south  9.75</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 3  east 14.25</span>
 </code></pre></div>
     </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

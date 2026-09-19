@@ -28,5 +28,6 @@ for the errors this can raise.
 
 ``` r
 path <- system.file("extdata", "two-sheets.xlsx", package = "zuxlsx")
-if (nzchar(path)) xlsx_sheets(path)
+xlsx_sheets(path)
+#> [1] "readings" "notes"   
 ```
