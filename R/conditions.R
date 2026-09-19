@@ -18,6 +18,9 @@
 #'     not a single string, or a file that does not exist.}
 #'   \item{`zuxlsx_zip_error`}{The file could not be opened as a ZIP archive.
 #'     It is missing, unreadable, truncated, or not a ZIP at all.}
+#'   \item{`zuxlsx_xml_error`}{A part of the workbook is not well-formed XML.
+#'     Raised in preference to `zuxlsx_ooxml_error` when the failure is the
+#'     XML itself rather than what it says, and names the part and line.}
 #'   \item{`zuxlsx_ooxml_error`}{The ZIP archive opened but is not a workbook.
 #'     A valid workbook declares at least one worksheet.}
 #'   \item{`zuxlsx_sheet_error`}{The workbook opened, but the requested
@@ -67,6 +70,16 @@ zuxlsx_unwrap <- function(res, path = NULL, call = sys.call(-1L)) {
         "Cannot open '", path, "' as an xlsx workbook.\n",
         "The file is not a readable ZIP archive. It may be truncated, ",
         "corrupt, or not an xlsx file at all."
+      )
+    ),
+    xml_malformed = list(
+      class = "zuxlsx_xml_error",
+      message = paste0(
+        "'", path, "' contains XML that is not well formed.\n",
+        "The part ", encodeString(res$value$part, quote = "'"),
+        " could not be parsed",
+        if (isTRUE(res$value$line > 0)) paste0(" (line ", res$value$line, ")") else "",
+        "."
       )
     ),
     format_ole2 = list(

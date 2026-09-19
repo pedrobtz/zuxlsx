@@ -14,6 +14,9 @@ stable. Every class below is a subclass of \code{zuxlsx_error}.
 not a single string, or a file that does not exist.}
 \item{\code{zuxlsx_zip_error}}{The file could not be opened as a ZIP archive.
 It is missing, unreadable, truncated, or not a ZIP at all.}
+\item{\code{zuxlsx_xml_error}}{A part of the workbook is not well-formed XML.
+Raised in preference to \code{zuxlsx_ooxml_error} when the failure is the
+XML itself rather than what it says, and names the part and line.}
 \item{\code{zuxlsx_ooxml_error}}{The ZIP archive opened but is not a workbook.
 A valid workbook declares at least one worksheet.}
 \item{\code{zuxlsx_sheet_error}}{The workbook opened, but the requested

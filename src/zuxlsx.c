@@ -43,6 +43,7 @@ static const char *const STATUS_BAD_PATH = "bad_path";
 static const char *const STATUS_NO_SHEET = "sheet_not_found";
 static const char *const STATUS_OLE2 = "format_ole2";
 static const char *const STATUS_XLSB = "format_xlsb";
+static const char *const STATUS_XML = "xml_malformed";
 
 static SEXP result(const char *status, SEXP value) {
   const char *fields[] = {"status", "value", ""};
@@ -182,6 +183,66 @@ static int file_is_xlsb(const char *file) {
   return found;
 }
 
+/* Which part, if any, is not well-formed XML.
+ *
+ * Asked only once a workbook has already failed to declare a worksheet, so
+ * the cost is irrelevant and the answer is the difference between "this file
+ * is not a workbook" and "xl/workbook.xml is broken at line 4". xlsxio does
+ * not report why its parse produced nothing, but Expat and miniz are both
+ * linked here directly, so the question can be asked without it.
+ *
+ * Only the two parts that must be well-formed for a workbook to be found are
+ * checked. A malformed worksheet is a different failure, reached later, and
+ * is not what this path is explaining. */
+static int first_malformed_part(const char *file, char *out, size_t outlen,
+                                int *line) {
+  static const char *const PARTS[] = {"[Content_Types].xml", "xl/workbook.xml"};
+  mz_zip_archive zip;
+  size_t i;
+  int found = 0;
+
+  memset(&zip, 0, sizeof(zip));
+  if (!mz_zip_reader_init_file(&zip, file, 0)) {
+    return 0;
+  }
+  for (i = 0; i < sizeof(PARTS) / sizeof(PARTS[0]); i++) {
+    size_t size = 0;
+    void *buf;
+    mz_uint32 index;
+    XML_Parser parser;
+
+    if (!mz_zip_reader_locate_file_v2(&zip, PARTS[i], NULL, 0, &index)) {
+      continue;
+    }
+    buf = mz_zip_reader_extract_to_heap(&zip, index, &size, 0);
+    if (buf == NULL) {
+      continue;
+    }
+    parser = XML_ParserCreate(NULL);
+    if (parser == NULL) {
+      mz_free(buf);
+      continue;
+    }
+    if (XML_Parse(parser, (const char *)buf, (int)size, 1) == XML_STATUS_ERROR) {
+      size_t n = strlen(PARTS[i]);
+      if (n >= outlen) {
+        n = outlen - 1;
+      }
+      memcpy(out, PARTS[i], n);
+      out[n] = '\0';
+      *line = (int)XML_GetCurrentLineNumber(parser);
+      found = 1;
+    }
+    XML_ParserFree(parser);
+    mz_free(buf);
+    if (found) {
+      break;
+    }
+  }
+  mz_zip_reader_end(&zip);
+  return found;
+}
+
 SEXP C_xlsx_sheets(SEXP path) {
   const char *file;
   sheet_list *sheets;
@@ -236,10 +297,29 @@ SEXP C_xlsx_sheets(SEXP path) {
      workbook part, or a workbook with no <sheet> elements. Reporting that as
      an empty character vector would make a wrong file look like an odd one. */
   if (sheets->n == 0) {
+    char part[64];
+    int line = 0;
     int xlsb = file_is_xlsb(file);
+    const char *status = STATUS_NO_SHEETS;
+    SEXP detail = R_NilValue;
+
+    if (xlsb) {
+      status = STATUS_XLSB;
+    } else if (first_malformed_part(file, part, sizeof(part), &line)) {
+      status = STATUS_XML;
+    }
     sheet_list_finalizer(bag);
+    if (status == STATUS_XML) {
+      const char *fields[] = {"part", "line", ""};
+      detail = PROTECT(Rf_mkNamed(VECSXP, fields));
+      SET_VECTOR_ELT(detail, 0, Rf_mkString(part));
+      SET_VECTOR_ELT(detail, 1, Rf_ScalarInteger(line));
+      res = PROTECT(result(status, detail));
+      UNPROTECT(3);
+      return res;
+    }
     UNPROTECT(1);
-    return result(xlsb ? STATUS_XLSB : STATUS_NO_SHEETS, R_NilValue);
+    return result(status, R_NilValue);
   }
 
   out = PROTECT(Rf_allocVector(STRSXP, (R_xlen_t)sheets->n));
