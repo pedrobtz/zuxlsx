@@ -1,0 +1,2 @@
+source	repo	commit	path	license	notes
+poi	https://github.com/apache/poi	b66d71f85030b060df543702d8c0d64dfac922c3	test-data/spreadsheet	Apache-2.0	OOXML regression and fuzzer corpus, .xlsx only

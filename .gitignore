@@ -1,3 +1,6 @@
 docs
 src/Makevars
 src/Makevars.win
+
+# The external corpus is fetched, not committed.
+tools/corpus/files/
