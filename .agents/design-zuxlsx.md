@@ -737,6 +737,42 @@ text -- so `DESCRIPTION`'s claim that a workbook need not be held in memory in
 full remains true of the document, but the cell list is a second copy that a
 streaming builder would not need.
 
+### Measured, 2026-09-19, and it changes what section 14 should ask for
+
+For a 20000 by 10 sheet of 200000 cells:
+
+| | size |
+| --- | --- |
+| `xlsx_cells()` result | 12.8 MB |
+| of which `value`, the cell text | 7.5 MB |
+| row, column, type and number together | 5.3 MB |
+| `read_xlsx()` result | 4.7 MB |
+
+The text is 59% of the intermediate, and **a streaming builder cannot discard
+it.** Promoting a column to character currently returns each cell as it was
+written, not as its stored double formats:
+
+```text
+stored text     '1.50'  '2.0e3'  '0.30'
+read_xlsx gives '1.50'  '2.0e3'  '0.30'
+from a double   '1.5'   '2000'   '0.3'
+```
+
+A builder that dropped the text and reformatted on promotion would change
+every mixed column silently. Keeping the text costs the 59%, which is most of
+what streaming was supposed to save.
+
+So the section as written asks for something whose price was not understood
+when it was written. The narrower version worth doing is to build columns in
+C from the cell list that already exists there, which removes the R-side cell
+vectors from the peak without touching fidelity, since the text stays
+reachable in C. That is roughly 29 MB to 17 MB on the sheet above, against
+about 5 MB for true streaming with the representation change.
+
+Deferred rather than done: it refactors correct, well-covered code for a
+memory improvement, and the package has gaps worth more. Recorded so the next
+attempt starts from the measurement rather than from the assumption.
+
 Doing it this way first was a deliberate trade: it reuses a boundary that is
 already tested, and it makes the column semantics -- promotion, alignment,
 epochs -- reviewable on their own, before they are entangled with incremental
@@ -775,11 +811,26 @@ conditions carry the offending `path`. Implemented so far:
 | `zuxlsx_memory_error` | an allocation failed while reading |
 | `zuxlsx_sheet_error` | the workbook opened, but has no such worksheet |
 
-`zuxlsx_input_error` and `zuxlsx_memory_error` are additions to the list
-above. `zuxlsx_sheet_error` arrived with `xlsx_cells()`, as expected.
-`zuxlsx_xml_error` and `zuxlsx_type_error` are still unraised: a malformed
-part currently surfaces as `zuxlsx_ooxml_error`, and nothing yet promotes a
-cell to a column type that could conflict.
+`zuxlsx_input_error`, `zuxlsx_memory_error` and
+`zuxlsx_unsupported_format_error` are additions to the list above.
+`zuxlsx_sheet_error` arrived with `xlsx_cells()`, and `zuxlsx_xml_error` is
+raised as of 2026-09-19, naming the offending part and line.
+
+Only `zuxlsx_type_error` is still unraised, and it may never be: nothing
+promotes a cell to a column type that could conflict, because a column that
+cannot hold its cells becomes character rather than failing.
+
+`zuxlsx_xml_error` needed no sixth xlsxio patch. xlsxio does not report why a
+parse produced nothing, but Expat and miniz are both linked here directly, so
+once a workbook has already failed to declare a worksheet the two parts that
+must be well formed -- `[Content_Types].xml` and `xl/workbook.xml` -- are
+parsed again in this package's own code purely to find out which one is
+broken. That path runs only on a failure, so it costs nothing, and it turns
+"declares no worksheets" into "xl/workbook.xml could not be parsed (line 4)".
+
+The boundary is the point: XML that parses but declares no worksheet stays
+`zuxlsx_ooxml_error`. Calling that an XML error would send the reader looking
+for a syntax problem that is not there.
 
 Note that the worksheet name is checked in R against `xlsx_sheets()` rather
 than left to the native layer. Opening a worksheet that does not exist yields
