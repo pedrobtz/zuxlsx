@@ -12,8 +12,20 @@ set -eu
 : "${R_HOME:?configure must be run by R CMD INSTALL, which sets R_HOME}"
 RSCRIPT="${R_HOME}/bin/Rscript"
 
+# Where a sibling installed its static archive.
+#
+# zukomp installs under R_ARCH, so on Windows the archive is in lib/x64 rather
+# than lib; zuxml still installs to a plain lib. R_ARCH is empty on every
+# single-arch platform, which is all of them except Windows since R 4.2
+# dropped 32-bit builds, so the two spellings coincide everywhere else and the
+# difference only shows up on the one platform.
+#
+# Asking for the arch-specific path first and falling back to the plain one is
+# correct for either convention, and stays correct when the siblings agree
+# again -- which matters because this is resolved at install time against
+# whatever version of them happens to be installed.
 lib_dir() {
-  "${RSCRIPT}" --vanilla -e "cat(system.file('lib', package = '$1'))"
+  "${RSCRIPT}" --vanilla -e "arch <- .Platform\$r_arch; d <- if (nzchar(arch)) system.file('lib', arch, package = '$1') else ''; if (!nzchar(d)) d <- system.file('lib', package = '$1'); cat(d)"
 }
 
 fail() {
