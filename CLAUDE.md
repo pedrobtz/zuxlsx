@@ -56,7 +56,10 @@ The build:
   — a zukomp release broke Windows here on 2026-09-19 — and it is the
   cost being chosen. Do not pin a *feature* branch: those are deleted on
   merge and the ref then 404s. Drop `Remotes:` entirely before any CRAN
-  submission.
+  submission – on submission day, not before, since it is what makes a
+  GitHub install work. The full sequence, including why the siblings
+  must reach CRAN first, is in
+  [.agents/release-checklist.md](https://pedrobtz.github.io/zuxlsx/.agents/release-checklist.md).
 - `src/Makevars` is generated and `.gitignore`d. `cleanup` removes it.
 
 Vendored and copied from the working `utopp/pkg-xlsx` prototype at

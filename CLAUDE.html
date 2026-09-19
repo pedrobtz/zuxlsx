@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="index.html">zuxlsx</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.0.9000</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -53,7 +53,7 @@
 <li>
 <code>DESCRIPTION</code> has <code>LinkingTo: zukomp, zuxml</code> and <strong>no <code>Imports:</code></strong>, which is what design §3 asks for.</li>
 <li>
-<strong><code>Remotes:</code> tracks <code>pedrobtz/zuxml@main</code> and <code>pedrobtz/zukomp@main</code></strong>, since neither is on CRAN. <code>@main</code> is deliberate and is not a version pin: the three packages are developed together, so zuxlsx builds against what the siblings actually are, and a sibling release that breaks this package is a bug to fix in the sibling rather than a version to freeze away from. That has real cost — a zukomp release broke Windows here on 2026-09-19 — and it is the cost being chosen. Do not pin a <em>feature</em> branch: those are deleted on merge and the ref then 404s. Drop <code>Remotes:</code> entirely before any CRAN submission.</li>
+<strong><code>Remotes:</code> tracks <code>pedrobtz/zuxml@main</code> and <code>pedrobtz/zukomp@main</code></strong>, since neither is on CRAN. <code>@main</code> is deliberate and is not a version pin: the three packages are developed together, so zuxlsx builds against what the siblings actually are, and a sibling release that breaks this package is a bug to fix in the sibling rather than a version to freeze away from. That has real cost — a zukomp release broke Windows here on 2026-09-19 — and it is the cost being chosen. Do not pin a <em>feature</em> branch: those are deleted on merge and the ref then 404s. Drop <code>Remotes:</code> entirely before any CRAN submission – on submission day, not before, since it is what makes a GitHub install work. The full sequence, including why the siblings must reach CRAN first, is in <a href=".agents/release-checklist.html">.agents/release-checklist.md</a>.</li>
 <li>
 <code>src/Makevars</code> is generated and <code>.gitignore</code>d. <code>cleanup</code> removes it.</li>
 </ul><p>Vendored and copied from the working <code>utopp/pkg-xlsx</code> prototype at <code>/Users/pbtz/Documents/repos/gh/utopp/pkg-xlsx</code>:</p>

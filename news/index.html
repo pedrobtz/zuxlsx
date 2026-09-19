@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">zuxlsx</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.0.0.9000</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -33,11 +33,30 @@
     </div>
 
     <div class="section level2">
-<h2 class="pkg-version" data-toc-text="0.0.0.9000" id="zuxlsx-0009000">zuxlsx 0.0.0.9000<a class="anchor" aria-label="anchor" href="#zuxlsx-0009000"></a></h2>
-<ul><li><p><code><a href="../reference/xlsx_sheets.html">xlsx_sheets()</a></code> lists the worksheets in an <code>.xlsx</code> file, and <code><a href="../reference/zuxlsx_native.html">zuxlsx_native()</a></code> reports the vendored ‘xlsxio’ version together with the ‘Expat’ and ‘miniz’ builds linked in from <code>zuxml</code> and <code>zukomp</code>. These are a first slice rather than the reading API: they exist so the native build is exercised by a test.</p></li>
-<li><p>Errors are raised as classed conditions: <code>zuxlsx_input_error</code>, <code>zuxlsx_zip_error</code>, <code>zuxlsx_ooxml_error</code> and <code>zuxlsx_memory_error</code>, all subclasses of <code>zuxlsx_error</code>. See <code><a href="../reference/zuxlsx-conditions.html">?"zuxlsx-conditions"</a></code>. A ZIP archive that is not a workbook is now an error rather than an empty result.</p></li>
+<h2 class="pkg-version" data-toc-text="0.1.0" id="zuxlsx-010">zuxlsx 0.1.0<a class="anchor" aria-label="anchor" href="#zuxlsx-010"></a></h2>
+<p>First release. zuxlsx reads <code>.xlsx</code> workbooks without a system XML or ZIP library: it bundles the ‘xlsxio’ reader and links ‘Expat’ and ‘miniz’ statically from <code>zuxml</code> and <code>zukomp</code>, so an installed zuxlsx has no run-time dependency on either.</p>
+<div class="section level3">
+<h3 id="reading-0-1-0">Reading<a class="anchor" aria-label="anchor" href="#reading-0-1-0"></a></h3>
+<ul><li><p><code><a href="../reference/read_xlsx.html">read_xlsx()</a></code> reads a worksheet into a data frame, giving each column the type its cells support: logical, double, character, <code>Date</code> or <code>POSIXct</code>. <code>range</code> takes A1 notation and either corner may name a cell, a column or a row, so <code>"B2:D10"</code>, <code>"A:C"</code> and <code>"2:10"</code> are all accepted.</p></li>
+<li><p><code><a href="../reference/xlsx_cells.html">xlsx_cells()</a></code> returns one row per cell with its position, type, text and numeric value – the view underneath <code><a href="../reference/read_xlsx.html">read_xlsx()</a></code>, for worksheets that are not rectangular enough for a data frame.</p></li>
+<li><p><code><a href="../reference/xlsx_rows.html">xlsx_rows()</a></code> returns a worksheet row by row as text, padded so that the nth element of each row is the nth column.</p></li>
+<li><p><code><a href="../reference/xlsx_read_cells.html">xlsx_read_cells()</a></code> reads a worksheet a chunk at a time, passing each chunk to a function. Returning <code>FALSE</code> stops the read, which is how a caller finds something near the top of a large worksheet without paying for the rest.</p></li>
+<li><p><code><a href="../reference/xlsx_sheets.html">xlsx_sheets()</a></code> lists worksheets, and <code><a href="../reference/zuxlsx_native.html">zuxlsx_native()</a></code> reports the ‘xlsxio’, ‘Expat’ and ‘miniz’ versions actually linked in.</p></li>
 </ul></div>
-  </main></div>
+<div class="section level3">
+<h3 id="dates-0-1-0">Dates<a class="anchor" aria-label="anchor" href="#dates-0-1-0"></a></h3>
+<ul><li><p>Both Excel epochs are handled. The workbook’s own <code>date1904</code> setting decides which is used, so a workbook written on a Mac does not read four years out.</p></li>
+<li><p>The 1900 system’s phantom 29 February 1900 is accounted for: serial 1 is 1 January 1900 and serial 61 is 1 March 1900, as Excel shows them, and serial 60 – a day that never existed – is <code>NA</code>. Using a single origin, as is common, puts every date before March 1900 a day early.</p></li>
+</ul></div>
+<div class="section level3">
+<h3 id="errors-0-1-0">Errors<a class="anchor" aria-label="anchor" href="#errors-0-1-0"></a></h3>
+<ul><li><p>Every error is a classed condition under <code>zuxlsx_error</code>: <code>zuxlsx_input_error</code>, <code>zuxlsx_zip_error</code>, <code>zuxlsx_xml_error</code>, <code>zuxlsx_ooxml_error</code>, <code>zuxlsx_sheet_error</code>, <code>zuxlsx_unsupported_format_error</code> and <code>zuxlsx_memory_error</code>. See <code><a href="../reference/zuxlsx-conditions.html">?"zuxlsx-conditions"</a></code>.</p></li>
+<li><p>A file that is a spreadsheet zuxlsx cannot read is reported as such rather than as damage. An encrypted workbook is an OLE2 container, not a ZIP, and an <code>.xlsb</code> stores its worksheets as binary records; both raise <code>zuxlsx_unsupported_format_error</code> instead of looking corrupt.</p></li>
+<li><p>XML that will not parse is distinguished from XML that parses but declares no worksheet, and the message names the part and line.</p></li>
+</ul></div>
+</div>
+  </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>
+    </nav></aside></div>
 
 
     <footer><div class="pkgdown-footer-left">

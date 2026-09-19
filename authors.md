@@ -13,13 +13,13 @@ Source:
 [`DESCRIPTION`](https://github.com/pedrobtz/zuxlsx/blob/main/DESCRIPTION)
 
 Baltazar P (2026). *zuxlsx: Read 'xlsx' Workbooks Without System
-Dependencies*. R package version 0.0.0.9000,
+Dependencies*. R package version 0.1.0,
 <https://github.com/pedrobtz/zuxlsx>.
 
     @Manual{,
       title = {zuxlsx: Read 'xlsx' Workbooks Without System Dependencies},
       author = {Pedro Baltazar},
       year = {2026},
-      note = {R package version 0.0.0.9000},
+      note = {R package version 0.1.0},
       url = {https://github.com/pedrobtz/zuxlsx},
     }
