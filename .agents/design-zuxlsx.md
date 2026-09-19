@@ -944,16 +944,29 @@ testcases, and a `.docx` renamed `.xlsx`. Two more were checked rather than
 assumed -- `deep-data.xlsx` has no end-of-central-directory at all, which
 `unzip` also refuses, so `zuxlsx_zip_error` is right.
 
-Two findings remain, neither yet fixed:
+Two findings came out of it.
 
-**`49609.xlsx` is a real interoperability gap.** It is a valid archive holding
-valid OOXML, but its member names use backslashes and lowercase --
-`[content_types].xml`, `xl\styles.xml`, `_rels\.rels`. xlsxio opens the
-literal `[Content_Types].xml` and locates members with
-`MZ_ZIP_FLAG_CASE_SENSITIVE`, so the part is never found and the workbook
-reports as `zuxlsx_ooxml_error`. Excel reads this file. Fixing it means
-case-insensitive member lookup and treating a backslash as a separator, which
-is a fifth vendored patch.
+**`49609.xlsx` was a real interoperability gap, now fixed** by vendored patch
+0005. It is a valid archive holding valid OOXML, but its member names use
+backslashes and lowercase -- `[content_types].xml`, `xl\styles.xml`,
+`_rels\.rels`. xlsxio opened the literal `[Content_Types].xml` and located
+members with `MZ_ZIP_FLAG_CASE_SENSITIVE`, so the part was never found. Excel
+reads that file; now so does this. The corpus count went from 334 to 335, and
+`run` reported the improvement in the same way it would report a regression,
+which is what the baseline is for.
+
+The fix is not simply "clear the case-sensitive flag", and the reason is worth
+keeping. `mz_zip_reader_locate_file_v2()` resolves a duplicated member name
+differently depending on that flag -- set, the earlier member wins; clear, the
+later one. Clearing it turned this package's duplicate handling from
+first-wins to last-wins, which `test-hostile.R` caught immediately. Which copy
+of a duplicated part a reader picks is a security property, so it must follow
+from position rather than from a lookup flag, and patch 0005 scans the central
+directory itself and takes the first match.
+
+Matching tolerantly also widens what counts as a duplicate: two members
+differing only in case, or only in which slash they use, now collide where
+they did not before. Those resolve by position as well, and are tested.
 
 **Encrypted workbooks deserve their own error.** Three files are
 password-protected, which makes them OLE2 containers rather than ZIPs, so they

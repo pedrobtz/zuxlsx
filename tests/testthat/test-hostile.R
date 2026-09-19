@@ -151,3 +151,40 @@ test_that("KNOWN GAP: a corrupt CRC-32 is not detected", {
 
   expect_identical(xlsx_sheets(path), "CRCBAD")
 })
+
+test_that("members differing only in case or separator still resolve first-first", {
+  # Matching part names tolerantly widens what counts as a duplicate: two
+  # members that differ only in case, or only in which slash they use, now
+  # collide where they did not before. Whichever wins, it must be the earlier
+  # one in the central directory, for the same reason as the exact-duplicate
+  # case above -- otherwise a workbook can show one part to a validator and
+  # another to the reader.
+  first_of <- function(first_name, first_sheet, second_name, second_sheet) {
+    path <- withr::local_tempfile(fileext = ".xlsx", .local_envir = parent.frame())
+    parts <- workbook_parts()
+    entries <- lapply(names(parts), function(n) zip_entry(n, parts[[n]]))
+    entries[[3L]] <- zip_entry(first_name, workbook_xml(first_sheet))
+    entries <- c(entries, list(zip_entry(second_name, workbook_xml(second_sheet))))
+    write_zip(path, entries)
+    xlsx_sheets(path)
+  }
+
+  # Same part, different case.
+  expect_identical(
+    first_of("xl/workbook.xml", "FIRST", "xl/WORKBOOK.xml", "SECOND"),
+    "FIRST"
+  )
+  expect_identical(
+    first_of("xl/WORKBOOK.xml", "FIRST", "xl/workbook.xml", "SECOND"),
+    "FIRST"
+  )
+  # Same part, different separator.
+  expect_identical(
+    first_of("xl/workbook.xml", "FIRST", "xl\\workbook.xml", "SECOND"),
+    "FIRST"
+  )
+  expect_identical(
+    first_of("xl\\workbook.xml", "FIRST", "xl/workbook.xml", "SECOND"),
+    "FIRST"
+  )
+})
