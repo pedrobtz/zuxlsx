@@ -55,6 +55,11 @@ not a single string, or a file that does not exist.</p></dd>
 <dd><p>The file could not be opened as a ZIP archive.
 It is missing, unreadable, truncated, or not a ZIP at all.</p></dd>
 
+<dt><code>zuxlsx_xml_error</code></dt>
+<dd><p>A part of the workbook is not well-formed XML.
+Raised in preference to <code>zuxlsx_ooxml_error</code> when the failure is the
+XML itself rather than what it says, and names the part and line.</p></dd>
+
 <dt><code>zuxlsx_ooxml_error</code></dt>
 <dd><p>The ZIP archive opened but is not a workbook.
 A valid workbook declares at least one worksheet.</p></dd>

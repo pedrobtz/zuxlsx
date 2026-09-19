@@ -16,6 +16,12 @@ stable. Every class below is a subclass of `zuxlsx_error`.
   The file could not be opened as a ZIP archive. It is missing,
   unreadable, truncated, or not a ZIP at all.
 
+- `zuxlsx_xml_error`:
+
+  A part of the workbook is not well-formed XML. Raised in preference to
+  `zuxlsx_ooxml_error` when the failure is the XML itself rather than
+  what it says, and names the part and line.
+
 - `zuxlsx_ooxml_error`:
 
   The ZIP archive opened but is not a workbook. A valid workbook
