@@ -1,54 +1,184 @@
-# A ZIP archive built byte by byte, so that tests needing a non-workbook
-# archive do not depend on an external zip program. CRAN guarantees neither
-# `zip` nor Python, and utils::zip() shells out to the system one.
+# A ZIP archive built byte by byte, so that tests needing a hand-made archive
+# do not depend on an external zip program. CRAN guarantees neither `zip` nor
+# Python, and utils::zip() shells out to the system one.
 #
-# One stored (uncompressed) entry, no data descriptor, no ZIP64. That is the
-# smallest thing miniz will open and walk, which is all these tests need.
-write_stored_zip <- function(path, name = "a.txt", contents = "hello") {
-  name_raw <- charToRaw(name)
-  data_raw <- charToRaw(contents)
-  crc <- crc32_le(data_raw)
-  n <- length(data_raw)
+# Stored (uncompressed) entries only, no data descriptors, no ZIP64. That is
+# the smallest thing miniz will open and walk. Building the bytes by hand is
+# not incidental: the adversarial tests need to write a central directory that
+# disagrees with the local headers, declare a size an entry does not have, or
+# name the same member twice, and no ZIP library will produce those on request.
 
-  # little-endian fixed-width field
-  le <- function(x, bytes) {
-    as.raw(vapply(
-      seq_len(bytes),
-      function(i) (as.numeric(x) %/% (256^(i - 1L))) %% 256,
-      numeric(1)
-    ))
+# little-endian fixed-width field
+le <- function(x, bytes) {
+  as.raw(vapply(
+    seq_len(bytes),
+    function(i) (as.numeric(x) %/% (256^(i - 1L))) %% 256,
+    numeric(1)
+  ))
+}
+
+as_raw_contents <- function(x) if (is.raw(x)) x else charToRaw(x)
+
+# One member of an archive. `declared_size` and `declared_crc` override what
+# goes into the headers without changing the bytes actually stored, which is
+# how the lying-header tests are built.
+zip_entry <- function(name, contents, declared_size = NULL, declared_crc = NULL) {
+  data_raw <- as_raw_contents(contents)
+  list(
+    name = name,
+    data = data_raw,
+    size = if (is.null(declared_size)) length(data_raw) else declared_size,
+    crc = if (is.null(declared_crc)) crc32_le(data_raw) else declared_crc
+  )
+}
+
+# Assembles `entries` into a ZIP at `path`.
+#
+# `central_offset_delta` and `entry_count_delta` perturb the end-of-central-
+# directory record so that a structurally valid archive can be made to point
+# somewhere wrong, which is what the corrupt-central-directory tests need.
+write_zip <- function(path,
+                      entries,
+                      central_offset_delta = 0L,
+                      entry_count_delta = 0L) {
+  local_blocks <- list()
+  central_blocks <- list()
+  offset <- 0L
+
+  for (e in entries) {
+    name_raw <- charToRaw(e$name)
+    n_stored <- length(e$data)
+
+    local_header <- c(
+      as.raw(c(0x50, 0x4b, 0x03, 0x04)), # signature
+      le(20, 2), le(0, 2), le(0, 2),     # version needed, flags, method 0=stored
+      le(0, 2), le(0, 2),                # mod time, mod date
+      e$crc, le(n_stored, 4), le(e$size, 4),
+      le(length(name_raw), 2), le(0, 2)  # name length, extra length
+    )
+    central <- c(
+      as.raw(c(0x50, 0x4b, 0x01, 0x02)), # signature
+      le(20, 2), le(20, 2),              # version made by, version needed
+      le(0, 2), le(0, 2),                # flags, method
+      le(0, 2), le(0, 2),                # mod time, mod date
+      e$crc, le(n_stored, 4), le(e$size, 4),
+      le(length(name_raw), 2), le(0, 2), le(0, 2), # name, extra, comment
+      le(0, 2), le(0, 2), le(0, 4),      # disk, internal attrs, external attrs
+      le(offset, 4)                      # offset of local header
+    )
+
+    local_blocks[[length(local_blocks) + 1L]] <- c(local_header, name_raw, e$data)
+    central_blocks[[length(central_blocks) + 1L]] <- c(central, name_raw)
+    offset <- offset + length(local_header) + length(name_raw) + n_stored
   }
 
-  local_header <- c(
-    as.raw(c(0x50, 0x4b, 0x03, 0x04)), # signature
-    le(20, 2), le(0, 2), le(0, 2),     # version needed, flags, method 0=stored
-    le(0, 2), le(0, 2),                # mod time, mod date
-    crc, le(n, 4), le(n, 4),           # crc32, compressed, uncompressed size
-    le(length(name_raw), 2), le(0, 2)  # name length, extra length
-  )
-  central <- c(
-    as.raw(c(0x50, 0x4b, 0x01, 0x02)), # signature
-    le(20, 2), le(20, 2),              # version made by, version needed
-    le(0, 2), le(0, 2),                # flags, method
-    le(0, 2), le(0, 2),                # mod time, mod date
-    crc, le(n, 4), le(n, 4),
-    le(length(name_raw), 2), le(0, 2), le(0, 2), # name, extra, comment lengths
-    le(0, 2), le(0, 2), le(0, 4),      # disk, internal attrs, external attrs
-    le(0, 4)                           # offset of local header
-  )
-  central_size <- length(central) + length(name_raw)
-  central_offset <- length(local_header) + length(name_raw) + n
+  local_bytes <- unlist(local_blocks, use.names = FALSE)
+  central_bytes <- unlist(central_blocks, use.names = FALSE)
+
   eocd <- c(
     as.raw(c(0x50, 0x4b, 0x05, 0x06)), # signature
     le(0, 2), le(0, 2),                # this disk, disk with central dir
-    le(1, 2), le(1, 2),                # entries on this disk, entries total
-    le(central_size, 4), le(central_offset, 4),
+    le(length(entries) + entry_count_delta, 2),
+    le(length(entries) + entry_count_delta, 2),
+    le(length(central_bytes), 4),
+    le(length(local_bytes) + central_offset_delta, 4),
     le(0, 2)                           # comment length
   )
 
-  writeBin(c(local_header, name_raw, data_raw, central, name_raw, eocd), path)
+  writeBin(c(local_bytes, central_bytes, eocd), path)
   path
 }
+
+# The original single-entry helper, kept as the narrow case it always was.
+write_stored_zip <- function(path, name = "a.txt", contents = "hello") {
+  write_zip(path, list(zip_entry(name, contents)))
+}
+
+
+# --- Minimal OOXML workbooks -------------------------------------------------
+#
+# A workbook assembled from parts, each of which a test can replace or drop.
+# xlsx_sheets() drives the whole native stack -- miniz opens the archive,
+# locates and inflates xl/workbook.xml, Expat parses it, and xlsxio resolves
+# each <sheet> through the relationship part -- so malformed parts exercise
+# every layer without needing the reading API.
+
+CONTENT_TYPES_XML <- paste0(
+  '<?xml version="1.0" encoding="UTF-8"?>',
+  '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">',
+  '<Default Extension="xml" ContentType="application/xml"/>',
+  '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>',
+  '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>',
+  '</Types>'
+)
+
+ROOT_RELS_XML <- paste0(
+  '<?xml version="1.0" encoding="UTF-8"?>',
+  '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
+  '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>',
+  '</Relationships>'
+)
+
+workbook_xml <- function(sheets = "Sheet1", rid = NULL) {
+  if (is.null(rid)) rid <- paste0("rId", seq_along(sheets))
+  entries <- paste0(
+    '<sheet name="', sheets, '" sheetId="', seq_along(sheets),
+    '" r:id="', rid, '"/>',
+    collapse = ""
+  )
+  paste0(
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"',
+    ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">',
+    '<sheets>', entries, '</sheets></workbook>'
+  )
+}
+
+workbook_rels_xml <- function(n = 1L, targets = NULL) {
+  if (is.null(targets)) targets <- paste0("worksheets/sheet", seq_len(n), ".xml")
+  entries <- paste0(
+    '<Relationship Id="rId', seq_along(targets),
+    '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"',
+    ' Target="', targets, '"/>',
+    collapse = ""
+  )
+  paste0(
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
+    entries, '</Relationships>'
+  )
+}
+
+SHEET_XML <- paste0(
+  '<?xml version="1.0" encoding="UTF-8"?>',
+  '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
+  '<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>x</t></is></c></row></sheetData>',
+  '</worksheet>'
+)
+
+# The parts of a well-formed one-sheet workbook, as a named list so that a test
+# can override one, drop one, or add a duplicate before handing it to
+# write_workbook().
+workbook_parts <- function(sheets = "Sheet1") {
+  n <- length(sheets)
+  parts <- list(
+    "[Content_Types].xml"          = CONTENT_TYPES_XML,
+    "_rels/.rels"                  = ROOT_RELS_XML,
+    "xl/workbook.xml"              = workbook_xml(sheets),
+    "xl/_rels/workbook.xml.rels"   = workbook_rels_xml(n)
+  )
+  for (i in seq_len(n)) {
+    parts[[paste0("xl/worksheets/sheet", i, ".xml")]] <- SHEET_XML
+  }
+  parts
+}
+
+# Writes `parts` (a named list of part name -> contents) as an .xlsx.
+write_workbook <- function(path, parts = workbook_parts(), ...) {
+  entries <- lapply(names(parts), function(n) zip_entry(n, parts[[n]]))
+  write_zip(path, entries, ...)
+}
+
 
 # CRC-32 of `bytes`, as the four little-endian bytes a ZIP header wants.
 #

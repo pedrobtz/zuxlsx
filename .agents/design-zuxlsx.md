@@ -715,13 +715,54 @@ The reader should explicitly defend against:
 
 Potential limits should be configurable internally and documented.
 
+### Status, 2026-09-19: eight of thirteen are covered by tests
+
+`test-hostile.R` and `test-malformed.R` cover truncated archives, corrupt
+central directories, duplicate entries, extreme uncompressed sizes, malformed
+XML, missing workbook parts, pathological nesting and excessively large
+strings -- see 17.4b for what each one established.
+
+Not yet covered, because they need the reading API to be reachable at all:
+invalid relationships beyond a dangling `r:id`, invalid shared-string indices,
+extreme row and column indices, and integer overflow in cell references.
+Compression bombs are also untested: every hand-built archive here uses stored
+entries, so a real bomb needs a DEFLATE writer the test helper does not have.
+
+No configurable limits exist yet. Nothing in the reader caps a part size, a
+string length or a sheet count; the defenses that hold today come from Expat's
+and miniz's own behavior rather than from a policy this package sets.
+
 ---
 
 ## 17. Test strategy
 
 There is no single canonical XLSX equivalent of `JSONTestSuite`.
 
-Testing should combine several corpora.
+Testing should combine several corpora. Four sources, in the order they earn
+their keep:
+
+1. **SheetJS `test_files`** -- the best ready-made broad XLSX corpus, with
+   formula-heavy workbooks, hidden sheets, dates, and compatibility oddities.
+2. **Apache POI `test-data`** -- a regression corpus accumulated over years
+   from real interoperability bugs.
+3. **xlsxio's own fixtures** -- narrow, but they exercise precisely the reader
+   being adapted here, so a failure is unambiguous.
+4. **Generated mutation cases** -- the only source that can target the seam
+   this package actually owns, which is miniz to Expat to xlsxio.
+
+ECMA-376 / ISO/IEC 29500 defines what a conforming consumer should accept but
+states that it does not include a test suite, so there is no official
+conformance corpus to fall back on. That is what makes 17.4 load-bearing
+rather than supplementary.
+
+**Constraint on 1 and 2.** Both are large external archives under Apache-2.0,
+and neither can be vendored wholesale: a CRAN tarball is a few megabytes, and
+Apache-2.0 files in an MIT package carry notice obligations that
+`inst/COPYRIGHTS` would have to absorb per file. They therefore enter as
+curated subsets, chosen for cases nothing else covers, or stay out of the
+package entirely and run from CI against a fetched archive. That decision is
+open; the choice is between a few dozen committed files with full provenance,
+and a CI-only job that tests more but does not travel with the package.
 
 ### 17.1 xlsxio fixtures
 
@@ -761,40 +802,105 @@ has to open. The generated corpus below is still to be built.
 
 ### 17.4 Generated fixtures
 
-Maintain small deterministic workbooks generated specifically for `zuxlsx`.
-
-Suggested categories:
+Maintain small deterministic workbooks generated specifically for `zuxlsx`,
+in four categories rather than three: splitting `unusual/` into
+`unusual-valid/` (conforming files a too-strict reader would wrongly reject)
+and `hostile/` (files built to attack the reader) separates two goals that
+pull in opposite directions. The first guards against over-strictness, the
+second against under-strictness, and a single category blurs which failure a
+test is protecting against.
 
 ```text
 tests/xlsx/
 ├── valid/
 │   ├── minimal.xlsx
-│   ├── strings.xlsx
-│   ├── inline-strings.xlsx
-│   ├── numbers.xlsx
-│   ├── logical.xlsx
+│   ├── shared_strings.xlsx
+│   ├── inline_strings.xlsx
+│   ├── numeric_types.xlsx
+│   ├── booleans.xlsx
 │   ├── dates.xlsx
-│   ├── datetimes.xlsx
 │   ├── formulas.xlsx
-│   ├── sparse.xlsx
+│   ├── empty_cells.xlsx
+│   ├── sparse_rows.xlsx
+│   ├── multiple_sheets.xlsx
 │   ├── unicode.xlsx
-│   └── multiple-sheets.xlsx
+│   ├── utf8_edge_cases.xlsx
+│   └── large_shared_strings.xlsx
 │
-├── unusual/
-│   ├── no-shared-strings.xlsx
-│   ├── reordered-zip-members.xlsx
-│   ├── large-shared-strings.xlsx
-│   └── empty-sheet.xlsx
+├── unusual-valid/
+│   ├── strict_ooxml.xlsx
+│   ├── no_shared_strings.xlsx
+│   ├── reordered_zip_entries.xlsx
+│   ├── unusual_relationship_paths.xlsx
+│   ├── zip64.xlsx
+│   └── very_large_sheet.xlsx
 │
-└── invalid/
-    ├── truncated-zip.xlsx
-    ├── missing-workbook.xlsx
-    ├── missing-sheet.xml.xlsx
-    ├── malformed-workbook.xml.xlsx
-    ├── malformed-sheet.xml.xlsx
-    ├── bad-shared-string-index.xlsx
-    └── duplicate-entry.xlsx
+├── invalid/
+│   ├── truncated_zip.xlsx
+│   ├── corrupt_central_directory.xlsx
+│   ├── missing_workbook.xml.xlsx
+│   ├── missing_relationship.xlsx
+│   ├── malformed_sheet_xml.xlsx
+│   ├── malformed_shared_strings.xlsx
+│   ├── bad_cell_reference.xlsx
+│   └── invalid_xml_encoding.xlsx
+│
+└── hostile/
+    ├── zip_bomb.xlsx
+    ├── huge_shared_string.xlsx
+    ├── extreme_row_number.xlsx
+    ├── extreme_column_number.xlsx
+    ├── duplicate_entries.xlsx
+    └── recursive_relationships.xlsx
 ```
+
+### 17.4b Status, 2026-09-19: built in-test, not committed
+
+The adversarial half of the tree above is implemented, as
+`tests/testthat/test-malformed.R`, `test-hostile.R` and `test-unusual.R`,
+built byte by byte by `helper-zip.R` rather than committed as `.xlsx` files.
+
+This is a deliberate split from the rule that fixtures are committed. That
+rule exists so a *corpus* file has provenance -- it came from somewhere, and
+its bytes must not drift. A synthetic adversarial input has the opposite
+property: its value is entirely in how it is malformed, which a committed
+binary hides. `write_zip()` and `write_workbook()` make the malformation the
+literal subject of each test -- `central_offset_delta = 64L`, a
+`declared_size` the member cannot back, the same part name twice -- and no ZIP
+library will produce those on request, so the bytes have to be assembled by
+hand regardless. Committed fixtures remain the rule for 17.1--17.3, which are
+real files from real projects.
+
+This needed no reading API. `xlsx_sheets()` already drives miniz, Expat and
+xlsxio end to end, so every layer is reachable today.
+
+What this established about the current reader:
+
+| Behavior | Status |
+| --- | --- |
+| Internal entity expansion (billion laughs) | Not performed; reference survives verbatim |
+| External entities (XXE) | Not resolved; no file is read off disk |
+| Pathological nesting | Refused |
+| Declared size larger than the member | Refused on header arithmetic, no allocation attempt |
+| Duplicate archive members | First in the central directory wins, deterministically |
+| Corrupt central directory / overcounted entries | `zuxlsx_zip_error` |
+| Malformed or non-UTF-8 XML | Refused |
+| **Corrupt CRC-32** | **Not detected** -- see below |
+
+The first two hold because of how Expat behaves by default, not because
+zuxlsx configures it. xlsxio calls `XML_ParserCreate` itself, so the defense
+is inherited and could be lost silently in an xlsxio bump. That is why they
+are pinned by assertion rather than assumed.
+
+**Known gap: CRC-32 is never verified.** miniz's extract-iter path does not
+check it, so a member whose bytes were corrupted in transit parses as if
+intact. `test-hostile.R` characterizes this with a test that is written to
+fail once validation is added. Section 16 lists corrupt archives among the
+things to defend against; nothing does so yet.
+
+Still to build: the `valid/` category, which needs the reading API before its
+contents can be asserted on, and `strict_ooxml.xlsx` and `zip64.xlsx`, which
+need a real producer rather than a hand-assembled archive.
 
 ---
 
