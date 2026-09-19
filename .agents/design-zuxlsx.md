@@ -995,9 +995,36 @@ intact. `test-hostile.R` characterizes this with a test that is written to
 fail once validation is added. Section 16 lists corrupt archives among the
 things to defend against; nothing does so yet.
 
-Still to build: the `valid/` category, which needs the reading API before its
-contents can be asserted on, and `strict_ooxml.xlsx` and `zip64.xlsx`, which
-need a real producer rather than a hand-assembled archive.
+### 17.4c Status, 2026-09-19: `valid/` covered, and it found a bug
+
+`test-valid.R` covers the `valid/` category -- numeric forms parsed to the
+double R would parse, formula cells reporting their cached value, sparse rows
+and columns, a 2000-entry shared string table resolved at both ends, a 33000
+character string, astral-plane and right-to-left text, XML-escaped characters,
+and worksheets read independently of one another.
+
+Separately, `test-corpus.R` asserts the *content* of the seven committed
+workbooks for the first time. Until `read_xlsx()` existed they could only be
+checked for opening, which left the real-producer corpus -- the part that
+actually tests interoperability -- almost unexercised.
+
+**Doing so found a row-alignment bug.** A row omitted from the worksheet XML
+was being dropped rather than kept as a blank row, so values on either side of
+a gap moved next to each other and every row index below it was wrong. The
+readxl fixture `blanks.xlsx` contains a worksheet named `same_row_middle`
+which exists to catch exactly this, and it had been passing only because
+nothing asserted its contents.
+
+The cause was trusting xlsxio's row padding, which inserts a single row for an
+omitted range however wide it is: a sheet with data on rows 1, 2 and 5 arrives
+as rows 1, 2, 4, 5. `read_xlsx()` now spans the range of row numbers the cells
+themselves carry, which is independent of that padding. The quirk is pinned by
+a characterisation test rather than patched in xlsxio, since nothing above the
+cell layer needs the padding to be right.
+
+Still to build: `strict_ooxml.xlsx` and `zip64.xlsx`, which need a real
+producer rather than a hand-assembled archive, and the external corpora of
+17.1 to 17.3, which remain an open decision.
 
 ---
 
@@ -1139,9 +1166,11 @@ shared strings, 5 stream worksheet XML, 6 emit rows and cells, 7 build an R
 `data.frame`, 8 basic scalar cell types, 9 dates and datetimes including both
 epochs, 10 structured errors.
 
-Partial: 11 the corpus -- the adversarial categories are built, `valid/` is
-now assertable but not yet written as a generated tree, and the external
-corpora of 17.1 to 17.3 are still an open decision.
+Partial: 11 the corpus -- `valid/`, `unusual-valid/`, `invalid/` and
+`hostile/` are all covered, and the committed workbooks are asserted on
+content rather than only on opening. Outstanding are `strict_ooxml.xlsx` and
+`zip64.xlsx`, which need a real producer, and the external corpora of 17.1 to
+17.3, which remain an open decision.
 
 Known limitations rather than missing items: `read_xlsx()` has no `range`
 argument, column building is a post-pass rather than streaming (section 14),

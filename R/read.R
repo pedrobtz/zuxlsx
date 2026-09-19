@@ -71,12 +71,19 @@ column_names <- function(cells, header_row, n_col, col_names) {
 # column that is blank in the middle keeps its alignment with the others. That
 # is why `all_cells` is needed: the full row range comes from the sheet, not
 # from the cells of this one column.
+#
+# The range is the span of row numbers, not the rows that happen to carry a
+# cell. A worksheet may omit an empty row from its XML entirely, and xlsxio
+# pads such a gap with a single row however wide it is -- a sheet with data on
+# rows 1, 2 and 5 arrives as rows 1, 2, 4, 5. Since every cell carries its own
+# row number, spanning the range reconstructs the gap correctly and makes the
+# result independent of that padding.
 build_column <- function(col_cells, all_cells, date1904) {
-  rows <- sort(unique(all_cells$row))
-  n <- length(rows)
-  if (n == 0L) {
+  if (nrow(all_cells) == 0L) {
     return(logical(0))
   }
+  rows <- seq.int(min(all_cells$row), max(all_cells$row))
+  n <- length(rows)
   at <- match(col_cells$row, rows)
 
   present <- col_cells[as.character(col_cells$type) != "blank", , drop = FALSE]
