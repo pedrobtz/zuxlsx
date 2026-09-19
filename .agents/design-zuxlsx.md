@@ -865,22 +865,55 @@ states that it does not include a test suite, so there is no official
 conformance corpus to fall back on. That is what makes 17.4 load-bearing
 rather than supplementary.
 
-**Constraint on 1 and 2.** Both are large external archives under Apache-2.0,
-and neither can be vendored wholesale: a CRAN tarball is a few megabytes, and
-Apache-2.0 files in an MIT package carry notice obligations that
-`inst/COPYRIGHTS` would have to absorb per file. They therefore enter as
-curated subsets, chosen for cases nothing else covers, or stay out of the
-package entirely and run from CI against a fetched archive. That decision is
-open; the choice is between a few dozen committed files with full provenance,
-and a CI-only job that tests more but does not travel with the package.
+### Settled, 2026-09-19: three tiers, not one suite
+
+The question was posed as ship-with-the-package versus CI-only, and both
+answers were wrong. Tests do not all have to live in the same place, and the
+expensive ones do not belong in the package at all.
+
+**Tier 1, `tests/testthat/` — ships.** Fast, small, deterministic. Its job is
+regression protection on every platform CRAN checks, so its binding
+constraints are tarball size and check time, not coverage. It stays cheap
+deliberately.
+
+**Tier 2, `tools/corpus/` — committed, not shipped.** The external corpus and
+its runner, excluded by `.Rbuildignore`, run in CI on every pull request.
+Because it does not ship, the size limit that forced talk of "a few dozen
+curated files" disappears: the whole of POI's spreadsheet corpus is in scope,
+and curation becomes a question of coverage rather than bytes.
+
+**Tier 3 — run once, record the result.** Soundness work that does not need
+repeating on every change: fuzzing (section 18), sanitiser runs, a full
+differential against another reader. The script stays so it can be re-run when
+something underneath it changes; the finding goes in this document.
+
+The corpus files are fetched rather than committed. 20 MB of another project's
+fixtures does not belong in this repository's history, and `checksums.sha256`
+pins every byte, so a moved or rewritten upstream fails the fetch instead of
+silently changing what is tested. The network dependency is acceptable
+precisely because it is tier 2: tier 1 never touches the network, so the suite
+that must not flake cannot.
+
+Licensing stays simple under this split. Nothing from POI is redistributed,
+so the Apache-2.0 notice obligations that a vendored subset would have created
+do not arise.
 
 ### 17.1 xlsxio fixtures
 
 Use xlsxio's own fixtures and tests first because they directly exercise the upstream reader logic being adapted.
 
-### 17.2 SheetJS test files
+### 17.2 SheetJS test files -- unavailable
 
-Use a curated subset of the SheetJS workbook corpus for broad interoperability and unusual XLSX structures.
+The obvious first choice, and it cannot be used. GitHub has disabled
+`SheetJS/test_files` under its Terms of Service, flagged `private_information`;
+the API returns 403 and the tarball 404s. Even if a mirror were found,
+vendoring files that were removed for containing personal data into a package
+is not a reasonable thing to do. Recorded so the question is not reopened
+blindly.
+
+The categories it would have covered -- shared and inline strings, formulas,
+sparse sheets, unusual styles, Unicode, dates, malformed files -- are covered
+by POI below and by the generated corpus of 17.4.
 
 Relevant cases include:
 
@@ -899,7 +932,34 @@ Relevant cases include:
 
 Apache POI has a long-lived collection of OOXML regression files and compatibility fixtures.
 
-A curated subset can provide valuable cases that originated from real-world workbook bugs.
+### 17.3a Status, 2026-09-19: wired up, and it found two things
+
+`tools/corpus/` fetches all 352 `.xlsx` files from POI's
+`test-data/spreadsheet` at a pinned commit and reads every worksheet of every
+one. 334 read; 18 error, and `expected.tsv` pins each outcome so that a file
+which starts failing, or starts passing, is reported either way.
+
+Most of the 18 are correct refusals: twelve clusterfuzz-minimised or crash
+testcases, and a `.docx` renamed `.xlsx`. Two more were checked rather than
+assumed -- `deep-data.xlsx` has no end-of-central-directory at all, which
+`unzip` also refuses, so `zuxlsx_zip_error` is right.
+
+Two findings remain, neither yet fixed:
+
+**`49609.xlsx` is a real interoperability gap.** It is a valid archive holding
+valid OOXML, but its member names use backslashes and lowercase --
+`[content_types].xml`, `xl\styles.xml`, `_rels\.rels`. xlsxio opens the
+literal `[Content_Types].xml` and locates members with
+`MZ_ZIP_FLAG_CASE_SENSITIVE`, so the part is never found and the workbook
+reports as `zuxlsx_ooxml_error`. Excel reads this file. Fixing it means
+case-insensitive member lookup and treating a backslash as a separator, which
+is a fifth vendored patch.
+
+**Encrypted workbooks deserve their own error.** Three files are
+password-protected, which makes them OLE2 containers rather than ZIPs, so they
+surface as `zuxlsx_zip_error` -- true but unhelpful, since it reads as
+corruption. A `zuxlsx_encrypted_error`, recognised from the CFB signature,
+would tell the caller what is actually wrong.
 
 ### 17.3b Status, 2026-09-18
 

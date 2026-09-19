@@ -1,0 +1,91 @@
+#!/bin/sh
+# Fetch the external interoperability corpus into tools/corpus/files/.
+#
+#   tools/corpus/fetch [--check]
+#
+# Network is required. This is a maintainer and CI script; it is never run
+# during R CMD check, and tools/corpus is excluded from the built package by
+# .Rbuildignore. The files are not committed -- 20 MB of other projects'
+# fixtures does not belong in this repository's history -- so what is committed
+# is checksums.sha256, which pins every byte of what a fetch may produce.
+#
+# --check re-verifies an existing tools/corpus/files/ without downloading.
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+cd "$ROOT"
+. tools/vendor/common.sh
+
+SOURCES=tools/corpus/sources.tsv
+SUMS=tools/corpus/checksums.sha256
+DEST=tools/corpus/files
+
+check_only=0
+[ "${1:-}" = "--check" ] && check_only=1
+
+if [ "$check_only" -eq 0 ]; then
+    mkdir -p "$DEST"
+    # One source per row; every file listed in checksums.sha256 under its name.
+    awk 'NR > 1 { print $1 "\t" $2 "\t" $3 "\t" $4 }' FS='\t' "$SOURCES" |
+    while IFS="$(printf '\t')" read -r name repo commit path; do
+        raw=$(echo "$repo" | sed 's|github.com|raw.githubusercontent.com|')
+        mkdir -p "$DEST/$name"
+        printf '==> %s at %s\n' "$name" "$commit"
+
+        # The file list is the committed checksum file, so a fetch can never
+        # pull something the manifest does not already account for. Keeping the
+        # sum alongside the name lets the loop below tell an already-correct
+        # file from a stale one.
+        sed -n "s|^\([0-9a-f]*\)  *$name/\(.*\)$|\1\t\2|p" "$SUMS" \
+            > "$DEST/.$name.list"
+        total=$(wc -l < "$DEST/.$name.list" | tr -d ' ')
+        printf '    %s files\n' "$total"
+
+        fetched=0
+        kept=0
+        while IFS="$(printf '\t')" read -r want file; do
+            # Skip only a file that is already the right one. Testing mere
+            # existence would be wrong wherever files/ is restored from a
+            # cache: an upstream file rewritten under the same name would be
+            # kept, and the verification below would then fail with no way for
+            # a re-run to recover.
+            if [ -f "$DEST/$name/$file" ] \
+                && [ "$(sha256_of "$DEST/$name/$file")" = "$want" ]; then
+                kept=$((kept + 1))
+                continue
+            fi
+            # Percent-encode the characters that actually occur in these names.
+            enc=$(printf '%s' "$file" | sed 's/ /%20/g; s/#/%23/g; s/+/%2B/g')
+            curl -sSL --fail --max-time 120 \
+                -o "$DEST/$name/$file" \
+                "$raw/$commit/$path/$enc" \
+                && fetched=$((fetched + 1)) \
+                || { rm -f "$DEST/$name/$file"; printf '    MISSING %s\n' "$file"; }
+        done < "$DEST/.$name.list"
+        rm -f "$DEST/.$name.list"
+        printf '    %s downloaded, %s already present\n' "$fetched" "$kept"
+    done
+fi
+
+printf '==> verifying against %s\n' "$SUMS"
+fail=0
+missing=0
+while read -r want file; do
+    if [ ! -f "$DEST/$file" ]; then
+        missing=$((missing + 1))
+        continue
+    fi
+    got=$(sha256_of "$DEST/$file")
+    if [ "$got" != "$want" ]; then
+        printf 'FAIL %s\n  expected %s\n  got      %s\n' "$file" "$want" "$got" >&2
+        fail=$((fail + 1))
+    fi
+done < "$SUMS"
+
+total=$(wc -l < "$SUMS" | tr -d ' ')
+if [ "$fail" -ne 0 ] || [ "$missing" -ne 0 ]; then
+    printf 'FAIL %d of %d files: %d mismatched, %d missing\n' \
+        $((fail + missing)) "$total" "$fail" "$missing" >&2
+    exit 1
+fi
+printf 'ok  %d files match %s\n' "$total" "$SUMS"

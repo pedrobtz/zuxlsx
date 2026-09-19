@@ -1,0 +1,55 @@
+#!/bin/sh
+# Read the external corpus and report any file whose outcome changed.
+#
+#   tools/corpus/run              compare against tools/corpus/expected.tsv
+#   tools/corpus/run --record     rewrite that baseline
+#
+# Needs tools/corpus/fetch to have run first. Never runs during R CMD check:
+# tools/corpus is excluded from the built package, because 352 workbooks from
+# another project are not something to ship to CRAN or to make every reverse
+# dependency check pay for.
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+cd "$ROOT"
+
+FILES=tools/corpus/files
+EXPECTED=tools/corpus/expected.tsv
+
+if [ ! -d "$FILES" ]; then
+    echo "tools/corpus/files is missing; run tools/corpus/fetch first" >&2
+    exit 1
+fi
+
+tmp=$(mktemp)
+trap 'rm -f "$tmp"' EXIT
+Rscript tools/corpus/sweep.R "$FILES" > "$tmp"
+
+if [ "${1:-}" = "--record" ]; then
+    mv "$tmp" "$EXPECTED"
+    trap - EXIT
+    printf 'wrote %s (%d files)\n' "$EXPECTED" "$(($(wc -l < "$EXPECTED") - 1))"
+    exit 0
+fi
+
+if [ ! -f "$EXPECTED" ]; then
+    echo "$EXPECTED is missing; run tools/corpus/run --record first" >&2
+    exit 1
+fi
+
+# Compare name and outcome only. The detail column carries sheet counts, which
+# are informative in the baseline but too noisy to gate on.
+cut -f1,2 "$EXPECTED" | LC_ALL=C sort > "$tmp.want"
+cut -f1,2 "$tmp" | LC_ALL=C sort > "$tmp.got"
+if diff -u "$tmp.want" "$tmp.got" > "$tmp.diff"; then
+    ok=$(awk -F'\t' 'NR > 1 && $2 == "ok"' "$tmp" | wc -l | tr -d ' ')
+    all=$(($(wc -l < "$tmp") - 1))
+    printf 'ok  %d of %d files read; outcomes match %s\n' "$ok" "$all" "$EXPECTED"
+    rm -f "$tmp.want" "$tmp.got" "$tmp.diff"
+    exit 0
+fi
+
+echo "corpus outcomes changed:" >&2
+sed -n '4,$p' "$tmp.diff" >&2
+rm -f "$tmp.want" "$tmp.got" "$tmp.diff"
+exit 1
