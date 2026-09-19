@@ -275,6 +275,33 @@ DLL_EXPORT_XLSXIO int xlsxioread_sheet_next_row (xlsxioreadersheet sheethandle);
  */
 DLL_EXPORT_XLSXIO XLSXIOCHAR* xlsxioread_sheet_next_cell (xlsxioreadersheet sheethandle);
 
+/*! \brief zuxlsx: OOXML cell types reported by xlsxioread_sheet_last_cell_type()
+ * \name   XLSXIOREAD_CELLTYPE_*
+ * \{
+ */
+#define XLSXIOREAD_CELLTYPE_NONE        0
+#define XLSXIOREAD_CELLTYPE_NUMBER      1
+#define XLSXIOREAD_CELLTYPE_STRING      2
+#define XLSXIOREAD_CELLTYPE_BOOLEAN     3
+#define XLSXIOREAD_CELLTYPE_ERROR       4
+#define XLSXIOREAD_CELLTYPE_DATE        5
+/*! @} */
+
+/*! \brief zuxlsx: OOXML type of the cell last returned by xlsxioread_sheet_next_cell()
+ * \param  sheethandle   read handle for worksheet object
+ * \return one of XLSXIOREAD_CELLTYPE_*
+ */
+DLL_EXPORT_XLSXIO int xlsxioread_sheet_last_cell_type (xlsxioreadersheet sheethandle);
+
+/*! \brief zuxlsx: whether that cell carries a date or time number format
+ * \param  sheethandle   read handle for worksheet object
+ * \return nonzero if the cell is a date or time
+ */
+DLL_EXPORT_XLSXIO int xlsxioread_sheet_last_cell_is_date (xlsxioreadersheet sheethandle);
+
+
+
+
 /*! \brief get next cell from worksheet as a string
  * \param  sheethandle   read handle for worksheet object
  * \param  pvalue        pointer where string will be stored if data is available (caller must free the result using xlsxioread_free())

@@ -23,7 +23,6 @@ Depends:
     R (>= 4.1)
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 8.0.0
 LinkingTo: 
     zukomp,
     zuxml
@@ -34,3 +33,4 @@ Config/testthat/edition: 3
 Remotes: 
     pedrobtz/zukomp,
     pedrobtz/zuxml
+Config/roxygen2/version: 8.1.0

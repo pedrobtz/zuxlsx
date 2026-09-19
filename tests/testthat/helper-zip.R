@@ -215,3 +215,60 @@ crc32_le <- function(bytes) {
     numeric(1)
   ))
 }
+
+
+# --- Workbooks with number formats -------------------------------------------
+#
+# A date in OOXML is a number whose style carries a date format, so testing
+# date handling means building styles.xml as well as the worksheet. `cells` is
+# the literal <c> elements, so a test can write exactly the cell it means.
+
+# `formats` is numFmtId per cellXfs entry: style index i selects formats[i+1].
+# 0 is General, 14 is the built-in short date, and anything from 164 up needs
+# a formatCode in <numFmts>, supplied through `custom`.
+styles_xml <- function(formats = 0L, custom = NULL) {
+  numfmts <- ""
+  if (length(custom)) {
+    numfmts <- paste0(
+      '<numFmts count="', length(custom), '">',
+      paste0(
+        '<numFmt numFmtId="', names(custom), '" formatCode="', custom, '"/>',
+        collapse = ""
+      ),
+      "</numFmts>"
+    )
+  }
+  paste0(
+    '<?xml version="1.0"?>',
+    '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
+    numfmts,
+    '<cellXfs count="', length(formats), '">',
+    paste0('<xf numFmtId="', formats, '"/>', collapse = ""),
+    "</cellXfs></styleSheet>"
+  )
+}
+
+# A one-sheet workbook whose worksheet holds `cells` (raw <c> elements) and
+# whose styles.xml is built from `formats` and `custom`.
+styled_workbook_parts <- function(cells, formats = 0L, custom = NULL) {
+  parts <- workbook_parts()
+  parts[["xl/_rels/workbook.xml.rels"]] <- paste0(
+    '<?xml version="1.0"?>',
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
+    '<Relationship Id="rId1"',
+    ' Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"',
+    ' Target="worksheets/sheet1.xml"/>',
+    '<Relationship Id="rId2"',
+    ' Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles"',
+    ' Target="styles.xml"/>',
+    "</Relationships>"
+  )
+  parts[["xl/styles.xml"]] <- styles_xml(formats, custom)
+  parts[["xl/worksheets/sheet1.xml"]] <- paste0(
+    '<?xml version="1.0"?>',
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
+    "<sheetData><row r=\"1\">", paste0(cells, collapse = ""), "</row></sheetData>",
+    "</worksheet>"
+  )
+  parts
+}
