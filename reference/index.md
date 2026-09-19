@@ -6,6 +6,8 @@
   : Read a worksheet into a data frame
 - [`xlsx_cells()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_cells.md)
   : Read the cells of a worksheet
+- [`xlsx_read_cells()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_read_cells.md)
+  : Read a worksheet in chunks
 - [`xlsx_rows()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_rows.md)
   : Read a worksheet as rows
 - [`xlsx_sheets()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_sheets.md)
