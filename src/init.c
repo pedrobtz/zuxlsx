@@ -4,10 +4,12 @@
 #include <R_ext/Rdynload.h>
 
 SEXP C_xlsx_sheets(SEXP path);
+SEXP C_xlsx_cells(SEXP path, SEXP sheet);
 SEXP C_zuxlsx_native(void);
 
 static const R_CallMethodDef call_entries[] = {
   {"C_xlsx_sheets",   (DL_FUNC) &C_xlsx_sheets,   1},
+  {"C_xlsx_cells",    (DL_FUNC) &C_xlsx_cells,    2},
   {"C_zuxlsx_native", (DL_FUNC) &C_zuxlsx_native, 0},
   {NULL, NULL, 0}
 };

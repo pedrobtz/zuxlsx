@@ -16,6 +16,8 @@ not a single string, or a file that does not exist.}
 It is missing, unreadable, truncated, or not a ZIP at all.}
 \item{\code{zuxlsx_ooxml_error}}{The ZIP archive opened but is not a workbook.
 A valid workbook declares at least one worksheet.}
+\item{\code{zuxlsx_sheet_error}}{The workbook opened, but the requested
+worksheet is not in it.}
 \item{\code{zuxlsx_memory_error}}{An allocation failed while reading.}
 }
 

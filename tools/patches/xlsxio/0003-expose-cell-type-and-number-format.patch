@@ -1,0 +1,428 @@
+Report a cell's OOXML type and whether its number format is a date.
+
+xlsxio reports every cell as text. Two things it knows, or could know, never
+reach the caller, and without them the typed cell model in design section 13
+cannot be built at all.
+
+First, the t= attribute. data_sheet_expat_callback_find_cell_start read it
+only to test for "s", and everything else fell through to value_string. A
+boolean (t="b"), an error (t="e"), a formula result (t="str") and an ISO date
+(t="d") were therefore indistinguishable from a number downstream. This reads
+the whole vocabulary and keeps inline strings distinct as well.
+
+Second, number formats. OOXML stores a date as an ordinary number; the format
+attached through the cell's s= index is the only thing that says it is a date.
+Upstream locates xl/styles.xml in main_sheet_get_rels_callback_data, and then
+frees the name without ever opening the part -- stylesfile is assigned in one
+place and freed in another, and read nowhere. So the information was not
+merely unexposed, it was never parsed. This adds a small parser for the two
+elements that matter, cellXfs and numFmts, and a lookup from a cell's style
+index to "is this a date or a time".
+
+Deciding date-ness from a format code needs care: literal text in quotes,
+backslash escapes and bracketed sections must not be scanned, or the custom
+format "day" 0.00 reads as a date because of the d, a and y in a string
+literal. Bracketed sections are scanned only for elapsed-time codes such as
+[h], which are times; [Red] and condition brackets are skipped.
+
+The public API is extended rather than changed. No existing signature moves;
+two accessors report the type and date-ness of the cell that
+xlsxioread_sheet_next_cell() last returned. The callback interface hands the
+caller no handle to ask, so the accessors are on the sheet handle and serve
+the iterator path, which is the one zuxlsx drives. Because the type and style
+are reset before the value reaches the caller, both are preserved in
+last_cell_type and last_cell_style at the point of reset.
+
+The number format table is owned by data_sheet_callback_data and destroyed in
+its cleanup, alongside the shared string list, so both read paths free it
+without a new call site.
+
+Note the styles parse passes NULL for expat_process_zip_file()'s parser
+out-parameter. That function frees the parser itself unless it returns early
+on XML_STATUS_SUSPENDED, which only the worksheet walk asks for; taking the
+pointer back and freeing it again is a double free.
+
+Origin: written for zuxlsx. Not upstream.
+Applies to xlsxio 0.2.36 with 0001 and 0002 already applied.
+--- a/include/xlsxio_read.h
++++ b/include/xlsxio_read.h
+@@ -275,6 +275,33 @@
+  */
+ DLL_EXPORT_XLSXIO XLSXIOCHAR* xlsxioread_sheet_next_cell (xlsxioreadersheet sheethandle);
+ 
++/*! \brief zuxlsx: OOXML cell types reported by xlsxioread_sheet_last_cell_type()
++ * \name   XLSXIOREAD_CELLTYPE_*
++ * \{
++ */
++#define XLSXIOREAD_CELLTYPE_NONE        0
++#define XLSXIOREAD_CELLTYPE_NUMBER      1
++#define XLSXIOREAD_CELLTYPE_STRING      2
++#define XLSXIOREAD_CELLTYPE_BOOLEAN     3
++#define XLSXIOREAD_CELLTYPE_ERROR       4
++#define XLSXIOREAD_CELLTYPE_DATE        5
++/*! @} */
++
++/*! \brief zuxlsx: OOXML type of the cell last returned by xlsxioread_sheet_next_cell()
++ * \param  sheethandle   read handle for worksheet object
++ * \return one of XLSXIOREAD_CELLTYPE_*
++ */
++DLL_EXPORT_XLSXIO int xlsxioread_sheet_last_cell_type (xlsxioreadersheet sheethandle);
++
++/*! \brief zuxlsx: whether that cell carries a date or time number format
++ * \param  sheethandle   read handle for worksheet object
++ * \return nonzero if the cell is a date or time
++ */
++DLL_EXPORT_XLSXIO int xlsxioread_sheet_last_cell_is_date (xlsxioreadersheet sheethandle);
++
++
++
++
+ /*! \brief get next cell from worksheet as a string
+  * \param  sheethandle   read handle for worksheet object
+  * \param  pvalue        pointer where string will be stored if data is available (caller must free the result using xlsxioread_free())
+--- a/lib/xlsxio_read.c
++++ b/lib/xlsxio_read.c
+@@ -988,14 +988,171 @@
+   none,
+   value_string,
+   inline_string,
+-  shared_string
++  shared_string,
++  boolean_string,
++  error_string,
++  formula_string,
++  date_string
+ } cell_string_type_enum;
++
++////////////////////////////////////////////////////////////////////////
++
++/* zuxlsx: xl/styles.xml, reduced to the one question a reader must ask of it.
++   OOXML stores a date as an ordinary number; the number format attached to
++   the cell is the only thing that says it is a date. Upstream locates the
++   styles part and then frees the name without opening it, so that
++   information was simply absent.
++
++   Two tables are needed. cellXfs maps a cell's s= index to a numFmtId, and
++   numFmts declares the format codes for ids at or above 164; below that the
++   ids are built in and carry no code. */
++struct numfmt_table {
++  int* xf;                 //numFmtId per cellXfs entry, in document order
++  size_t xf_count;
++  size_t xf_size;
++  int* custom_id;          //ids declared in <numFmts>
++  int* custom_isdate;
++  size_t custom_count;
++  size_t custom_size;
++  int in_cellxfs;          //<xf> appears in cellStyleXfs too; only cellXfs counts
++  int oom;
++};
++
++/* Does a format code describe a date or a time?
++   Literal text in quotes, backslash escapes and bracketed sections such as
++   [Red] must not be scanned: "day" is text, [h] is elapsed hours. */
++static int numfmt_code_is_date (const XML_Char* code)
++{
++  const XML_Char* p = code;
++  if (!p)
++    return 0;
++  while (*p) {
++    if (*p == '"') {
++      for (p++; *p && *p != '"'; p++) ;
++      if (*p) p++;
++    } else if (*p == '\\') {
++      p++;
++      if (*p) p++;
++    } else if (*p == '[') {
++      const XML_Char* q = p + 1;
++      int elapsed = 0;
++      for (; *q && *q != ']'; q++)
++        if (*q == 'h' || *q == 'H' || *q == 'm' || *q == 'M' || *q == 's' || *q == 'S')
++          elapsed = 1;
++      if (elapsed)
++        return 1;
++      p = (*q ? q + 1 : q);
++    } else {
++      switch (*p) {
++        case 'y': case 'Y': case 'd': case 'D':
++        case 'h': case 'H': case 's': case 'S':
++          return 1;
++        case 'm': case 'M':
++          //month or minute; either way the cell is a date or a time
++          return 1;
++        default:
++          break;
++      }
++      p++;
++    }
++  }
++  return 0;
++}
++
++/* Built-in ids with date or time semantics, per ECMA-376 part 1, 18.8.30. */
++static int numfmt_builtin_is_date (int id)
++{
++  return (id >= 14 && id <= 22) || (id >= 45 && id <= 47);
++}
++
++static struct numfmt_table* numfmt_table_create (void)
++{
++  struct numfmt_table* t = (struct numfmt_table*)malloc(sizeof(struct numfmt_table));
++  if (!t)
++    return NULL;
++  t->xf = NULL; t->xf_count = 0; t->xf_size = 0;
++  t->custom_id = NULL; t->custom_isdate = NULL;
++  t->custom_count = 0; t->custom_size = 0;
++  t->in_cellxfs = 0; t->oom = 0;
++  return t;
++}
++
++static void numfmt_table_destroy (struct numfmt_table* t)
++{
++  if (!t)
++    return;
++  free(t->xf);
++  free(t->custom_id);
++  free(t->custom_isdate);
++  free(t);
++}
++
++/* Is the cell carrying style index `style` formatted as a date? */
++int numfmt_table_style_is_date (const struct numfmt_table* t, long style)
++{
++  int id;
++  size_t i;
++  if (!t || style < 0 || (size_t)style >= t->xf_count)
++    return 0;
++  id = t->xf[style];
++  for (i = 0; i < t->custom_count; i++)
++    if (t->custom_id[i] == id)
++      return t->custom_isdate[i];
++  return numfmt_builtin_is_date(id);
++}
++
++static void numfmt_expat_callback_element_start (void* callbackdata, const XML_Char* name, const XML_Char** atts)
++{
++  struct numfmt_table* t = (struct numfmt_table*)callbackdata;
++  if (XML_Char_icmp_ins(name, X("cellXfs")) == 0) {
++    t->in_cellxfs = 1;
++  } else if (t->in_cellxfs && XML_Char_icmp_ins(name, X("xf")) == 0) {
++    const XML_Char* a = get_expat_attr_by_name(atts, X("numFmtId"));
++    XML_Char* endp = NULL;
++    if (t->xf_count == t->xf_size) {
++      size_t size = (t->xf_size < 16 ? 16 : t->xf_size * 2);
++      int* grown;
++      if (size > SIZE_MAX / sizeof(int)) { t->oom = 1; return; }
++      if ((grown = (int*)realloc(t->xf, size * sizeof(int))) == NULL) { t->oom = 1; return; }
++      t->xf = grown;
++      t->xf_size = size;
++    }
++    t->xf[t->xf_count++] = (a ? (int)XML_Char_strtol(a, &endp, 10) : 0);
++  } else if (XML_Char_icmp_ins(name, X("numFmt")) == 0) {
++    const XML_Char* a = get_expat_attr_by_name(atts, X("numFmtId"));
++    const XML_Char* c = get_expat_attr_by_name(atts, X("formatCode"));
++    XML_Char* endp = NULL;
++    if (t->custom_count == t->custom_size) {
++      size_t size = (t->custom_size < 8 ? 8 : t->custom_size * 2);
++      int* gi;
++      int* gd;
++      if (size > SIZE_MAX / sizeof(int)) { t->oom = 1; return; }
++      if ((gi = (int*)realloc(t->custom_id, size * sizeof(int))) == NULL) { t->oom = 1; return; }
++      t->custom_id = gi;
++      if ((gd = (int*)realloc(t->custom_isdate, size * sizeof(int))) == NULL) { t->oom = 1; return; }
++      t->custom_isdate = gd;
++      t->custom_size = size;
++    }
++    t->custom_id[t->custom_count] = (a ? (int)XML_Char_strtol(a, &endp, 10) : 0);
++    t->custom_isdate[t->custom_count] = numfmt_code_is_date(c);
++    t->custom_count++;
++  }
++}
+ 
++static void numfmt_expat_callback_element_end (void* callbackdata, const XML_Char* name)
++{
++  struct numfmt_table* t = (struct numfmt_table*)callbackdata;
++  if (XML_Char_icmp_ins(name, X("cellXfs")) == 0)
++    t->in_cellxfs = 0;
++}
++
++
+ #define XLSXIOREAD_NO_CALLBACK          0x80
+ 
+ struct data_sheet_callback_data {
+   XML_Parser xmlparser;
+   struct sharedstringlist* sharedstrings;
++  struct numfmt_table* numfmts;         //zuxlsx: destroyed by _cleanup(), as sharedstrings is
+   size_t rownr;
+   size_t colnr;
+   size_t cols;
+@@ -1003,6 +1160,9 @@
+   XML_Char* celldata;
+   size_t celldatalen;
+   cell_string_type_enum cell_string_type;
++  long cell_style;                      //s= attribute, index into cellXfs
++  cell_string_type_enum last_cell_type; //zuxlsx: type of the cell being delivered
++  long last_cell_style;                 //zuxlsx: its style index
+   unsigned int flags;
+   XML_Char* skiptag;                    //tag to skip
+   size_t skiptagcount;                  //nesting level for current tag to skip
+@@ -1014,10 +1174,11 @@
+   void* callbackdata;
+ };
+ 
+-void data_sheet_callback_data_initialize (struct data_sheet_callback_data* data, struct sharedstringlist* sharedstrings, unsigned int flags, xlsxioread_process_cell_callback_fn cell_callback, xlsxioread_process_row_callback_fn row_callback, void* callbackdata)
++void data_sheet_callback_data_initialize (struct data_sheet_callback_data* data, struct sharedstringlist* sharedstrings, struct numfmt_table* numfmts, unsigned int flags, xlsxioread_process_cell_callback_fn cell_callback, xlsxioread_process_row_callback_fn row_callback, void* callbackdata)
+ {
+   data->xmlparser = NULL;
+   data->sharedstrings = sharedstrings;
++  data->numfmts = numfmts;
+   data->rownr = 0;
+   data->colnr = 0;
+   data->cols = 0;
+@@ -1025,6 +1186,9 @@
+   data->celldata = NULL;
+   data->celldatalen = 0;
+   data->cell_string_type = none;
++  data->cell_style = 0;
++  data->last_cell_type = none;
++  data->last_cell_style = 0;
+   data->flags = flags;
+   data->skiptag = NULL;
+   data->skiptagcount = 0;
+@@ -1039,6 +1203,7 @@
+ void data_sheet_callback_data_cleanup (struct data_sheet_callback_data* data)
+ {
+   sharedstringlist_destroy(data->sharedstrings);
++  numfmt_table_destroy(data->numfmts);
+   free(data->celldata);
+   free(data->skiptag);
+ }
+@@ -1232,10 +1397,34 @@
+       }
+     }
+     //determine value type
+-    if ((t = get_expat_attr_by_name(atts, X("t"))) != NULL && XML_Char_icmp(t, X("s")) == 0)
++    //zuxlsx: read the whole t= vocabulary rather than only testing for
++    //"s". Everything else used to fall through to value_string, which left
++    //a boolean or an error indistinguishable from a number downstream.
++    if ((t = get_expat_attr_by_name(atts, X("t"))) == NULL)
++      data->cell_string_type = value_string;
++    else if (XML_Char_icmp(t, X("s")) == 0)
+       data->cell_string_type = shared_string;
++    else if (XML_Char_icmp(t, X("b")) == 0)
++      data->cell_string_type = boolean_string;
++    else if (XML_Char_icmp(t, X("e")) == 0)
++      data->cell_string_type = error_string;
++    else if (XML_Char_icmp(t, X("str")) == 0)
++      data->cell_string_type = formula_string;
++    else if (XML_Char_icmp(t, X("d")) == 0)
++      data->cell_string_type = date_string;
++    else if (XML_Char_icmp(t, X("inlineStr")) == 0)
++      data->cell_string_type = inline_string;
+     else
+       data->cell_string_type = value_string;
++    //zuxlsx: the style index selects the number format, which is the only
++    //thing distinguishing a date from a plain number in OOXML.
++    {
++      const XML_Char* sattr = get_expat_attr_by_name(atts, X("s"));
++      XML_Char* sendp = NULL;
++      data->cell_style = (sattr ? XML_Char_strtol(sattr, &sendp, 10) : 0);
++      if (data->cell_style < 0)
++        data->cell_style = 0;
++    }
+     //prepare empty value data
+     free(data->celldata);
+     data->celldata = NULL;
+@@ -1266,9 +1455,14 @@
+         data->celldata = NULL;
+       }
+     }
++    //zuxlsx: the reset below runs before the value is handed to the caller,
++    //so the type and style have to be kept aside to stay reachable.
++    data->last_cell_type = data->cell_string_type;
++    data->last_cell_style = data->cell_style;
+     //reset data
+     data->colnr++;
+     data->cell_string_type = none;
++    data->cell_style = 0;
+     data->celldatalen = 0;
+     XML_SetElementHandler(data->xmlparser, data_sheet_expat_callback_find_cell_start, data_sheet_expat_callback_find_row_end);
+     XML_SetCharacterDataHandler(data->xmlparser, NULL);
+@@ -1418,17 +1612,34 @@
+     shared_strings_callback_data_cleanup(&sharedstringsdata);
+   }
+ 
++  //zuxlsx: process number formats. Upstream located xl/styles.xml and then
++  //freed the name without opening it, so a date was indistinguishable from
++  //the number it is stored as.
++  struct numfmt_table* numfmts = NULL;
++  if (getrelscallbackdata.stylesfile && getrelscallbackdata.stylesfile[0]) {
++    if ((numfmts = numfmt_table_create()) != NULL) {
++      //NULL for the parser out-param: expat_process_zip_file() frees the
++      //parser itself unless it returns early on XML_STATUS_SUSPENDED, which
++      //only the worksheet walk asks for. Taking it back here double-frees it.
++      if (expat_process_zip_file(handle->zip, getrelscallbackdata.stylesfile, numfmt_expat_callback_element_start, numfmt_expat_callback_element_end, NULL, numfmts, NULL) != 0 || numfmts->oom) {
++        //styles are optional; a workbook without them simply has no dates
++        numfmt_table_destroy(numfmts);
++        numfmts = NULL;
++      }
++    }
++  }
++
+   //process sheet
+   if (!(flags & XLSXIOREAD_NO_CALLBACK)) {
+     //use callback mechanism
+     struct data_sheet_callback_data processcallbackdata;
+-    data_sheet_callback_data_initialize(&processcallbackdata, sharedstrings, flags, cell_callback, row_callback, callbackdata);
++    data_sheet_callback_data_initialize(&processcallbackdata, sharedstrings, numfmts, flags, cell_callback, row_callback, callbackdata);
+     expat_process_zip_file(handle->zip, getrelscallbackdata.sheetfile, data_sheet_expat_callback_find_worksheet_start, NULL, NULL, &processcallbackdata, &processcallbackdata.xmlparser);
+     data_sheet_callback_data_cleanup(&processcallbackdata);
+   } else {
+     //use simplified interface by suspending the XML parser when data is found
+     xlsxioreadersheet sheethandle = (xlsxioreadersheet)callbackdata;
+-    data_sheet_callback_data_initialize(&sheethandle->processcallbackdata, sharedstrings, flags, NULL, NULL, sheethandle);
++    data_sheet_callback_data_initialize(&sheethandle->processcallbackdata, sharedstrings, numfmts, flags, NULL, NULL, sheethandle);
+     if ((sheethandle->zipfile = XML_Char_openzip(sheethandle->handle->zip, getrelscallbackdata.sheetfile, 0)) == NULL) {
+       result = 1;
+     }
+@@ -1549,8 +1760,41 @@
+   result->paddingcol = 0;
+   xlsxioread_process(handle, sheetname, flags | XLSXIOREAD_NO_CALLBACK, NULL, NULL, result);  /* Note: currently broken when not using XLSXIOREAD_NO_CALLBACK flag */
+   return result;
++}
++
++/* zuxlsx: the OOXML type and date-ness of the cell most recently returned by
++   xlsxioread_sheet_next_cell(). Both describe that cell only, and are reset
++   when the next one is read. */
++DLL_EXPORT_XLSXIO int xlsxioread_sheet_last_cell_type (xlsxioreadersheet sheethandle)
++{
++  if (!sheethandle)
++    return XLSXIOREAD_CELLTYPE_NONE;
++  switch (sheethandle->processcallbackdata.last_cell_type) {
++    case value_string:   return XLSXIOREAD_CELLTYPE_NUMBER;
++    case inline_string:  return XLSXIOREAD_CELLTYPE_STRING;
++    case shared_string:  return XLSXIOREAD_CELLTYPE_STRING;
++    case boolean_string: return XLSXIOREAD_CELLTYPE_BOOLEAN;
++    case error_string:   return XLSXIOREAD_CELLTYPE_ERROR;
++    case formula_string: return XLSXIOREAD_CELLTYPE_STRING;
++    case date_string:    return XLSXIOREAD_CELLTYPE_DATE;
++    default:             return XLSXIOREAD_CELLTYPE_NONE;
++  }
+ }
+ 
++DLL_EXPORT_XLSXIO int xlsxioread_sheet_last_cell_is_date (xlsxioreadersheet sheethandle)
++{
++  if (!sheethandle)
++    return 0;
++  if (sheethandle->processcallbackdata.last_cell_type == date_string)
++    return 1;
++  //an ISO date carries t="d"; everything else is a number plus a format
++  if (sheethandle->processcallbackdata.last_cell_type != value_string)
++    return 0;
++  return numfmt_table_style_is_date(sheethandle->processcallbackdata.numfmts,
++                                    sheethandle->processcallbackdata.last_cell_style);
++}
++
++
+ DLL_EXPORT_XLSXIO void xlsxioread_sheet_close (xlsxioreadersheet sheethandle)
+ {
+   if (!sheethandle)

@@ -517,6 +517,22 @@ An initial implementation can support:
 
 Care must be taken with Excel's 1900 and 1904 date systems.
 
+### Status, 2026-09-19: formats are read, the epoch is not applied yet
+
+`xl/styles.xml` is parsed as of vendored patch 0003, and a cell's style index
+resolves to "is this number a date or a time" through `cellXfs` and `numFmts`.
+`xlsx_cells()` reports such a cell as type `date` and hands back the serial
+number unchanged.
+
+The conversion to an R `Date` or `POSIXct` is deliberately **not** done there.
+The epoch is a property of the workbook -- `workbookPr/@date1904` -- not of the
+cell, and that attribute is not read yet. Converting with a hard-coded 1900
+epoch would silently shift every date in a 1904 workbook by four years, which
+is worse than handing back a number the caller can see is unconverted.
+
+Reading `date1904` and applying it belongs with `read_xlsx()`, which is where
+a column acquires a type.
+
 ---
 
 ## 12. Proposed R API
@@ -559,6 +575,19 @@ xlsx_read_cells(
 ```
 
 The first release should keep the public API deliberately narrow.
+
+### Status, 2026-09-19: `xlsx_sheets()` and `xlsx_cells()`
+
+`xlsx_cells()` is implemented, returning one row per cell with `row`, `col`,
+`type`, `value` and `number`. `read_xlsx()`, `xlsx_rows()` and
+`xlsx_read_cells()` are not.
+
+`xlsx_cells()` was built before `read_xlsx()` on purpose. It needs only the
+cell event model of section 13, whereas `read_xlsx()` additionally needs the
+column builders of section 14 and the epoch handling of section 11, so
+building it first would have coupled three unproven things. It also makes the
+`valid/` corpus assertable for the first time: until there was a way to read a
+cell, a fixture could only be checked for opening at all.
 
 ---
 
@@ -603,6 +632,25 @@ and:
 ```text
 R data-frame construction
 ```
+
+### Status, 2026-09-19: implemented, in C rather than as a public header
+
+`zu_cell_type` and the classification live in `src/zuxlsx.c` as an enum and
+`classify_cell()`. The struct of section 13 is not materialised per cell:
+cells accumulate into parallel arrays -- row, column, type, text, number --
+which is the same boundary with the layout section 14 wants, and avoids one
+allocation per cell.
+
+Populating it needed vendored patch 0003. xlsxio reported every cell as text,
+read the `t=` attribute only to test for `"s"`, and located `xl/styles.xml`
+without ever opening it, so neither the OOXML type nor the number format was
+reachable through its API. The patch adds
+`xlsxioread_sheet_last_cell_type()` and `xlsxioread_sheet_last_cell_is_date()`
+without changing any existing signature.
+
+One boundary detail worth keeping: `xlsxioread_sheet_next_cell()` returns
+`NULL` for end of row, and a blank cell as a non-`NULL` empty string. Treating
+`NULL` as a value does not terminate the row.
 
 ---
 
@@ -671,10 +719,18 @@ conditions carry the offending `path`. Implemented so far:
 | `zuxlsx_zip_error` | the file will not open as a ZIP archive |
 | `zuxlsx_ooxml_error` | the archive opened but declares no worksheets |
 | `zuxlsx_memory_error` | an allocation failed while reading |
+| `zuxlsx_sheet_error` | the workbook opened, but has no such worksheet |
 
 `zuxlsx_input_error` and `zuxlsx_memory_error` are additions to the list
-above; `zuxlsx_xml_error`, `zuxlsx_sheet_error` and `zuxlsx_type_error` arrive
-with the reading API, which is the first thing that can raise them.
+above. `zuxlsx_sheet_error` arrived with `xlsx_cells()`, as expected.
+`zuxlsx_xml_error` and `zuxlsx_type_error` are still unraised: a malformed
+part currently surfaces as `zuxlsx_ooxml_error`, and nothing yet promotes a
+cell to a column type that could conflict.
+
+Note that the worksheet name is checked in R against `xlsx_sheets()` rather
+than left to the native layer. Opening a worksheet that does not exist yields
+a handle reporting no rows, so an unknown name would otherwise be
+indistinguishable from an empty sheet.
 
 The C layer never calls `Rf_error()`. Both entry points return a
 `(status, value)` pair and `zuxlsx_unwrap()` turns a non-`"ok"` status into the
@@ -1034,6 +1090,19 @@ Out of scope initially:
 - legacy `.xls`
 
 Formula cells can expose the cached value and optionally the formula text, but `zuxlsx` should not evaluate formulas.
+
+### Status, 2026-09-19: 7 of 11
+
+Done: 1 open the archive, 2 enumerate sheets, 3 parse relationships, 4 parse
+shared strings, 5 stream worksheet XML, 6 emit rows and cells, 8 basic scalar
+cell types, 10 structured errors.
+
+Partial: 9 dates -- a date is identified and its serial number returned, but
+not converted, because the workbook epoch is not read yet (section 11).
+11 the corpus -- the adversarial categories exist, `valid/` does not.
+
+Not started: 7 build an R `data.frame`, which is `read_xlsx()` and the column
+builders of section 14.
 
 ---
 

@@ -20,6 +20,8 @@
 #'     It is missing, unreadable, truncated, or not a ZIP at all.}
 #'   \item{`zuxlsx_ooxml_error`}{The ZIP archive opened but is not a workbook.
 #'     A valid workbook declares at least one worksheet.}
+#'   \item{`zuxlsx_sheet_error`}{The workbook opened, but the requested
+#'     worksheet is not in it.}
 #'   \item{`zuxlsx_memory_error`}{An allocation failed while reading.}
 #' }
 #'
@@ -60,6 +62,12 @@ zuxlsx_unwrap <- function(res, path = NULL, call = sys.call(-1L)) {
         "Cannot open '", path, "' as an xlsx workbook.\n",
         "The file is not a readable ZIP archive. It may be truncated, ",
         "corrupt, or not an xlsx file at all."
+      )
+    ),
+    sheet_not_found = list(
+      class = "zuxlsx_sheet_error",
+      message = paste0(
+        "'", path, "' has no such worksheet."
       )
     ),
     ooxml_no_sheets = list(

@@ -33,12 +33,19 @@ in order. Neither is upstream.
       "r:id", so that a workbook binding the OOXML relationships namespace to
       some other prefix still resolves. Written for zuxlsx.
 
-Running the two patches in order against the pristine 0.2.36 release archive
+  0003-expose-cell-type-and-number-format.patch
+      Reports a cell's OOXML type (t=) rather than only whether it is a shared
+      string, and parses xl/styles.xml so that a cell's number format can say
+      whether the number it holds is a date. Upstream located the styles part
+      and freed the name without opening it. Adds two accessors; changes no
+      existing signature. Written for zuxlsx.
+
+Running the three patches in order against the pristine 0.2.36 release archive
 reproduces src/vendor/xlsxio/ byte for byte, including line endings. No other
 modification is made to the bundled code, and it is never edited in place:
 tools/vendor/fetch re-derives it, and tools/vendor/verify checks the result.
 
-Line endings are CRLF, as shipped by upstream, except on the lines the two
+Line endings are CRLF, as shipped by upstream, except on the lines the three
 patches introduce. They are deliberately not normalised, so the kept files
 still match the release archive.
 
