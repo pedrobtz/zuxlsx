@@ -361,9 +361,10 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet) {
   xlsxioreader reader;
   xlsxioreadersheet worksheet;
   SEXP bag, out, res;
-  SEXP r_row, r_col, r_type, r_text, r_number;
+  SEXP r_row, r_col, r_type, r_text, r_number, r_epoch;
   size_t i;
   size_t rownr = 0;
+  int date1904 = 0;
 
   if (TYPEOF(path) != STRSXP || XLENGTH(path) < 1 ||
       STRING_ELT(path, 0) == NA_STRING ||
@@ -422,6 +423,7 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet) {
       break;
     }
   }
+  date1904 = xlsxioread_sheet_date1904(worksheet);
   xlsxioread_sheet_close(worksheet);
   xlsxioread_close(reader);
 
@@ -431,12 +433,13 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet) {
     return result(STATUS_MEMORY, R_NilValue);
   }
 
-  out = PROTECT(Rf_allocVector(VECSXP, 5));
+  out = PROTECT(Rf_allocVector(VECSXP, 6));
   r_row = PROTECT(Rf_allocVector(REALSXP, (R_xlen_t)cells->n));
   r_col = PROTECT(Rf_allocVector(REALSXP, (R_xlen_t)cells->n));
   r_type = PROTECT(Rf_allocVector(INTSXP, (R_xlen_t)cells->n));
   r_text = PROTECT(Rf_allocVector(STRSXP, (R_xlen_t)cells->n));
   r_number = PROTECT(Rf_allocVector(REALSXP, (R_xlen_t)cells->n));
+  r_epoch = PROTECT(Rf_ScalarLogical(date1904));
   for (i = 0; i < cells->n; i++) {
     REAL(r_row)[i] = (double)cells->row[i];
     REAL(r_col)[i] = (double)cells->col[i];
@@ -452,10 +455,11 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet) {
   SET_VECTOR_ELT(out, 2, r_type);
   SET_VECTOR_ELT(out, 3, r_text);
   SET_VECTOR_ELT(out, 4, r_number);
+  SET_VECTOR_ELT(out, 5, r_epoch);
   cell_list_finalizer(bag);
 
   res = PROTECT(result(STATUS_OK, out));
-  UNPROTECT(8);
+  UNPROTECT(9);
   return res;
 }
 
