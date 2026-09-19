@@ -2,6 +2,8 @@
 
 ## All functions
 
+- [`read_xlsx()`](https://pedrobtz.github.io/zuxlsx/reference/read_xlsx.md)
+  : Read a worksheet into a data frame
 - [`xlsx_cells()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_cells.md)
   : Read the cells of a worksheet
 - [`xlsx_sheets()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_sheets.md)

@@ -42,7 +42,7 @@
 <div class="section level2">
 <h2 id="current-state-it-builds-and-reads-workbooks">Current state: it builds and reads workbooks<a class="anchor" aria-label="anchor" href="#current-state-it-builds-and-reads-workbooks"></a></h2>
 <p>The native stack compiles, links and runs: <code><a href="reference/xlsx_sheets.html">xlsx_sheets()</a></code> opens a real <code>.xlsx</code> and lists its worksheets, which means miniz (from <code>zukomp</code>) opened the ZIP, Expat (from <code>zuxml</code>) parsed <code>xl/workbook.xml</code>, and vendored xlsxio drove both. 41 tests pass, shuffled, and <code>R CMD check --as-cran</code> is 0 errors / 0 warnings / 1 note (the note is “New submission” plus the two non-CRAN <code>LinkingTo</code> packages).</p>
-<p><strong>This is a build slice, not the reading API.</strong> <code>read_xlsx()</code>, the cell event model and the column builders (design §12–§14) are unstarted. The two exported functions exist so that a broken native build is a failing test rather than something discovered later:</p>
+<p><strong>This is a build slice, not the reading API.</strong> <code><a href="reference/read_xlsx.html">read_xlsx()</a></code>, the cell event model and the column builders (design §12–§14) are unstarted. The two exported functions exist so that a broken native build is a failing test rather than something discovered later:</p>
 <ul><li>
 <code>xlsx_sheets(path)</code> — exercises both archives on a real file.</li>
 <li>

@@ -3,7 +3,9 @@
 Reads a worksheet one cell at a time and returns them in a data frame,
 one row per cell. This is the low-level reader: it reports what is in
 each cell without assembling columns or guessing a type for them, which
-is what `read_xlsx()` will do on top of it.
+is what
+[`read_xlsx()`](https://pedrobtz.github.io/zuxlsx/reference/read_xlsx.md)
+will do on top of it.
 
 ## Usage
 

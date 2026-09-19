@@ -20,10 +20,11 @@ and vendored xlsxio drove both. 41 tests pass, shuffled, and
 `R CMD check --as-cran` is 0 errors / 0 warnings / 1 note (the note is
 “New submission” plus the two non-CRAN `LinkingTo` packages).
 
-**This is a build slice, not the reading API.** `read_xlsx()`, the cell
-event model and the column builders (design §12–§14) are unstarted. The
-two exported functions exist so that a broken native build is a failing
-test rather than something discovered later:
+**This is a build slice, not the reading API.**
+[`read_xlsx()`](https://pedrobtz.github.io/zuxlsx/reference/read_xlsx.md),
+the cell event model and the column builders (design §12–§14) are
+unstarted. The two exported functions exist so that a broken native
+build is a failing test rather than something discovered later:
 
 - `xlsx_sheets(path)` — exercises both archives on a real file.
 - [`zuxlsx_native()`](https://pedrobtz.github.io/zuxlsx/reference/zuxlsx_native.md)

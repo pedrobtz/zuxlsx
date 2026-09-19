@@ -28,8 +28,9 @@ xlsx_sheets(path)   # worksheet names, in workbook order
 zuxlsx_native()     # the xlsxio, Expat and miniz versions actually linked in
 ```
 
-`read_xlsx()`, the cell reader and the column builders are not written
-yet. The design they will follow is in `.agents/design-zuxlsx.md`.
+[`read_xlsx()`](https://pedrobtz.github.io/zuxlsx/reference/read_xlsx.md),
+the cell reader and the column builders are not written yet. The design
+they will follow is in `.agents/design-zuxlsx.md`.
 
 ## Installation
 
