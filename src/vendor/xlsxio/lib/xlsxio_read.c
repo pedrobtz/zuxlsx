@@ -68,6 +68,64 @@ static const XLSXIOCHAR* xltm_content_type = X("application/vnd.ms-excel.templat
 
 #if !defined(XML_UNICODE_WCHAR_T) && !defined(XML_UNICODE)
 
+#ifdef USE_MINIZ
+/* zuxlsx: locate an archive member by part name, tolerating the spellings
+   real producers actually use.
+
+   OPC part names are forward-slash separated, and OOXML consumers compare
+   them without regard to case. Some writers store neither: POI's regression
+   file 49609.xlsx names its members "[content_types].xml", "xl\\styles.xml"
+   and "_rels\\.rels", and Excel reads it.
+
+   The central directory is scanned in order and the FIRST match wins. That
+   is deliberate and is not merely miniz's behaviour restated: an archive may
+   name the same part twice, and which copy a reader picks is a security
+   property, since a workbook that presents one part to a validator and
+   another to the reader is a known ZIP attack. mz_zip_reader_locate_file_v2
+   is not used for this reason -- it resolves duplicates differently
+   depending on whether the case-sensitive flag is set, so borrowing it made
+   the answer depend on a flag rather than on position.
+
+   Scanning costs a pass over the central directory per lookup, of which a
+   read performs fewer than ten. */
+static int zu_locate_member (mz_zip_archive* archive, const char* filename, mz_uint32* index)
+{
+  mz_uint count;
+  mz_uint i;
+  size_t len;
+
+  if (!filename)
+    return 0;
+  len = strlen(filename);
+  count = mz_zip_reader_get_num_files(archive);
+  for (i = 0; i < count; i++) {
+    char stored[MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE];
+    size_t j;
+    mz_uint got = mz_zip_reader_get_filename(archive, i, stored, sizeof(stored));
+    if (got == 0 || got > sizeof(stored))
+      continue;
+    if (strlen(stored) != len)
+      continue;
+    for (j = 0; j < len; j++) {
+      char a = stored[j];
+      char b = filename[j];
+      if (a == '\\') a = '/';
+      if (b == '\\') b = '/';
+      if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
+      if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
+      if (a != b)
+        break;
+    }
+    if (j == len) {
+      *index = i;
+      return 1;
+    }
+  }
+  return 0;
+}
+
+#endif
+
 //UTF-8 version
 #define XML_Char_dupchar strdup
 
@@ -78,7 +136,7 @@ static ZIPFILEENTRYTYPE* XML_Char_openzip (ZIPFILETYPE* archive, const XML_Char*
 #ifdef USE_MINIZ
   mz_uint32 file_index;
   (void)flags;
-  if (!mz_zip_reader_locate_file_v2(archive, filename, NULL, MZ_ZIP_FLAG_CASE_SENSITIVE, &file_index))
+  if (!zu_locate_member(archive, filename, &file_index))
     return NULL;
   return mz_zip_reader_extract_iter_new(archive, file_index, 0);
 #elif defined(USE_MINIZIP)
@@ -136,7 +194,7 @@ static ZIPFILEENTRYTYPE* XML_Char_openzip (ZIPFILETYPE* archive, const XML_Char*
 #ifdef USE_MINIZ
   mz_uint32 file_index;
   (void)flags;
-  if (!mz_zip_reader_locate_file_v2(archive, s, NULL, MZ_ZIP_FLAG_CASE_SENSITIVE, &file_index))
+  if (!zu_locate_member(archive, s, &file_index))
     result = NULL;
   else
     result = mz_zip_reader_extract_iter_new(archive, file_index, 0);

@@ -71,3 +71,36 @@ test_that("an escaped sheet name is unescaped exactly once", {
   # "a &amp; b", not "a & b".
   expect_identical(xlsx_sheets(path), "a &amp; b")
 })
+
+test_that("part names may use backslashes and any case", {
+  # OPC part names are forward-slash separated and compared without regard to
+  # case, but real writers store neither. POI's regression file 49609.xlsx
+  # names its members "[content_types].xml", "xl\\styles.xml" and
+  # "_rels\\.rels", and Excel reads it.
+  #
+  # Reproduced here at a few hundred bytes rather than by committing the
+  # 105 KB original: tools/corpus/ is where that file is read, and this is
+  # what keeps the fix from regressing on every platform.
+  path <- withr::local_tempfile(fileext = ".xlsx")
+  parts <- workbook_parts()
+  names(parts) <- vapply(
+    names(parts),
+    function(n) gsub("/", "\\", tolower(n), fixed = TRUE),
+    character(1)
+  )
+  write_workbook(path, parts)
+
+  expect_identical(xlsx_sheets(path), "Sheet1")
+  expect_s3_class(read_xlsx(path, 1), "data.frame")
+})
+
+test_that("a conforming workbook is unaffected by that tolerance", {
+  # The tolerant lookup must not change what a normal file resolves to. Two
+  # members differing only in case is the case that would expose a scan
+  # picking the wrong one.
+  path <- withr::local_tempfile(fileext = ".xlsx")
+  parts <- workbook_parts()
+  write_workbook(path, parts)
+
+  expect_identical(xlsx_sheets(path), "Sheet1")
+})
