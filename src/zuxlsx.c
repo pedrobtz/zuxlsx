@@ -497,6 +497,70 @@ static int classify_cell(int xlsxio_type, int is_date, const char *value,
   return is_date ? ZU_CELL_DATE : ZU_CELL_NUMBER;
 }
 
+/* The cells accumulated so far, as the five parallel vectors R assembles into
+   a data frame, plus the workbook's epoch. Shared by the whole-sheet read and
+   the callback read so that the two cannot describe a cell differently. */
+static SEXP cells_to_list(const cell_list *cells, int date1904) {
+  SEXP out, r_row, r_col, r_type, r_text, r_number, r_epoch;
+  size_t i;
+
+  out = PROTECT(Rf_allocVector(VECSXP, 6));
+  r_row = PROTECT(Rf_allocVector(REALSXP, (R_xlen_t)cells->n));
+  r_col = PROTECT(Rf_allocVector(REALSXP, (R_xlen_t)cells->n));
+  r_type = PROTECT(Rf_allocVector(INTSXP, (R_xlen_t)cells->n));
+  r_text = PROTECT(Rf_allocVector(STRSXP, (R_xlen_t)cells->n));
+  r_number = PROTECT(Rf_allocVector(REALSXP, (R_xlen_t)cells->n));
+  r_epoch = PROTECT(Rf_ScalarLogical(date1904));
+  for (i = 0; i < cells->n; i++) {
+    REAL(r_row)[i] = (double)cells->row[i];
+    REAL(r_col)[i] = (double)cells->col[i];
+    INTEGER(r_type)[i] = cells->type[i];
+    SET_STRING_ELT(r_text, (R_xlen_t)i,
+                   cells->text[i] == NULL
+                     ? NA_STRING
+                     : Rf_mkCharCE(cells->text[i], CE_UTF8));
+    REAL(r_number)[i] = cells->number[i];
+  }
+  SET_VECTOR_ELT(out, 0, r_row);
+  SET_VECTOR_ELT(out, 1, r_col);
+  SET_VECTOR_ELT(out, 2, r_type);
+  SET_VECTOR_ELT(out, 3, r_text);
+  SET_VECTOR_ELT(out, 4, r_number);
+  SET_VECTOR_ELT(out, 5, r_epoch);
+  UNPROTECT(7);
+  return out;
+}
+
+/* An open reader and worksheet, owned by R rather than by the C stack.
+ *
+ * The whole-sheet read can keep these on the stack because nothing between
+ * opening and closing them can longjmp. The callback read cannot: it calls an
+ * R function while both are open, and that function may signal a condition,
+ * be interrupted, or simply return from a restart -- any of which unwinds
+ * straight past a close(). Handing ownership to an external pointer with a
+ * registered finalizer is what makes that safe, and is the pattern design
+ * section 15 asks for. */
+typedef struct {
+  xlsxioreader reader;
+  xlsxioreadersheet sheet;
+} reader_handle;
+
+static void reader_handle_finalizer(SEXP ptr) {
+  reader_handle *h = (reader_handle *)R_ExternalPtrAddr(ptr);
+  if (h != NULL) {
+    if (h->sheet != NULL) {
+      xlsxioread_sheet_close(h->sheet);
+      h->sheet = NULL;
+    }
+    if (h->reader != NULL) {
+      xlsxioread_close(h->reader);
+      h->reader = NULL;
+    }
+    free(h);
+    R_ClearExternalPtr(ptr);
+  }
+}
+
 SEXP C_xlsx_cells(SEXP path, SEXP sheet) {
   const char *file;
   const char *sheetname;
@@ -504,7 +568,6 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet) {
   xlsxioreader reader;
   xlsxioreadersheet worksheet;
   SEXP bag, out, res;
-  SEXP r_row, r_col, r_type, r_text, r_number, r_epoch;
   size_t i;
   size_t rownr = 0;
   int date1904 = 0;
@@ -582,33 +645,139 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet) {
     return result(STATUS_MEMORY, R_NilValue);
   }
 
-  out = PROTECT(Rf_allocVector(VECSXP, 6));
-  r_row = PROTECT(Rf_allocVector(REALSXP, (R_xlen_t)cells->n));
-  r_col = PROTECT(Rf_allocVector(REALSXP, (R_xlen_t)cells->n));
-  r_type = PROTECT(Rf_allocVector(INTSXP, (R_xlen_t)cells->n));
-  r_text = PROTECT(Rf_allocVector(STRSXP, (R_xlen_t)cells->n));
-  r_number = PROTECT(Rf_allocVector(REALSXP, (R_xlen_t)cells->n));
-  r_epoch = PROTECT(Rf_ScalarLogical(date1904));
-  for (i = 0; i < cells->n; i++) {
-    REAL(r_row)[i] = (double)cells->row[i];
-    REAL(r_col)[i] = (double)cells->col[i];
-    INTEGER(r_type)[i] = cells->type[i];
-    SET_STRING_ELT(r_text, (R_xlen_t)i,
-                   cells->text[i] == NULL
-                     ? NA_STRING
-                     : Rf_mkCharCE(cells->text[i], CE_UTF8));
-    REAL(r_number)[i] = cells->number[i];
-  }
-  SET_VECTOR_ELT(out, 0, r_row);
-  SET_VECTOR_ELT(out, 1, r_col);
-  SET_VECTOR_ELT(out, 2, r_type);
-  SET_VECTOR_ELT(out, 3, r_text);
-  SET_VECTOR_ELT(out, 4, r_number);
-  SET_VECTOR_ELT(out, 5, r_epoch);
+  out = PROTECT(cells_to_list(cells, date1904));
   cell_list_finalizer(bag);
 
   res = PROTECT(result(STATUS_OK, out));
-  UNPROTECT(9);
+  UNPROTECT(3);
+  return res;
+}
+
+/* Reads a worksheet a chunk at a time, handing each chunk to an R function.
+ *
+ * The point of this entry is that the whole sheet is never held at once, so
+ * unlike C_xlsx_cells it must call R while the archive and parser are open.
+ * Both are therefore owned by external pointers with registered finalizers:
+ * the callback may signal a condition or be interrupted, and either unwinds
+ * past every close() and free() on this stack. Nothing here calls Rf_error()
+ * itself, for the same reason it is avoided everywhere else.
+ *
+ * A callback returning FALSE stops the read. That is what makes this more
+ * than a memory optimisation -- it is how a caller finds something in a large
+ * sheet without paying for the rest of it. */
+SEXP C_xlsx_read_cells(SEXP path, SEXP sheet, SEXP callback, SEXP env,
+                       SEXP chunk) {
+  const char *file;
+  const char *sheetname;
+  cell_list *cells;
+  reader_handle *handle;
+  SEXP bag, holder, res;
+  size_t limit;
+  size_t rownr = 0;
+  int date1904 = 0;
+  int stopped = 0;
+
+  if (TYPEOF(path) != STRSXP || XLENGTH(path) < 1 ||
+      STRING_ELT(path, 0) == NA_STRING ||
+      TYPEOF(sheet) != STRSXP || XLENGTH(sheet) < 1 ||
+      STRING_ELT(sheet, 0) == NA_STRING ||
+      TYPEOF(callback) != CLOSXP || TYPEOF(env) != ENVSXP ||
+      TYPEOF(chunk) != INTSXP || XLENGTH(chunk) < 1 ||
+      INTEGER(chunk)[0] == NA_INTEGER || INTEGER(chunk)[0] < 1) {
+    return result(STATUS_BAD_PATH, R_NilValue);
+  }
+  file = Rf_translateCharUTF8(STRING_ELT(path, 0));
+  sheetname = Rf_translateCharUTF8(STRING_ELT(sheet, 0));
+  limit = (size_t)INTEGER(chunk)[0];
+
+  if (file_is_ole2(file)) {
+    return result(STATUS_OLE2, R_NilValue);
+  }
+
+  cells = (cell_list *)calloc(1, sizeof(cell_list));
+  if (cells == NULL) {
+    return result(STATUS_MEMORY, R_NilValue);
+  }
+  bag = PROTECT(R_MakeExternalPtr(cells, R_NilValue, R_NilValue));
+  R_RegisterCFinalizerEx(bag, cell_list_finalizer, TRUE);
+
+  handle = (reader_handle *)calloc(1, sizeof(reader_handle));
+  if (handle == NULL) {
+    cell_list_finalizer(bag);
+    UNPROTECT(1);
+    return result(STATUS_MEMORY, R_NilValue);
+  }
+  holder = PROTECT(R_MakeExternalPtr(handle, R_NilValue, R_NilValue));
+  R_RegisterCFinalizerEx(holder, reader_handle_finalizer, TRUE);
+
+  handle->reader = xlsxioread_open(file);
+  if (handle->reader == NULL) {
+    reader_handle_finalizer(holder);
+    cell_list_finalizer(bag);
+    UNPROTECT(2);
+    return result(STATUS_ZIP_OPEN, R_NilValue);
+  }
+  handle->sheet = xlsxioread_sheet_open(handle->reader, sheetname,
+                                        XLSXIOREAD_SKIP_NONE);
+  if (handle->sheet == NULL) {
+    reader_handle_finalizer(holder);
+    cell_list_finalizer(bag);
+    UNPROTECT(2);
+    return result(STATUS_NO_SHEET, R_NilValue);
+  }
+  date1904 = xlsxioread_sheet_date1904(handle->sheet);
+
+  while (!stopped && xlsxioread_sheet_next_row(handle->sheet)) {
+    size_t colnr = 0;
+    char *value;
+    rownr++;
+    while ((value = xlsxioread_sheet_next_cell(handle->sheet)) != NULL) {
+      double num;
+      int type = classify_cell(xlsxioread_sheet_last_cell_type(handle->sheet),
+                               xlsxioread_sheet_last_cell_is_date(handle->sheet),
+                               value, &num);
+      colnr++;
+      if (cell_list_push(cells, rownr, colnr, type, value, num) != 0) {
+        free(value);
+        break;
+      }
+      free(value);
+    }
+    if (cells->oom) {
+      break;
+    }
+    /* Emitted between rows, never inside one, so a chunk boundary can never
+       fall in the middle of a row and split it across two callbacks. */
+    if (cells->n >= limit) {
+      SEXP arg = PROTECT(cells_to_list(cells, date1904));
+      SEXP call = PROTECT(Rf_lang2(callback, arg));
+      SEXP val = PROTECT(Rf_eval(call, env));
+      stopped = (TYPEOF(val) == LGLSXP && XLENGTH(val) >= 1 &&
+                 LOGICAL(val)[0] == FALSE);
+      UNPROTECT(3);
+      cell_list_free(cells);
+    }
+  }
+
+  if (cells->oom) {
+    reader_handle_finalizer(holder);
+    cell_list_finalizer(bag);
+    UNPROTECT(2);
+    return result(STATUS_MEMORY, R_NilValue);
+  }
+  if (!stopped && cells->n > 0) {
+    SEXP arg = PROTECT(cells_to_list(cells, date1904));
+    SEXP call = PROTECT(Rf_lang2(callback, arg));
+    SEXP val = PROTECT(Rf_eval(call, env));
+    stopped = (TYPEOF(val) == LGLSXP && XLENGTH(val) >= 1 &&
+               LOGICAL(val)[0] == FALSE);
+    UNPROTECT(3);
+  }
+
+  reader_handle_finalizer(holder);
+  cell_list_finalizer(bag);
+  res = PROTECT(result(STATUS_OK, Rf_ScalarLogical(stopped)));
+  UNPROTECT(3);
   return res;
 }
 

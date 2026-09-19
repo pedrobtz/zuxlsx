@@ -592,9 +592,41 @@ The first release should keep the public API deliberately narrow.
 
 ### Status, 2026-09-19: `xlsx_sheets()`, `xlsx_cells()` and `read_xlsx()`
 
-`read_xlsx(path, sheet, col_names, range)`, `xlsx_cells()` and `xlsx_rows()`
-are implemented. `xlsx_read_cells()`, the callback form, is not; nothing needs
-it while column building is a post-pass rather than a stream (section 14).
+`read_xlsx(path, sheet, col_names, range)`, `xlsx_cells()`, `xlsx_rows()` and
+`xlsx_read_cells()` are all implemented. Section 12 is complete.
+
+`xlsx_read_cells(path, sheet, callback, chunk_size)` hands the callback a
+chunk of cells at a time and stops when it returns `FALSE`. A chunk never
+splits a row, so `chunk_size` is a lower bound: the boundary falls at the
+first row end at or after it. A callback that saw half a row could do nothing
+useful with it.
+
+It is the only entry that calls R while the archive and the parser are open,
+which is why both are owned by external pointers with registered finalizers
+rather than by the C stack. The callback may signal a condition or be
+interrupted, and either unwinds past every `close()` on that stack. Asserted
+rather than assumed: an erroring callback propagates its message, the same
+file then reads normally, and 300 aborted reads return to the same in-use
+memory after a `gc()`.
+
+**Measured, and the benefit is not the one section 9 implies.** On a 20000 by
+10 sheet:
+
+| | elapsed |
+| --- | --- |
+| `xlsx_cells()`, whole sheet | 0.42 s |
+| `xlsx_read_cells()`, read to the end | 0.37 s |
+| `xlsx_read_cells()`, stopping after one chunk | **0.02 s** |
+
+Early termination is the win, and it is a large one: finding something near
+the top of a large worksheet costs a twentieth of reading it.
+
+Peak memory for a *full* read is not improved -- 68 MB against 62 MB for
+`xlsx_cells()` on the same sheet. Each chunk is an allocation R need not
+collect before the next is made, so the high-water mark is unchanged even
+though nothing holds the whole worksheet at once. What the API bounds is what
+the *caller* has to keep, which is the useful guarantee and the one the
+documentation makes.
 
 `range` takes A1 notation, and either corner may name a cell, a column or a
 row: `"B2:D10"` is a rectangle, `"A:C"` is three whole columns, `"2:10"` nine
