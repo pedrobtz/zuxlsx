@@ -4,7 +4,7 @@
 \alias{read_xlsx}
 \title{Read a worksheet into a data frame}
 \usage{
-read_xlsx(path, sheet = 1, col_names = TRUE)
+read_xlsx(path, sheet = 1, col_names = TRUE, range = NULL)
 }
 \arguments{
 \item{path}{Path to an \code{.xlsx} file.}
@@ -14,6 +14,15 @@ workbook.}
 
 \item{col_names}{Whether the first row holds column names. When \code{FALSE},
 columns are named \code{X1}, \code{X2} and so on.}
+
+\item{range}{An A1-style cell range limiting what is read, or \code{NULL} for the
+whole worksheet. Either corner may name a cell, a column or a row, so
+\code{"B2:D10"} takes a rectangle, \code{"A:C"} takes three columns in full, and
+\code{"2:10"} takes nine rows in full. The corners may be given in either
+order. A range is read as its own rectangle: cells outside it are ignored,
+the top-left becomes the first row and column, and columns the range
+covers appear even where the worksheet left them empty. When \code{col_names}
+is \code{TRUE} the first row of the range supplies the names.}
 }
 \value{
 A data frame.
@@ -24,6 +33,12 @@ the type its cells support. This is the high-level reader; \code{\link[=xlsx_cel
 the cell-by-cell view underneath it.
 }
 \details{
+A worksheet may leave a row out of its XML rather than write an empty one.
+Such a row is kept, as a row of \code{NA}, wherever it falls -- including
+directly beneath the header. Keeping every blank row is easier to predict
+than keeping only the interior ones, and \code{range} is the way to begin
+further down the sheet.
+
 Column types are inferred by promotion. A column of blanks is logical, one
 of booleans stays logical, numbers give a double, and anything that mixes
 types, or that holds a string or a cell error, becomes character. A column
@@ -33,6 +48,7 @@ carries a time of day.
 \examples{
 path <- system.file("extdata", "two-sheets.xlsx", package = "zuxlsx")
 if (nzchar(path)) read_xlsx(path)
+if (nzchar(path)) read_xlsx(path, range = "A1:B5")
 }
 \seealso{
 \code{\link[=xlsx_cells]{xlsx_cells()}} for the cells themselves, and \code{\link[=xlsx_sheets]{xlsx_sheets()}} to

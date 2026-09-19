@@ -4,6 +4,12 @@
 #' the type its cells support. This is the high-level reader; [xlsx_cells()] is
 #' the cell-by-cell view underneath it.
 #'
+#' A worksheet may leave a row out of its XML rather than write an empty one.
+#' Such a row is kept, as a row of `NA`, wherever it falls -- including
+#' directly beneath the header. Keeping every blank row is easier to predict
+#' than keeping only the interior ones, and `range` is the way to begin
+#' further down the sheet.
+#'
 #' Column types are inferred by promotion. A column of blanks is logical, one
 #' of booleans stays logical, numbers give a double, and anything that mixes
 #' types, or that holds a string or a cell error, becomes character. A column
@@ -15,6 +21,14 @@
 #'   workbook.
 #' @param col_names Whether the first row holds column names. When `FALSE`,
 #'   columns are named `X1`, `X2` and so on.
+#' @param range An A1-style cell range limiting what is read, or `NULL` for the
+#'   whole worksheet. Either corner may name a cell, a column or a row, so
+#'   `"B2:D10"` takes a rectangle, `"A:C"` takes three columns in full, and
+#'   `"2:10"` takes nine rows in full. The corners may be given in either
+#'   order. A range is read as its own rectangle: cells outside it are ignored,
+#'   the top-left becomes the first row and column, and columns the range
+#'   covers appear even where the worksheet left them empty. When `col_names`
+#'   is `TRUE` the first row of the range supplies the names.
 #'
 #' @return A data frame.
 #' @export
@@ -23,28 +37,50 @@
 #' @examples
 #' path <- system.file("extdata", "two-sheets.xlsx", package = "zuxlsx")
 #' if (nzchar(path)) read_xlsx(path)
-read_xlsx <- function(path, sheet = 1, col_names = TRUE) {
+#' if (nzchar(path)) read_xlsx(path, range = "A1:B5")
+read_xlsx <- function(path, sheet = 1, col_names = TRUE, range = NULL) {
   if (!is.logical(col_names) || length(col_names) != 1L || is.na(col_names)) {
     zuxlsx_stop(
       "zuxlsx_input_error",
       "`col_names` must be TRUE or FALSE."
     )
   }
+  bounds <- if (is.null(range)) NULL else parse_range(range)
+
   cells <- xlsx_cells(path, sheet)
   date1904 <- isTRUE(attr(cells, "date1904"))
+  if (!is.null(bounds)) {
+    cells <- clip_cells(cells, bounds)
+  }
 
   if (nrow(cells) == 0L) {
     return(data.frame())
   }
 
-  n_col <- max(cells$col)
-  header_row <- if (col_names) min(cells$row) else NA_real_
+  # A range asks for its own rectangle, whether or not every part of it holds
+  # a cell: "A1:D3" is three rows of four columns even if column D is empty
+  # throughout. Without a range the extent is whatever the sheet used.
+  n_col <- if (!is.null(bounds) && !is.na(bounds$min_col)) {
+    bounds$max_col - bounds$min_col + 1
+  } else {
+    max(cells$col)
+  }
+  row_span <- if (!is.null(bounds) && !is.na(bounds$min_row)) {
+    seq_len(bounds$max_row - bounds$min_row + 1)
+  } else {
+    seq.int(min(cells$row), max(cells$row))
+  }
+
+  header_row <- if (col_names) row_span[1L] else NA_real_
+  body_span <- if (col_names) row_span[-1L] else row_span
   body <- if (col_names) cells[cells$row != header_row, , drop = FALSE] else cells
 
   names_out <- column_names(cells, header_row, n_col, col_names)
   cols <- vector("list", n_col)
   for (j in seq_len(n_col)) {
-    cols[[j]] <- build_column(body[body$col == j, , drop = FALSE], body, date1904)
+    cols[[j]] <- build_column(
+      body[body$col == j, , drop = FALSE], body_span, date1904
+    )
   }
 
   out <- as.data.frame(cols, stringsAsFactors = FALSE, optional = TRUE)
@@ -67,23 +103,21 @@ column_names <- function(cells, header_row, n_col, col_names) {
 
 # Turns one column's cells into a vector, at the type its cells support.
 #
-# Rows are placed by their row number rather than by order of arrival, so a
-# column that is blank in the middle keeps its alignment with the others. That
-# is why `all_cells` is needed: the full row range comes from the sheet, not
-# from the cells of this one column.
+# `rows` is the row numbers the column must cover, passed in rather than
+# derived from the cells: a column that is blank in the middle, or absent
+# entirely, still has to line up with its neighbours, and a range asks for its
+# own height whether or not cells fill it.
 #
-# The range is the span of row numbers, not the rows that happen to carry a
-# cell. A worksheet may omit an empty row from its XML entirely, and xlsxio
-# pads such a gap with a single row however wide it is -- a sheet with data on
-# rows 1, 2 and 5 arrives as rows 1, 2, 4, 5. Since every cell carries its own
-# row number, spanning the range reconstructs the gap correctly and makes the
-# result independent of that padding.
-build_column <- function(col_cells, all_cells, date1904) {
-  if (nrow(all_cells) == 0L) {
+# It is a span rather than the rows that happen to carry a cell for a second
+# reason. A worksheet may omit an empty row from its XML, and xlsxio pads such
+# a gap with a single row however wide it is -- data on rows 1, 2 and 5
+# arrives as rows 1, 2, 4, 5. Every cell carries its own row number, so
+# spanning the range reconstructs the gap and ignores that padding.
+build_column <- function(col_cells, rows, date1904) {
+  n <- length(rows)
+  if (n == 0L) {
     return(logical(0))
   }
-  rows <- seq.int(min(all_cells$row), max(all_cells$row))
-  n <- length(rows)
   at <- match(col_cells$row, rows)
 
   present <- col_cells[as.character(col_cells$type) != "blank", , drop = FALSE]

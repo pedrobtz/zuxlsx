@@ -310,3 +310,15 @@ read_literals <- function(literals) {
   )))
   read_xlsx(path)$v
 }
+
+
+# A rectangular sheet of numbers, value (row-1)*ncol + col, with no header.
+grid_workbook <- function(nrow, ncol) {
+  styled_workbook_parts(lapply(seq_len(nrow), function(r) {
+    vapply(
+      seq_len(ncol),
+      function(cc) num(paste0(LETTERS[cc], r), (r - 1L) * ncol + cc),
+      character(1)
+    )
+  }))
+}

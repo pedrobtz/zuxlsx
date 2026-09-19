@@ -592,12 +592,25 @@ The first release should keep the public API deliberately narrow.
 
 ### Status, 2026-09-19: `xlsx_sheets()`, `xlsx_cells()` and `read_xlsx()`
 
-`read_xlsx(path, sheet, col_names)` and `xlsx_cells()` are implemented.
-`xlsx_rows()` and `xlsx_read_cells()` are not.
+`read_xlsx(path, sheet, col_names, range)`, `xlsx_cells()` and `xlsx_rows()`
+are implemented. `xlsx_read_cells()`, the callback form, is not; nothing needs
+it while column building is a post-pass rather than a stream (section 14).
 
-`read_xlsx()` does **not** take `range` yet. The argument is left off rather
-than accepted and ignored, so that its absence is a call that fails rather
-than a silently unfiltered read.
+`range` takes A1 notation, and either corner may name a cell, a column or a
+row: `"B2:D10"` is a rectangle, `"A:C"` is three whole columns, `"2:10"` nine
+whole rows. Corners may be given in either order. The rectangle is what is
+asked for rather than what the data happens to fill, so a range wider than the
+sheet still yields its own columns; narrowing it to the data would make the
+result depend on the file rather than the request.
+
+**Blank rows are kept, including directly beneath the header.** A worksheet
+may omit an empty row from its XML, and until `range` existed `read_xlsx()`
+dropped such a row when it fell immediately after the header while preserving
+it anywhere else -- an inconsistency that came from deriving the row span from
+the body rather than from the sheet, and that the readxl fixture
+`blanks.xlsx` records in its `same_row_first` and `same_row_middle`
+worksheets. Keeping every blank row is easier to predict than keeping only the
+interior ones, and `range` is now the way to start further down.
 
 `xlsx_cells()` was built before `read_xlsx()` on purpose. It needs only the
 cell event model of section 13, whereas `read_xlsx()` additionally needs the
@@ -1172,9 +1185,10 @@ content rather than only on opening. Outstanding are `strict_ooxml.xlsx` and
 `zip64.xlsx`, which need a real producer, and the external corpora of 17.1 to
 17.3, which remain an open decision.
 
-Known limitations rather than missing items: `read_xlsx()` has no `range`
-argument, column building is a post-pass rather than streaming (section 14),
-and `zuxlsx_xml_error` and `zuxlsx_type_error` remain unraised (section 15).
+Known limitations rather than missing items: column building is a post-pass
+rather than streaming (section 14), `xlsx_read_cells()` is unimplemented
+(section 12), and `zuxlsx_xml_error` and `zuxlsx_type_error` remain unraised
+(section 15).
 
 ---
 
