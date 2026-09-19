@@ -15,9 +15,13 @@ test_that("blanks.xlsx keeps blank cells in their places", {
   expect_identical(first$x, c(NA, 1))
   expect_identical(first$y, c("a", NA))
 
+  # Rows 1 and 3: the blank falls immediately after the header, and is kept
+  # for the same reason an interior one is. A rule that preserved blank rows
+  # except at the top would be harder to predict than one that keeps them all,
+  # and `range` is the way to start lower down.
   expect_identical(
     read_xlsx(path_to("blanks.xlsx"), "same_row_first"),
-    data.frame(x = 1, y = "a", stringsAsFactors = FALSE)
+    data.frame(x = c(NA, 1), y = c(NA, "a"), stringsAsFactors = FALSE)
   )
   # Rows 1, 2 and 4: row 3 is absent from the XML entirely, which is what the
   # worksheet's name refers to. The blank row has to survive as a row, or the
