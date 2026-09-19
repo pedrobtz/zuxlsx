@@ -248,8 +248,11 @@ styles_xml <- function(formats = 0L, custom = NULL) {
   )
 }
 
-# A one-sheet workbook whose worksheet holds `cells` (raw <c> elements) and
-# whose styles.xml is built from `formats` and `custom`.
+# A one-sheet workbook whose worksheet holds `cells` and whose styles.xml is
+# built from `formats` and `custom`.
+#
+# `cells` is either a character vector of <c> elements, making a single row, or
+# a list of such vectors, one per row.
 styled_workbook_parts <- function(cells, formats = 0L, custom = NULL) {
   parts <- workbook_parts()
   parts[["xl/_rels/workbook.xml.rels"]] <- paste0(
@@ -263,12 +266,36 @@ styled_workbook_parts <- function(cells, formats = 0L, custom = NULL) {
     ' Target="styles.xml"/>',
     "</Relationships>"
   )
+  rows <- if (is.list(cells)) cells else list(cells)
   parts[["xl/styles.xml"]] <- styles_xml(formats, custom)
   parts[["xl/worksheets/sheet1.xml"]] <- paste0(
     '<?xml version="1.0"?>',
     '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
-    "<sheetData><row r=\"1\">", paste0(cells, collapse = ""), "</row></sheetData>",
-    "</worksheet>"
+    "<sheetData>",
+    paste0(
+      "<row r=\"", seq_along(rows), "\">",
+      vapply(rows, paste0, character(1), collapse = ""),
+      "</row>",
+      collapse = ""
+    ),
+    "</sheetData></worksheet>"
   )
   parts
+}
+
+
+# Single <c> elements, for tests that spell a worksheet out cell by cell.
+# These live here rather than in a test file because testthat shuffles test
+# order, and a helper defined at the top of one file is not reliably in scope
+# when its tests run.
+txt <- function(ref, s) {
+  paste0('<c r="', ref, '" t="inlineStr"><is><t>', s, "</t></is></c>")
+}
+
+num <- function(ref, v, s = NULL) {
+  paste0(
+    '<c r="', ref, '"',
+    if (is.null(s)) "" else paste0(' s="', s, '"'),
+    "><v>", v, "</v></c>"
+  )
 }

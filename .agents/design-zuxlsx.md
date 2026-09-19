@@ -517,21 +517,35 @@ An initial implementation can support:
 
 Care must be taken with Excel's 1900 and 1904 date systems.
 
-### Status, 2026-09-19: formats are read, the epoch is not applied yet
+### Status, 2026-09-19: implemented, including both epoch traps
 
 `xl/styles.xml` is parsed as of vendored patch 0003, and a cell's style index
 resolves to "is this number a date or a time" through `cellXfs` and `numFmts`.
 `xlsx_cells()` reports such a cell as type `date` and hands back the serial
 number unchanged.
 
-The conversion to an R `Date` or `POSIXct` is deliberately **not** done there.
-The epoch is a property of the workbook -- `workbookPr/@date1904` -- not of the
-cell, and that attribute is not read yet. Converting with a hard-coded 1900
-epoch would silently shift every date in a 1904 workbook by four years, which
-is worse than handing back a number the caller can see is unconverted.
+`read_xlsx()` converts, `xlsx_cells()` does not. The serial number is the
+honest answer at cell level, because the epoch is a property of the workbook
+rather than of the cell.
 
-Reading `date1904` and applying it belongs with `read_xlsx()`, which is where
-a column acquires a type.
+`workbookPr/@date1904` is read as of vendored patch 0004 and reaches R as an
+attribute on the `xlsx_cells()` result. It matters more than its rarity
+suggests: the readxl fixture `blanks.xlsx` carries `date1904="1"`, having been
+authored on a Mac, so the existing corpus already contains the case. Read as a
+1900 workbook, every date in it is four years and a day out.
+
+The 1900 system has a second trap. Excel reproduces a Lotus 1-2-3 bug and
+treats 1900 as a leap year, so serial 60 is a 29 February 1900 that never
+existed. No single origin can therefore be right: from serial 61 the phantom
+day has been counted and the origin is 1899-12-30, while below it the origin
+is really 1899-12-31, which is what makes serial 1 come out as 1 January 1900
+the way Excel shows it. Using 1899-12-30 throughout, as is common, puts every
+date before March 1900 one day early. Serial 60 itself becomes `NA` rather
+than being bent onto a neighbouring day.
+
+A column whose serials are whole numbers becomes `Date`; one where any cell
+carries a time of day becomes `POSIXct` in UTC, since coercing to `Date` would
+drop the time silently.
 
 ---
 
@@ -576,11 +590,14 @@ xlsx_read_cells(
 
 The first release should keep the public API deliberately narrow.
 
-### Status, 2026-09-19: `xlsx_sheets()` and `xlsx_cells()`
+### Status, 2026-09-19: `xlsx_sheets()`, `xlsx_cells()` and `read_xlsx()`
 
-`xlsx_cells()` is implemented, returning one row per cell with `row`, `col`,
-`type`, `value` and `number`. `read_xlsx()`, `xlsx_rows()` and
-`xlsx_read_cells()` are not.
+`read_xlsx(path, sheet, col_names)` and `xlsx_cells()` are implemented.
+`xlsx_rows()` and `xlsx_read_cells()` are not.
+
+`read_xlsx()` does **not** take `range` yet. The argument is left off rather
+than accepted and ignored, so that its absence is a call that fails rather
+than a silently unfiltered read.
 
 `xlsx_cells()` was built before `read_xlsx()` on purpose. It needs only the
 cell event model of section 13, whereas `read_xlsx()` additionally needs the
@@ -689,6 +706,30 @@ character
 ```
 
 with explicit handling for date/datetime columns.
+
+### Status, 2026-09-19: implemented, but as a post-pass rather than streaming
+
+`read_xlsx()` builds columns in R from the cells `xlsx_cells()` returns, in
+`R/read.R`. Promotion is by inspection rather than progressively: a column of
+blanks is logical, booleans stay logical, numbers give a double, dates give
+`Date` or `POSIXct`, and anything mixed or holding a string or a cell error
+becomes character. Rows are placed by row number, not by order of arrival, so
+a column that is blank in the middle keeps its alignment.
+
+**This is not yet the streaming pipeline section 9 describes.** Cells are
+materialised in full before columns are built, so peak memory is roughly the
+size of the sheet's data rather than of one column at a time. The XML is still
+streamed -- the parser suspends per cell and the worksheet is never held as
+text -- so `DESCRIPTION`'s claim that a workbook need not be held in memory in
+full remains true of the document, but the cell list is a second copy that a
+streaming builder would not need.
+
+Doing it this way first was a deliberate trade: it reuses a boundary that is
+already tested, and it makes the column semantics -- promotion, alignment,
+epochs -- reviewable on their own, before they are entangled with incremental
+buffer growth in C. Moving the builders below the cell list is a contained
+change once those semantics are settled, because `build_column()` is the only
+thing that would have to move.
 
 ---
 
@@ -1091,18 +1132,20 @@ Out of scope initially:
 
 Formula cells can expose the cached value and optionally the formula text, but `zuxlsx` should not evaluate formulas.
 
-### Status, 2026-09-19: 7 of 11
+### Status, 2026-09-19: 10 of 11
 
 Done: 1 open the archive, 2 enumerate sheets, 3 parse relationships, 4 parse
-shared strings, 5 stream worksheet XML, 6 emit rows and cells, 8 basic scalar
-cell types, 10 structured errors.
+shared strings, 5 stream worksheet XML, 6 emit rows and cells, 7 build an R
+`data.frame`, 8 basic scalar cell types, 9 dates and datetimes including both
+epochs, 10 structured errors.
 
-Partial: 9 dates -- a date is identified and its serial number returned, but
-not converted, because the workbook epoch is not read yet (section 11).
-11 the corpus -- the adversarial categories exist, `valid/` does not.
+Partial: 11 the corpus -- the adversarial categories are built, `valid/` is
+now assertable but not yet written as a generated tree, and the external
+corpora of 17.1 to 17.3 are still an open decision.
 
-Not started: 7 build an R `data.frame`, which is `read_xlsx()` and the column
-builders of section 14.
+Known limitations rather than missing items: `read_xlsx()` has no `range`
+argument, column building is a post-pass rather than streaming (section 14),
+and `zuxlsx_xml_error` and `zuxlsx_type_error` remain unraised (section 15).
 
 ---
 

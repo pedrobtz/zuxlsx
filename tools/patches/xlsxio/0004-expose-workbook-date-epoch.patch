@@ -1,0 +1,110 @@
+Report the workbook's date epoch.
+
+A date serial in an xlsx counts from one of two epochs, chosen per workbook by
+workbookPr/@date1904. Reading a date without knowing which is in force is not
+a rounding question: the two systems differ by four years and a day, so a
+1904 workbook read as a 1900 one is wrong by that much, silently and on every
+date in the file.
+
+This is not hypothetical for this package. The readxl fixture
+tests/testthat/sheets/blanks.xlsx carries date1904="1" -- it was authored on a
+Mac, where the 1904 system was once the default -- so the corpus already
+contains the case.
+
+xlsxio never read the attribute. main_sheet_get_relid_expat_callback_element_start
+already parses xl/workbook.xml to find the requested sheet's relationship id,
+and workbookPr precedes sheets in that part, so the attribute can be captured
+on the way past, before XML_StopParser() ends the walk at the matching <sheet>.
+
+The value is copied onto the worksheet handle and read back by a new accessor.
+As with patch 0003, no existing signature changes, and the accessor is on the
+sheet handle because that is what the iterator path holds.
+
+Origin: written for zuxlsx. Not upstream.
+Applies to xlsxio 0.2.36 with 0001, 0002 and 0003 already applied.
+--- a/include/xlsxio_read.h
++++ b/include/xlsxio_read.h
+@@ -298,6 +298,12 @@
+  * \return nonzero if the cell is a date or time
+  */
+ DLL_EXPORT_XLSXIO int xlsxioread_sheet_last_cell_is_date (xlsxioreadersheet sheethandle);
++
++/*! \brief zuxlsx: nonzero if the workbook uses the 1904 date system
++ * \param  sheethandle   read handle for worksheet object
++ * \return nonzero for the 1904 epoch, zero for 1900
++ */
++DLL_EXPORT_XLSXIO int xlsxioread_sheet_date1904 (xlsxioreadersheet sheethandle);
+ 
+ 
+ 
+--- a/lib/xlsxio_read.c
++++ b/lib/xlsxio_read.c
+@@ -894,12 +894,20 @@
+   XML_Char* sheetfile;
+   XML_Char* sharedstringsfile;
+   XML_Char* stylesfile;
++  int date1904;                         //zuxlsx: workbookPr/@date1904
+ };
+ 
+ //determine relationship id for specific sheet name
+ void main_sheet_get_relid_expat_callback_element_start (void* callbackdata, const XML_Char* name, const XML_Char** atts)
+ {
+   struct main_sheet_get_rels_callback_data* data = (struct main_sheet_get_rels_callback_data*)callbackdata;
++  //zuxlsx: the date epoch. workbookPr precedes sheets in workbook.xml, so
++  //this is seen before the parser is stopped at the matching <sheet>.
++  if (XML_Char_icmp_ins(name, X("workbookPr")) == 0) {
++    const XML_Char* d = get_expat_attr_by_name(atts, X("date1904"));
++    if (d && (*d == '1' || XML_Char_icmp_ins(d, X("true")) == 0))
++      data->date1904 = 1;
++  }
+   if (XML_Char_icmp_ins(name, X("sheet")) == 0) {
+     const XML_Char* sheetname;
+     if ((sheetname = get_expat_attr_by_name(atts, X("name"))) != NULL && (!data->sheetname || XML_Char_icmp(sheetname, data->sheetname) == 0)) {
+@@ -1561,6 +1569,7 @@
+   size_t paddingrow;
+   size_t lastcolnr;
+   size_t paddingcol;
++  int date1904;                         //zuxlsx: copied from the workbook
+ };
+ 
+ DLL_EXPORT_XLSXIO size_t xlsxioread_sheet_last_row_index (xlsxioreadersheet sheethandle)
+@@ -1588,7 +1597,8 @@
+     .sheetrelid = NULL,
+     .sheetfile = NULL,
+     .sharedstringsfile = NULL,
+-    .stylesfile = NULL
++    .stylesfile = NULL,
++    .date1904 = 0
+   };
+   iterate_files_by_contenttype(handle->zip, xlsx_content_type, main_sheet_get_sheetfile_callback, &getrelscallbackdata, NULL);
+   if (!getrelscallbackdata.sheetrelid)
+@@ -1639,6 +1649,7 @@
+   } else {
+     //use simplified interface by suspending the XML parser when data is found
+     xlsxioreadersheet sheethandle = (xlsxioreadersheet)callbackdata;
++    sheethandle->date1904 = getrelscallbackdata.date1904;
+     data_sheet_callback_data_initialize(&sheethandle->processcallbackdata, sharedstrings, numfmts, flags, NULL, NULL, sheethandle);
+     if ((sheethandle->zipfile = XML_Char_openzip(sheethandle->handle->zip, getrelscallbackdata.sheetfile, 0)) == NULL) {
+       result = 1;
+@@ -1758,6 +1769,7 @@
+   result->paddingrow = 0;
+   result->lastcolnr = 0;
+   result->paddingcol = 0;
++  result->date1904 = 0;
+   xlsxioread_process(handle, sheetname, flags | XLSXIOREAD_NO_CALLBACK, NULL, NULL, result);  /* Note: currently broken when not using XLSXIOREAD_NO_CALLBACK flag */
+   return result;
+ }
+@@ -1794,6 +1806,13 @@
+                                     sheethandle->processcallbackdata.last_cell_style);
+ }
+ 
++
++/* zuxlsx: the workbook's date epoch. Nonzero means the 1904 system, in which
++   a date serial counts from 1904-01-01 rather than 1899-12-30. */
++DLL_EXPORT_XLSXIO int xlsxioread_sheet_date1904 (xlsxioreadersheet sheethandle)
++{
++  return (sheethandle ? sheethandle->date1904 : 0);
++}
+ 
+ DLL_EXPORT_XLSXIO void xlsxioread_sheet_close (xlsxioreadersheet sheethandle)
+ {

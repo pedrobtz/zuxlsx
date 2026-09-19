@@ -36,7 +36,7 @@ xlsx_cells <- function(path, sheet = 1) {
   sheet <- resolve_sheet(path, sheet)
 
   cells <- zuxlsx_unwrap(.Call(C_xlsx_cells, path, sheet), path = path)
-  data.frame(
+  out <- data.frame(
     row = cells[[1L]],
     col = cells[[2L]],
     type = factor(CELL_TYPES[cells[[3L]] + 1L], levels = CELL_TYPES),
@@ -44,6 +44,12 @@ xlsx_cells <- function(path, sheet = 1) {
     number = cells[[5L]],
     stringsAsFactors = FALSE
   )
+  # The date epoch is a property of the workbook, not of any cell, so it rides
+  # along as an attribute rather than as a column. read_xlsx() needs it to turn
+  # a serial number into a date; a caller working with cells directly needs it
+  # for the same reason.
+  attr(out, "date1904") <- cells[[6L]]
+  out
 }
 
 # Turns `sheet` into the worksheet name the native layer wants. A position is

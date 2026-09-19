@@ -299,6 +299,12 @@ DLL_EXPORT_XLSXIO int xlsxioread_sheet_last_cell_type (xlsxioreadersheet sheetha
  */
 DLL_EXPORT_XLSXIO int xlsxioread_sheet_last_cell_is_date (xlsxioreadersheet sheethandle);
 
+/*! \brief zuxlsx: nonzero if the workbook uses the 1904 date system
+ * \param  sheethandle   read handle for worksheet object
+ * \return nonzero for the 1904 epoch, zero for 1900
+ */
+DLL_EXPORT_XLSXIO int xlsxioread_sheet_date1904 (xlsxioreadersheet sheethandle);
+
 
 
 
