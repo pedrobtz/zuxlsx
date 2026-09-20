@@ -10,3 +10,4 @@
 ^src/.*\.(so|dll)$
 ^tools/corpus$
 ^cran-comments\.md$
+^tools/fuzz$

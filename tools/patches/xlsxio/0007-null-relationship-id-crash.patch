@@ -1,0 +1,48 @@
+Do not pass a missing relationship Id to strcasecmp.
+
+main_sheet_get_sheetfile_expat_callback_element_start read the Id attribute
+of a <Relationship> and compared it without checking the result:
+
+    const XML_Char* relid = get_expat_attr_by_name(atts, X("Id"));
+    if (XML_Char_icmp(relid, data->sheetrelid) == 0) {
+
+get_expat_attr_by_name() returns NULL when the attribute is absent, and
+XML_Char_icmp is strcasecmp, which does not accept one. A <Relationship>
+carrying a worksheet Type and no Id therefore dereferenced NULL.
+
+That is a process crash, not an error: a 1573 byte workbook terminated the
+host application with SIGSEGV, with no condition raised and nothing to catch.
+For an R package reading untrusted files it ends the session outright, and
+design section 16 requires that malformed input never do this.
+
+Found by the structure-aware fuzzer in tools/fuzz, from a single byte flipped
+in xl/_rels/workbook.xml.rels -- Id="rId1" became Kd="rId1" -- after 2421
+mutants. The minimal reproducer is smaller than the mutant and is a test
+rather than a committed binary.
+
+Guarding relid is the whole fix, and matches what the surrounding code already
+does: the Target lookup three lines below is written "filename && *filename"
+for the same reason. The rest of the file was audited for the same pattern;
+every other XML_Char_icmp on an attribute result is either NULL-checked first
+or uses XML_Char_icmp_ins, which handles NULL itself. This was the only one.
+
+Origin: written for zuxlsx. Not upstream, and upstream is affected --
+reported as https://github.com/brechtsanders/xlsxio/issues/151, with the
+same reproducer and the same one-line fix. Drop this patch if it is taken
+upstream and the vendored release is bumped past it.
+Applies to xlsxio 0.2.36 with 0001 through 0006 already applied.
+--- a/lib/xlsxio_read.c
++++ b/lib/xlsxio_read.c
+@@ -1035,7 +1035,11 @@
+       if ((reltype = get_expat_attr_by_name(atts, X("Type"))) != NULL) {
+         if (reltype_is(reltype, X("worksheet"))) {
+           const XML_Char* relid = get_expat_attr_by_name(atts, X("Id"));
+-          if (XML_Char_icmp(relid, data->sheetrelid) == 0) {
++          /* zuxlsx: relid is NULL when the element carries no Id at all.
++             XML_Char_icmp is strcasecmp, which does not accept it: a
++             <Relationship> with a worksheet Type and no Id segfaulted the
++             process. The adjacent Target lookup below guards the same way. */
++          if (relid && XML_Char_icmp(relid, data->sheetrelid) == 0) {
+             const XML_Char* filename = get_expat_attr_by_name(atts, X("Target"));
+             if (filename && *filename) {
+               data->sheetfile = join_basepath_filename(data->basepath, filename);
