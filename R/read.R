@@ -56,125 +56,65 @@ read_xlsx <- function(path, sheet = 1, col_names = TRUE, range = NULL) {
     )
   }
   bounds <- if (is.null(range)) NULL else parse_range(range)
+  path <- check_path(path)
+  sheet <- resolve_sheet(path, sheet)
 
-  cells <- xlsx_cells(path, sheet)
-  date1904 <- isTRUE(attr(cells, "date1904"))
-  if (!is.null(bounds)) {
-    cells <- clip_cells(cells, bounds)
-  }
-
-  if (nrow(cells) == 0L) {
+  # Columns are built in C, from the cells it already holds. Doing it there
+  # rather than here means a column's text is only ever allocated in R if the
+  # column turns out to be character: on a wide numeric sheet most of the
+  # worksheet never crosses the boundary at all.
+  got <- zuxlsx_unwrap(
+    .Call(
+      C_read_xlsx, path, sheet, col_names,
+      if (is.null(bounds)) {
+        NULL
+      } else {
+        as.numeric(c(bounds$min_row, bounds$max_row, bounds$min_col, bounds$max_col))
+      }
+    ),
+    path = path
+  )
+  if (is.null(got)) {
     return(data.frame())
   }
 
-  # A range asks for its own rectangle, whether or not every part of it holds
-  # a cell: "A1:D3" is three rows of four columns even if column D is empty
-  # throughout. Without a range the extent is whatever the sheet used.
-  n_col <- if (!is.null(bounds) && !is.na(bounds$min_col)) {
-    bounds$max_col - bounds$min_col + 1
-  } else {
-    max(cells$col)
-  }
-  row_span <- if (!is.null(bounds) && !is.na(bounds$min_row)) {
-    seq_len(bounds$max_row - bounds$min_row + 1)
-  } else {
-    seq.int(min(cells$row), max(cells$row))
-  }
-
-  header_row <- if (col_names) row_span[1L] else NA_real_
-  body_span <- if (col_names) row_span[-1L] else row_span
-  body <- if (col_names) cells[cells$row != header_row, , drop = FALSE] else cells
-
-  names_out <- column_names(cells, header_row, n_col, col_names)
-  cols <- vector("list", n_col)
-  for (j in seq_len(n_col)) {
-    cols[[j]] <- build_column(
-      body[body$col == j, , drop = FALSE], body_span, date1904
-    )
+  cols <- got$columns
+  # The epoch arithmetic stays in R. It is the fiddliest part of this package
+  # -- two epochs, one of which counts a day that never existed -- and it is
+  # vectorised, so running it here costs one call per date column rather than
+  # one per cell.
+  for (j in which(got$is_date)) {
+    cols[[j]] <- to_datetime(cols[[j]], isTRUE(got$date1904))
   }
 
   out <- as.data.frame(cols, stringsAsFactors = FALSE, optional = TRUE)
-  names(out) <- names_out
+  names(out) <- header_names(got$header, length(cols))
   out
 }
 
-# The header row, padded and de-duplicated, or X1..Xn when there is none.
-column_names <- function(cells, header_row, n_col, col_names) {
-  fallback <- paste0("X", seq_len(n_col))
-  if (!col_names) {
-    return(fallback)
-  }
-  head_cells <- cells[cells$row == header_row, , drop = FALSE]
-  out <- fallback
-  hit <- head_cells$col[!is.na(head_cells$value) & nzchar(head_cells$value)]
-  out[hit] <- head_cells$value[!is.na(head_cells$value) & nzchar(head_cells$value)]
+# The header row, padded and de-duplicated, or X1..Xn where it gave nothing.
+header_names <- function(header, n_col) {
+  out <- paste0("X", seq_len(n_col))
+  hit <- !is.na(header) & nzchar(header)
+  out[hit] <- header[hit]
   make.unique(out, sep = "_")
-}
-
-# Turns one column's cells into a vector, at the type its cells support.
-#
-# `rows` is the row numbers the column must cover, passed in rather than
-# derived from the cells: a column that is blank in the middle, or absent
-# entirely, still has to line up with its neighbours, and a range asks for its
-# own height whether or not cells fill it.
-#
-# It is a span rather than the rows that happen to carry a cell for a second
-# reason. A worksheet may omit an empty row from its XML, and xlsxio pads such
-# a gap with a single row however wide it is -- data on rows 1, 2 and 5
-# arrives as rows 1, 2, 4, 5. Every cell carries its own row number, so
-# spanning the range reconstructs the gap and ignores that padding.
-build_column <- function(col_cells, rows, date1904) {
-  n <- length(rows)
-  if (n == 0L) {
-    return(logical(0))
-  }
-  at <- match(col_cells$row, rows)
-
-  present <- col_cells[as.character(col_cells$type) != "blank", , drop = FALSE]
-  at_present <- at[as.character(col_cells$type) != "blank"]
-  types <- unique(as.character(present$type))
-
-  # An empty column, or one of nothing but blanks, is logical NA: the type
-  # that promotes to anything else without a coercion warning.
-  if (length(types) == 0L) {
-    return(rep(NA, n))
-  }
-  if (identical(types, "boolean")) {
-    out <- rep(NA, n)
-    out[at_present] <- present$number != 0
-    return(out)
-  }
-  if (identical(types, "number")) {
-    out <- rep(NA_real_, n)
-    out[at_present] <- present$number
-    return(out)
-  }
-  if (identical(types, "date")) {
-    return(build_date_column(present, at_present, n, date1904))
-  }
-  # Anything else -- a string, a cell error, or a mix of types -- is character.
-  out <- rep(NA_character_, n)
-  out[at_present] <- present$value
-  out
 }
 
 # Excel stores a date as a number of days since an epoch that the workbook
 # chooses. Neither epoch is the obvious one, and the 1900 system is not even
 # internally consistent -- see shift_1900() below.
-build_date_column <- function(present, at_present, n, date1904) {
+to_datetime <- function(serial, date1904) {
   origin <- if (date1904) "1904-01-01" else "1899-12-30"
-  serial <- if (date1904) present$number else shift_1900(present$number)
+  if (!date1904) {
+    serial <- shift_1900(serial)
+  }
 
   # A whole number is a date; a fraction carries a time of day, and losing it
   # by coercing to Date would be silent data loss.
   if (all(is.na(serial) | serial == trunc(serial))) {
-    out <- rep(NA_real_, n)
-    out[at_present] <- serial
-    return(as.Date(out, origin = origin))
+    return(as.Date(serial, origin = origin))
   }
-  out <- rep(NA_real_, n)
-  out[at_present] <- serial * 86400
-  as.POSIXct(out, origin = paste(origin, "00:00:00"), tz = "UTC")
+  as.POSIXct(serial * 86400, origin = paste(origin, "00:00:00"), tz = "UTC")
 }
 
 # Excel reproduces a Lotus 1-2-3 bug: under the 1900 date system it treats 1900
