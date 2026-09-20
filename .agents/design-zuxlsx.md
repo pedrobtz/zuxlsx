@@ -769,20 +769,16 @@ text -- so `DESCRIPTION`'s claim that a workbook need not be held in memory in
 full remains true of the document, but the cell list is a second copy that a
 streaming builder would not need.
 
-### Measured, 2026-09-19, and it changes what section 14 should ask for
+### Done, 2026-09-20: columns are built in C, and the text mostly stays there
 
-For a 20000 by 10 sheet of 200000 cells:
+Measured first, on a 20000 by 10 sheet of 200000 cells. The intermediate cell
+list was 12.8 MB against a 4.7 MB result, and 7.5 MB of that -- 59% -- was the
+cell text. Seven of the ten columns were numeric and discarded it.
 
-| | size |
-| --- | --- |
-| `xlsx_cells()` result | 12.8 MB |
-| of which `value`, the cell text | 7.5 MB |
-| row, column, type and number together | 5.3 MB |
-| `read_xlsx()` result | 4.7 MB |
-
-The text is 59% of the intermediate, and **a streaming builder cannot discard
-it.** Promoting a column to character currently returns each cell as it was
-written, not as its stored double formats:
+**A streaming builder cannot discard that text.** Promoting a column to
+character returns each cell as it was written, and a column is only known to
+be character once a string appears in it, which may be thousands of rows after
+the numbers:
 
 ```text
 stored text     '1.50'  '2.0e3'  '0.30'
@@ -790,29 +786,40 @@ read_xlsx gives '1.50'  '2.0e3'  '0.30'
 from a double   '1.5'   '2000'   '0.3'
 ```
 
-A builder that dropped the text and reformatted on promotion would change
-every mixed column silently. Keeping the text costs the 59%, which is most of
-what streaming was supposed to save.
+So the section as originally written asked for something whose price was not
+understood: dropping the text would silently rewrite every mixed column.
 
-So the section as written asks for something whose price was not understood
-when it was written. The narrower version worth doing is to build columns in
-C from the cell list that already exists there, which removes the R-side cell
-vectors from the peak without touching fidelity, since the text stays
-reachable in C. That is roughly 29 MB to 17 MB on the sheet above, against
-about 5 MB for true streaming with the representation change.
+What was done instead is to decide each column's type in C, from the cell list
+that already exists there, and build only what the column turns out to be. A
+numeric column emits doubles and its text is never allocated in R at all,
+while a column that promotes still gets the original text, because in C it is
+still there when the decision is made. `C_read_xlsx()` does that; the type
+rules mirror R's former `build_column()` exactly.
 
-Deferred rather than done: it refactors correct, well-covered code for a
-memory improvement, and the package has gaps worth more. Recorded so the next
-attempt starts from the measurement rather than from the assumption.
+Measured after:
 
-Doing it this way first was a deliberate trade: it reuses a boundary that is
-already tested, and it makes the column semantics -- promotion, alignment,
-epochs -- reviewable on their own, before they are entangled with incremental
-buffer growth in C. Moving the builders below the cell list is a contained
-change once those semantics are settled, because `build_column()` is the only
-thing that would have to move.
+| | peak | above baseline | elapsed |
+| --- | --- | --- | --- |
+| before, pivoting in R over `xlsx_cells()` | 119 MB | 76 MB | 0.48 s |
+| after, columns built in C | 56 MB | 18 MB | 0.30 s |
 
----
+Four times less memory, and a third faster, which was not the aim. The earlier
+estimate in this section of 29 MB down to 17 MB was wrong in the conservative
+direction: it had not counted the type factor and the intermediate data frame
+that `read_xlsx()` was also building.
+
+The epoch arithmetic deliberately stayed in R. It is the fiddliest part of the
+package -- two epochs, one counting a day that never existed -- it is already
+covered by tests, and being vectorised it costs one call per date column
+rather than one per cell. C reports which columns are date serials and R
+converts them.
+
+Range clipping moved into C as well, so a range no longer pays for the rest of
+the worksheet in memory before discarding it.
+
+Evidence the rewrite is faithful: all 346 tests passed unchanged on the first
+run, and the external corpus reports the identical 1785804 cells across 363
+real workbooks.
 
 ## 15. Error handling
 
@@ -1232,10 +1239,37 @@ cells. Spot-checked rather than assumed: they contain no `<c>` elements at all,
 being POI fixtures for headers, tab colours and drawings. Genuinely empty, not
 more of the same.
 
-Still to build: `zip64.xlsx`. Unlike strict OOXML this one really is absent
-from the corpus, though it needs no real producer either -- a ZIP64 end of
-central directory record and locator can be assembled by hand the way the
-other adversarial archives already are.
+### 17.4e ZIP64, 2026-09-20
+
+Built by hand, as suspected, and no producer was needed. ZIP64 lifts the
+format's 32-bit limits: a field that will not fit is stored as all-ones and
+the real value moves into a ZIP64 extra field, with a ZIP64 end of central
+directory record and locator ahead of the ordinary one. `write_zip64()`
+produces tiny archives that use those structures anyway, which is how the
+format is covered without a four gigabyte fixture -- and is what writers
+themselves do when streaming, not knowing the final size in advance.
+
+All three places the escaping can happen are covered: the end-of-central-
+directory counts and offsets, the per-entry sizes and local header offset, and
+both together. A reader handling only one of them fails on real archives. The
+fixtures were cross-checked against system `unzip`, which accepts them, so
+they are well-formed ZIP64 rather than merely readable by miniz.
+
+The negative controls matter more than the positive ones here, because a
+reader that ignored ZIP64 entirely would pass the positive tests. Destroying
+the ZIP64 end-of-central-directory signature, or the central directory offset
+inside it, both give `zuxlsx_zip_error` -- so those structures are genuinely
+being read.
+
+**Characterised, not required: the ZIP64 locator is not consulted.** miniz
+finds the record by scanning for its signature rather than by following the
+locator, so a locator pointing far past the end of the file changes nothing.
+That is permissive rather than wrong, since the record it finds is the right
+one, but it means an archive malformed in exactly that way is read rather than
+refused. Pinned by a test, because a future miniz that began honouring the
+locator would change it silently.
+
+With this, section 17.4's tree is complete.
 
 ---
 

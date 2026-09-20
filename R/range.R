@@ -83,27 +83,3 @@ parse_range <- function(range, call = sys.call(-1L)) {
     max_col = max(from$col, to$col)
   )
 }
-
-# Keeps the cells inside `bounds`, and shifts them so that the top-left of the
-# range becomes row 1, column 1. Without the shift a range starting at C3
-# would come back with two empty leading columns.
-clip_cells <- function(cells, bounds) {
-  keep <- rep(TRUE, nrow(cells))
-  if (!is.na(bounds$min_row)) {
-    keep <- keep & cells$row >= bounds$min_row & cells$row <= bounds$max_row
-  }
-  if (!is.na(bounds$min_col)) {
-    keep <- keep & cells$col >= bounds$min_col & cells$col <= bounds$max_col
-  }
-  out <- cells[keep, , drop = FALSE]
-
-  if (nrow(out) > 0L) {
-    if (!is.na(bounds$min_row)) {
-      out$row <- out$row - bounds$min_row + 1
-    }
-    if (!is.na(bounds$min_col)) {
-      out$col <- out$col - bounds$min_col + 1
-    }
-  }
-  out
-}

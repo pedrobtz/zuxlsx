@@ -149,3 +149,41 @@ test_that("a committed fixture reads, and its 1904 epoch is honoured", {
   expect_s3_class(out, "data.frame")
   expect_gt(nrow(out), 0L)
 })
+
+test_that("promotion to character keeps the cell as it was written", {
+  # The property that decides how columns may be built. A column is only known
+  # to be character once a string appears in it, which may be thousands of
+  # rows after the numbers -- so the numbers' original text has to still be
+  # available at that point.
+  #
+  # Building columns in C keeps it available, because the text is there when
+  # the decision is made. A streaming builder that dropped the text and
+  # reformatted from the stored double would silently rewrite every mixed
+  # column, and that is why this package does not stream them.
+  path <- withr::local_tempfile(fileext = ".xlsx")
+  write_workbook(path, styled_workbook_parts(list(
+    c(txt("A1", "v")),
+    c(num("A2", "1.50")),
+    c(num("A3", "2.0e3")),
+    c(num("A4", "0.30")),
+    c(txt("A5", "a string, which forces the column to character"))
+  )))
+
+  out <- read_xlsx(path)$v
+  expect_identical(out[1:3], c("1.50", "2.0e3", "0.30"))
+  # What reformatting from the double would have given instead.
+  expect_false(identical(out[1:3], as.character(c(1.50, 2.0e3, 0.30))))
+})
+
+test_that("a column of only numbers is a double, not text", {
+  # The complement: when nothing forces promotion, the text is never needed
+  # and is never built in R at all.
+  path <- withr::local_tempfile(fileext = ".xlsx")
+  write_workbook(path, styled_workbook_parts(list(
+    c(txt("A1", "v")), c(num("A2", "1.50")), c(num("A3", "2.50"))
+  )))
+
+  out <- read_xlsx(path)$v
+  expect_type(out, "double")
+  expect_identical(out, c(1.5, 2.5))
+})
