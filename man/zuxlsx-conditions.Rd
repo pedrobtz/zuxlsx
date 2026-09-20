@@ -21,6 +21,11 @@ XML itself rather than what it says, and names the part and line.}
 A valid workbook declares at least one worksheet.}
 \item{\code{zuxlsx_sheet_error}}{The workbook opened, but the requested
 worksheet is not in it.}
+\item{\code{zuxlsx_encrypted_error}}{The workbook is password-protected. Its
+contents are encrypted and this package cannot decrypt them. Raised in
+preference to \code{zuxlsx_unsupported_format_error} so that "needs a
+password" can be handled on its own -- it is the one unsupported
+format the caller can do something about.}
 \item{\code{zuxlsx_unsupported_format_error}}{The file is a spreadsheet, but
 not one zuxlsx can read: an \code{.xlsb}, whose worksheets are binary rather
 than XML, or an OLE2 file, which is either a legacy \code{.xls} or an

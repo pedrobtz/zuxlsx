@@ -129,7 +129,7 @@ poi/58106.xlsx	ok	3	91
 poi/58315.xlsx	ok	1	2
 poi/58325_db.xlsx	ok	2	2
 poi/58325_lt.xlsx	ok	1	2
-poi/58616.xlsx	zuxlsx_unsupported_format_error	0	0
+poi/58616.xlsx	zuxlsx_encrypted_error	0	0
 poi/58648.xlsx	ok	1	11
 poi/58731.xlsx	ok	3	16
 poi/58747.xlsx	ok	1	71
@@ -220,7 +220,7 @@ poi/conditional_formatting_with_formula_on_second_sheet.xlsx	ok	2	27
 poi/ConditionalFormattingSamples.xlsx	ok	18	2540
 poi/craftonhills.edu_programreview_report.aspx_goalpriorityreport_0011d159-1eeb-4b63-8833-867b0926e5f3.xlsx	ok	1	36
 poi/crash-274d6342e4842d61be0fb48eaadad6208ae767ae.xlsx	zuxlsx_zip_error	0	0
-poi/crash-9bf3cd4bd6f50a8a9339d363c2c7af14b536865c.xlsx	zuxlsx_unsupported_format_error	0	0
+poi/crash-9bf3cd4bd6f50a8a9339d363c2c7af14b536865c.xlsx	zuxlsx_encrypted_error	0	0
 poi/customIndexedColors.xlsx	ok	2	34
 poi/CustomXMLMapping-singleattributenamespace.xlsx	ok	3	29
 poi/CustomXMLMappings-complex-type.xlsx	ok	3	159
@@ -282,8 +282,8 @@ poi/picture.xlsx	ok	3	20
 poi/poc-shared-strings.xlsx	ok	1	12000
 poi/poc-xmlbomb-empty.xlsx	ok	1	1
 poi/poc-xmlbomb.xlsx	ok	1	1
-poi/protected_passtika.xlsb	zuxlsx_unsupported_format_error	0	0
-poi/protected_passtika.xlsx	zuxlsx_unsupported_format_error	0	0
+poi/protected_passtika.xlsb	zuxlsx_encrypted_error	0	0
+poi/protected_passtika.xlsx	zuxlsx_encrypted_error	0	0
 poi/ref-56737.xlsx	ok	3	21
 poi/ref2-56737.xlsx	ok	3	30
 poi/reordered_sheets.xlsx	ok	4	2

@@ -1448,9 +1448,35 @@ is handed to the reader, since afterwards the only available answer is
 "corrupt archive".
 
 That signature identifies the container, not what is inside it: a legacy .xls
-is also OLE2. Distinguishing the two means reading the CFB directory and
-looking for an `EncryptionInfo` stream, which is most of the work of reading a
-CFB, so the message names both possibilities rather than guessing at one.
+is also OLE2. The original costing said distinguishing the two meant reading
+the CFB directory, which is "most of the work of reading a CFB", so the
+message named both possibilities rather than guessing.
+
+**Revised 2026-09-20.** That over-costed it. Reading a *stream* out of a CFB
+does need the FAT, the miniFAT, the directory tree and the mini stream.
+Reading the directory *names* needs the header, the FAT and the directory
+chain, and stops there -- no mini stream, no stream contents, no password. It
+is roughly 150 lines, and it is enough to tell the two apart: an encrypted
+package has `EncryptionInfo` and `EncryptedPackage`, a BIFF workbook has
+`Workbook` or `Book`.
+
+So `ole2_kind()` now classifies, and the two formats get different advice.
+`zuxlsx_encrypted_error` is a subclass of `zuxlsx_unsupported_format_error`,
+so code written against the old behaviour keeps working while code that wants
+to prompt for a password can catch the specific class. A container that is
+neither still reports as plain OLE2 -- the classifier must not reach for a
+better message when it does not have one.
+
+Everything in it is bounds-checked and every walk is bounded, because a
+workbook that arrives encrypted is a workbook somebody else produced. The
+sector offset is computed in 64-bit so a sector number near 2^32 cannot wrap
+into a small valid-looking offset; the directory walk is capped; a FAT chain
+pointing at itself terminates; a name length outside 2..64 bytes is refused
+before it is used. `test-ole2.R` sweeps truncations at every length through
+the header and first sectors, seeded byte corruption, and a deliberately
+self-referential FAT.
+
+This does not read an encrypted workbook. It tells the user they have one.
 
 **xlsb.** An `.xlsb` is a genuine OPC package -- a ZIP, with XML content types
 and relationships. Only the workbook and worksheet parts differ, holding BIFF12
@@ -1464,7 +1490,8 @@ to declare a worksheet, so a file that reads normally pays nothing.
 Reading an encrypted workbook was costed and deliberately left for later.
 
 It needs four things, and only the last is small: a CFB container reader
-(sector chains, FAT and miniFAT, directory tree -- 600 to 900 lines, all new);
+(sector chains, FAT and miniFAT, directory tree -- 600 to 900 lines, of which
+the directory-name subset is now written, see 21 above);
 AES-128 and AES-256 in ECB and CBC, plus SHA-1 and SHA-512, none of which this
 package links today; both schemes, since standard encryption (Office 2007,
 AES-128 ECB, SHA-1) and agile encryption (Office 2010 onward and the default
@@ -1488,6 +1515,65 @@ for AES and SHA, because "it decrypted something" proves nothing.
 Of the three main R readers -- readxl, openxlsx and openxlsx2 -- none supports
 this, and all three fail less informatively than detection alone achieves. If
 it is built, agile should come first, since that is what current Excel writes.
+
+### 21c. Decryption: agile only, 2026-09-20
+
+The costing above has been overtaken on two points, and the scope is now
+decided: **agile encryption only. Standard encryption is out of scope.**
+
+**The crypto is no longer an obstacle.** `zucrypt` exists, vendors
+TF-PSA-Crypto, and publishes exactly the primitives this needs through a
+static archive with no runtime dependency -- which is the route section 3
+demanded and the reason that package was written. A 60-line R prototype using
+only its public functions decrypted `tests/testthat/fixtures/ole2/
+two-sheets-encrypted.xlsx` to a byte-exact match of the known plaintext, and
+rejected a wrong password through the verifier. Nothing is missing from it.
+
+**Agile only.** Standard encryption (Office 2007: AES-128, ECB, SHA-1) shares
+nothing with agile but the container, so supporting it is a second
+implementation rather than a variation on the first. Agile has been Excel's
+default since 2013. A standard-encrypted file will be recognised and refused
+with a message naming the scheme, not decrypted -- and refusing it explicitly
+is the point, because the alternative is deriving a key with the wrong
+algorithm and reporting a wrong password.
+
+The two are told apart by the eight-byte prefix on `EncryptionInfo`: agile is
+version 4.4 with flags `0x40`, which is `04 00 04 00 40 00 00 00` and is what
+the real fixture carries. Anything else is not agile.
+
+What remains, in order:
+
+1. **CFB stream reading.** The gap. Section 21's classifier reads directory
+   *names*; reading *contents* needs the FAT chain walk, the miniFAT and the
+   mini stream, and the root entry's mini-stream container. `EncryptionInfo`
+   is 1441 bytes in the real fixture, so it lives in the mini stream and
+   there is no avoiding that path. 250 to 400 lines on top of what exists,
+   and it needs the same hostile-input treatment -- this is the layer whose
+   allocation bug made msoffcrypto-tool write corrupt files.
+2. **Parsing `EncryptionInfo`.** XML, and this package already links `zuxml`,
+   so it is parsing rather than a new dependency. Check the version prefix
+   first and refuse anything that is not agile.
+3. **Derivation and the segment loop, in C.** Straightforward once 1 and 2
+   exist. `zucrypt`'s incremental hash and explicit CBC chaining state were
+   built for this shape.
+4. **Handing the plaintext to xlsxio**, via `xlsxioread_open_memory()`, as
+   section 9 already settles.
+
+**The spin loop must be in C.** The real file specifies 100000 iterations. In
+R that measured 0.74 s, at 7.4 microseconds per iteration -- almost entirely
+`.Call` overhead, since the hash itself is nanoseconds. In C it is a few
+milliseconds. In R every open would feel broken.
+
+**On proving it correct.** That the prototype reproduces the plaintext shows
+the parameters were read correctly; it does not show the scheme is right,
+because the prototype and `zucrypt`'s known-answer tests share an
+implementation. The independent check is that `msoffcrypto-tool` produced the
+fixture and decrypts it to the same bytes. Keep that cross-check in the suite;
+it is the only part of this that is genuinely independent.
+
+The three consequences recorded in 21b stand unchanged: decryption cannot
+stream, a password passed from R cannot be wiped, and known-answer vectors are
+what make correctness meaningful rather than "it decrypted something".
 ### Status, 2026-09-19: 10 of 11
 
 Done: 1 open the archive, 2 enumerate sheets, 3 parse relationships, 4 parse
