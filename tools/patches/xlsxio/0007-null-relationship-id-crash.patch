@@ -26,7 +26,10 @@ for the same reason. The rest of the file was audited for the same pattern;
 every other XML_Char_icmp on an attribute result is either NULL-checked first
 or uses XML_Char_icmp_ins, which handles NULL itself. This was the only one.
 
-Origin: written for zuxlsx. Not upstream, and upstream is affected.
+Origin: written for zuxlsx. Not upstream, and upstream is affected --
+reported as https://github.com/brechtsanders/xlsxio/issues/151, with the
+same reproducer and the same one-line fix. Drop this patch if it is taken
+upstream and the vendored release is bumped past it.
 Applies to xlsxio 0.2.36 with 0001 through 0006 already applied.
 --- a/lib/xlsxio_read.c
 +++ b/lib/xlsxio_read.c

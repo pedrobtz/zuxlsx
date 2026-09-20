@@ -1338,7 +1338,12 @@ That is a *process crash*, not an error. A 1573-byte workbook ended the R
 session with SIGSEGV -- no condition, nothing to catch -- which is precisely
 what section 16 says malformed input must never do. Fixed by vendored patch
 0007 and regression-tested from a minimal reproducer rather than the mutant.
-Upstream xlsxio is affected.
+
+Upstream xlsxio is affected, and it was verified there rather than assumed:
+the 0.2.36 release sources were built separately and crash identically. It is
+reported as <https://github.com/brechtsanders/xlsxio/issues/151>. If the fix
+is taken upstream, patch 0007 goes away when the vendored release is bumped
+past it.
 
 The whole file was audited for the same pattern afterwards. Every other
 `XML_Char_icmp` on an attribute result is either NULL-checked first or uses
