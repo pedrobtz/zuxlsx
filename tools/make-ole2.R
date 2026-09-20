@@ -266,18 +266,20 @@ main <- function(args) {
 
 main(commandArgs(trailingOnly = TRUE))
 
-## A note on what is NOT here.
+## A note on what is NOT here, and where it went.
 ##
-## None of these fixtures is really encrypted, and no test should claim
-## otherwise. Producing a genuine Agile-encrypted workbook means implementing
-## the [MS-OFFCRYPTO] key derivation and segmented AES-CBC, which zucrypt now
-## provides the primitives for -- and then there would be no way to tell a
-## correct implementation from a confident misreading of the specification,
-## because nothing here can open the result. A fixture that encodes a
-## misreading is worse than no fixture: it makes the reader "verified" against
-## the wrong thing.
+## None of the fixtures written above is really encrypted, and no test should
+## claim otherwise. They carry the structure -- container, directory, stream
+## names -- which is all the reader needs to tell a password-protected .xlsx
+## from a legacy .xls, and that is the question it currently gets wrong.
 ##
-## Cross-checking needs one of: a workbook produced by Excel, LibreOffice's
-## `--convert-to` with a password, or msoffcrypto-tool. None is available on
-## this machine, and the first is not reproducible in CI. Decide which before
-## writing the decryption path, not after.
+## Genuinely encrypted fixtures now exist beside them, produced by
+## msoffcrypto-tool rather than by this script: two-sheets-encrypted.xlsx and
+## the plaintext it came from. They are committed as binaries because Agile
+## encryption draws a random salt and a random content key, so there is no
+## byte-reproducible version to generate -- and a fixed-seed one would be less
+## like the files this package will meet, not more.
+##
+## See fixtures/ole2/README.md for how to reproduce them, and for the
+## msoffcrypto-tool 6.0.0 defect that makes the plaintext size load-bearing:
+## below 4081 bytes it writes a corrupt container and exits 0.

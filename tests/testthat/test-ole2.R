@@ -75,6 +75,51 @@ test_that("the message names encryption as a possibility", {
   )
 })
 
+test_that("a real encrypted workbook has the structure the synthetic one models", {
+  # two-sheets-encrypted.xlsx is genuinely Agile-encrypted, produced by
+  # msoffcrypto-tool. The synthetic fixture above is a model of it, and a
+  # model nobody compares against the real thing is a model that drifts.
+  real <- cfb_stream_names(ole2_fixture("two-sheets-encrypted.xlsx"))
+  expect_true("EncryptionInfo" %in% real)
+  expect_true("EncryptedPackage" %in% real)
+
+  synthetic <- cfb_stream_names(ole2_fixture("encrypted-agile.xlsx"))
+  expect_true(all(c("EncryptionInfo", "EncryptedPackage") %in% synthetic))
+
+  # A real file carries the DataSpaces machinery too, which the synthetic one
+  # deliberately omits. Recorded so the omission stays a decision: if the
+  # reader ever needs those streams, the model has to grow them.
+  expect_true("DataSpaceMap" %in% real)
+  expect_false("DataSpaceMap" %in% synthetic)
+})
+
+test_that("the encrypted fixture's plaintext reads like the workbook it came from", {
+  # two-sheets-stored.xlsx is inst/extdata/two-sheets.xlsx repacked with its
+  # parts stored rather than deflated, purely to clear the 4081-byte floor
+  # msoffcrypto-tool 6.0.0 corrupts below (see fixtures/ole2/README.md).
+  # Asserting the repack changed nothing is what makes it usable as the
+  # expected result when decryption eventually works.
+  expect_identical(
+    read_xlsx(ole2_fixture("two-sheets-stored.xlsx")),
+    read_xlsx(system.file("extdata", "two-sheets.xlsx", package = "zuxlsx"))
+  )
+})
+
+test_that("the encrypted package is large enough to avoid the mini stream", {
+  # Not a property of zuxlsx, and it is still worth a test: the day someone
+  # regenerates this fixture from a smaller workbook, msoffcrypto-tool will
+  # write a corrupt container and exit 0, and the failure will surface as an
+  # unrelated decryption error much later.
+  entries <- cfb_read(ole2_fixture("two-sheets-encrypted.xlsx"))
+  pkg <- Filter(function(e) e$name == "EncryptedPackage", entries)[[1]]
+  expect_gte(pkg$size, 4096)
+})
+
+test_that("a real encrypted workbook is reported as unsupported, not corrupt", {
+  expect_error(read_xlsx(ole2_fixture("two-sheets-encrypted.xlsx")),
+               class = "zuxlsx_unsupported_format_error")
+})
+
 test_that("every entry point reports an OLE2 container the same way", {
   # read_xlsx() is not the only door in. A user calling xlsx_sheets() on an
   # encrypted workbook should not get a different story.
