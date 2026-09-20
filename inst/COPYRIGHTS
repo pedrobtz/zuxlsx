@@ -51,12 +51,19 @@ in order. Neither is upstream.
       that a duplicated part name resolves by position rather than by a lookup
       flag. Upstream matched stored names literally. Written for zuxlsx.
 
-Running the five patches in order against the pristine 0.2.36 release archive
+  0006-strict-ooxml-relationship-types.patch
+      Matches relationship types from the strict ISO/IEC 29500 namespace
+      family as well as the transitional one, so that a workbook saved as
+      "Strict Open XML Spreadsheet" reads its cells instead of appearing
+      empty. Upstream matched the transitional spelling only. Written for
+      zuxlsx.
+
+Running the six patches in order against the pristine 0.2.36 release archive
 reproduces src/vendor/xlsxio/ byte for byte, including line endings. No other
 modification is made to the bundled code, and it is never edited in place:
 tools/vendor/fetch re-derives it, and tools/vendor/verify checks the result.
 
-Line endings are CRLF, as shipped by upstream, except on the lines the five
+Line endings are CRLF, as shipped by upstream, except on the lines the six
 patches introduce. They are deliberately not normalised, so the kept files
 still match the release archive.
 

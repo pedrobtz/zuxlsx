@@ -322,3 +322,53 @@ grid_workbook <- function(nrow, ncol) {
     )
   }))
 }
+
+
+# --- Strict OOXML -----------------------------------------------------------
+#
+# ECMA-376 has two namespace families. Transitional is what Excel writes by
+# default and what workbook_parts() above produces; strict is the ISO/IEC
+# 29500 variant Excel writes for "Strict Open XML Spreadsheet", and differs
+# only in the namespace URIs -- including the relationship Type attributes,
+# which is what a reader has to match on to find a worksheet at all.
+STRICT_MAIN_NS <- "http://purl.oclc.org/ooxml/spreadsheetml/main"
+STRICT_REL_NS <- "http://purl.oclc.org/ooxml/officeDocument/relationships"
+
+strict_workbook_parts <- function(sheets = "Sheet1", cells = NULL) {
+  if (is.null(cells)) cells <- c(num("A1", 1), num("B1", 2))
+  list(
+    "[Content_Types].xml" = paste0(
+      '<?xml version="1.0"?>',
+      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">',
+      '<Default Extension="xml" ContentType="application/xml"/>',
+      '<Override PartName="/xl/workbook.xml"',
+      ' ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>',
+      '<Override PartName="/xl/worksheets/sheet1.xml"',
+      ' ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>',
+      "</Types>"
+    ),
+    "_rels/.rels" = paste0(
+      '<?xml version="1.0"?>',
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
+      '<Relationship Id="rId1" Type="', STRICT_REL_NS, '/officeDocument"',
+      ' Target="xl/workbook.xml"/></Relationships>'
+    ),
+    "xl/workbook.xml" = paste0(
+      '<?xml version="1.0"?><workbook xmlns="', STRICT_MAIN_NS, '"',
+      ' xmlns:r="', STRICT_REL_NS, '" conformance="strict">',
+      '<sheets><sheet name="', sheets[1], '" sheetId="1" r:id="rId1"/></sheets>',
+      "</workbook>"
+    ),
+    "xl/_rels/workbook.xml.rels" = paste0(
+      '<?xml version="1.0"?>',
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
+      '<Relationship Id="rId1" Type="', STRICT_REL_NS, '/worksheet"',
+      ' Target="worksheets/sheet1.xml"/></Relationships>'
+    ),
+    "xl/worksheets/sheet1.xml" = paste0(
+      '<?xml version="1.0"?><worksheet xmlns="', STRICT_MAIN_NS, '"><sheetData>',
+      '<row r="1">', paste0(cells, collapse = ""), "</row>",
+      "</sheetData></worksheet>"
+    )
+  )
+}

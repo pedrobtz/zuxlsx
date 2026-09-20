@@ -37,14 +37,17 @@ if [ ! -f "$EXPECTED" ]; then
     exit 1
 fi
 
-# Compare name and outcome only. The detail column carries sheet counts, which
-# are informative in the baseline but too noisy to gate on.
-cut -f1,2 "$EXPECTED" | LC_ALL=C sort > "$tmp.want"
-cut -f1,2 "$tmp" | LC_ALL=C sort > "$tmp.got"
+# Every column is compared, cell counts included. A file that starts or stops
+# reading matters, and so does one that keeps "reading" while returning
+# nothing -- which is how strict OOXML workbooks hid a defect behind an "ok".
+LC_ALL=C sort "$EXPECTED" > "$tmp.want"
+LC_ALL=C sort "$tmp" > "$tmp.got"
 if diff -u "$tmp.want" "$tmp.got" > "$tmp.diff"; then
     ok=$(awk -F'\t' 'NR > 1 && $2 == "ok"' "$tmp" | wc -l | tr -d ' ')
     all=$(($(wc -l < "$tmp") - 1))
-    printf 'ok  %d of %d files read; outcomes match %s\n' "$ok" "$all" "$EXPECTED"
+    cells=$(awk -F'\t' 'NR > 1 { n += $4 } END { print n + 0 }' "$tmp")
+    printf 'ok  %d of %d files read, %s cells; matches %s\n' \
+        "$ok" "$all" "$cells" "$EXPECTED"
     rm -f "$tmp.want" "$tmp.got" "$tmp.diff"
     exit 0
 fi
