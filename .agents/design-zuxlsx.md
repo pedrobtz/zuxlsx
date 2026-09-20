@@ -1417,9 +1417,35 @@ is handed to the reader, since afterwards the only available answer is
 "corrupt archive".
 
 That signature identifies the container, not what is inside it: a legacy .xls
-is also OLE2. Distinguishing the two means reading the CFB directory and
-looking for an `EncryptionInfo` stream, which is most of the work of reading a
-CFB, so the message names both possibilities rather than guessing at one.
+is also OLE2. The original costing said distinguishing the two meant reading
+the CFB directory, which is "most of the work of reading a CFB", so the
+message named both possibilities rather than guessing.
+
+**Revised 2026-09-20.** That over-costed it. Reading a *stream* out of a CFB
+does need the FAT, the miniFAT, the directory tree and the mini stream.
+Reading the directory *names* needs the header, the FAT and the directory
+chain, and stops there -- no mini stream, no stream contents, no password. It
+is roughly 150 lines, and it is enough to tell the two apart: an encrypted
+package has `EncryptionInfo` and `EncryptedPackage`, a BIFF workbook has
+`Workbook` or `Book`.
+
+So `ole2_kind()` now classifies, and the two formats get different advice.
+`zuxlsx_encrypted_error` is a subclass of `zuxlsx_unsupported_format_error`,
+so code written against the old behaviour keeps working while code that wants
+to prompt for a password can catch the specific class. A container that is
+neither still reports as plain OLE2 -- the classifier must not reach for a
+better message when it does not have one.
+
+Everything in it is bounds-checked and every walk is bounded, because a
+workbook that arrives encrypted is a workbook somebody else produced. The
+sector offset is computed in 64-bit so a sector number near 2^32 cannot wrap
+into a small valid-looking offset; the directory walk is capped; a FAT chain
+pointing at itself terminates; a name length outside 2..64 bytes is refused
+before it is used. `test-ole2.R` sweeps truncations at every length through
+the header and first sectors, seeded byte corruption, and a deliberately
+self-referential FAT.
+
+This does not read an encrypted workbook. It tells the user they have one.
 
 **xlsb.** An `.xlsb` is a genuine OPC package -- a ZIP, with XML content types
 and relationships. Only the workbook and worksheet parts differ, holding BIFF12
@@ -1433,7 +1459,8 @@ to declare a worksheet, so a file that reads normally pays nothing.
 Reading an encrypted workbook was costed and deliberately left for later.
 
 It needs four things, and only the last is small: a CFB container reader
-(sector chains, FAT and miniFAT, directory tree -- 600 to 900 lines, all new);
+(sector chains, FAT and miniFAT, directory tree -- 600 to 900 lines, of which
+the directory-name subset is now written, see 21 above);
 AES-128 and AES-256 in ECB and CBC, plus SHA-1 and SHA-512, none of which this
 package links today; both schemes, since standard encryption (Office 2007,
 AES-128 ECB, SHA-1) and agile encryption (Office 2010 onward and the default

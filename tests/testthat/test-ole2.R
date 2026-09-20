@@ -55,24 +55,44 @@ test_that("every OLE2 container is reported as unsupported, not corrupt", {
   }
 })
 
-test_that("the message names encryption as a possibility", {
-  # Pinning today's behaviour, which is deliberately non-committal: the
-  # message offers both formats because the reader cannot yet tell them
-  # apart. When it can, this test is the one that has to change, and it
-  # should -- an encrypted workbook and an .xls need different advice.
-  cond <- tryCatch(read_xlsx(ole2_fixture("encrypted-agile.xlsx")),
-                   condition = function(e) e)
-  expect_match(conditionMessage(cond), "OLE2")
-  expect_match(conditionMessage(cond), "password-protected")
-  expect_match(conditionMessage(cond), "cannot decrypt")
-
-  # And says the same thing about a legacy .xls, which is the shortcoming.
+test_that("an encrypted workbook and a legacy .xls get different answers", {
+  # The distinction this whole exercise is about. Both are OLE2 containers,
+  # and until the reader learned to read the CFB directory both produced the
+  # same message -- which told someone with a password-protected file that it
+  # might be a legacy .xls, and someone with a legacy .xls that it might need
+  # a password.
+  encrypted <- tryCatch(read_xlsx(ole2_fixture("encrypted-agile.xlsx")),
+                        condition = function(e) e)
   legacy <- tryCatch(read_xlsx(ole2_fixture("legacy.xls")),
                      condition = function(e) e)
-  expect_identical(
-    sub("^'[^']*'", "", conditionMessage(cond)),
-    sub("^'[^']*'", "", conditionMessage(legacy))
-  )
+
+  expect_s3_class(encrypted, "zuxlsx_encrypted_error")
+  expect_false(inherits(legacy, "zuxlsx_encrypted_error"))
+
+  expect_match(conditionMessage(encrypted), "password-protected")
+  expect_match(conditionMessage(encrypted), "cannot decrypt")
+  expect_match(conditionMessage(legacy), "legacy .xls", fixed = TRUE)
+  expect_no_match(conditionMessage(legacy), "password")
+})
+
+test_that("the encrypted condition is a subclass, so old handlers still work", {
+  # Code written before this distinction existed catches
+  # zuxlsx_unsupported_format_error. Narrowing the class without keeping that
+  # would be a silent break for every such caller.
+  cond <- tryCatch(read_xlsx(ole2_fixture("encrypted-agile.xlsx")),
+                   condition = function(e) e)
+  expect_s3_class(cond, "zuxlsx_encrypted_error")
+  expect_s3_class(cond, "zuxlsx_unsupported_format_error")
+  expect_s3_class(cond, "zuxlsx_error")
+})
+
+test_that("an OLE2 container that is neither is still reported honestly", {
+  # The reader must not reach for the better message when it does not know.
+  cond <- tryCatch(read_xlsx(ole2_fixture("unknown-ole2.bin")),
+                   condition = function(e) e)
+  expect_s3_class(cond, "zuxlsx_unsupported_format_error")
+  expect_false(inherits(cond, "zuxlsx_encrypted_error"))
+  expect_match(conditionMessage(cond), "OLE2")
 })
 
 test_that("a real encrypted workbook has the structure the synthetic one models", {
@@ -115,9 +135,16 @@ test_that("the encrypted package is large enough to avoid the mini stream", {
   expect_gte(pkg$size, 4096)
 })
 
-test_that("a real encrypted workbook is reported as unsupported, not corrupt", {
+test_that("a real encrypted workbook is recognised as encrypted", {
+  # The synthetic fixture proves the classifier reads a directory this
+  # package wrote. This proves it reads one msoffcrypto-tool wrote, which is
+  # the only one of the two that resembles what users will hand it.
   expect_error(read_xlsx(ole2_fixture("two-sheets-encrypted.xlsx")),
-               class = "zuxlsx_unsupported_format_error")
+               class = "zuxlsx_encrypted_error")
+
+  cond <- tryCatch(read_xlsx(ole2_fixture("two-sheets-encrypted.xlsx")),
+                   condition = function(e) e)
+  expect_match(conditionMessage(cond), "password-protected")
 })
 
 test_that("every entry point reports an OLE2 container the same way", {
@@ -127,4 +154,69 @@ test_that("every entry point reports an OLE2 container the same way", {
   for (fn in list(read_xlsx, xlsx_sheets, xlsx_cells)) {
     expect_error(fn(path), class = "zuxlsx_unsupported_format_error")
   }
+})
+
+
+# --- hostile containers ------------------------------------------------------
+#
+# The classifier is new C that reads attacker-controlled offsets, lengths and
+# chain pointers out of a file. Everything it does is bounded, and these are
+# the tests that say so rather than the comments.
+
+test_that("a truncated container produces a condition, never a crash", {
+  src <- readBin(ole2_fixture("two-sheets-encrypted.xlsx"), "raw",
+                 file.size(ole2_fixture("two-sheets-encrypted.xlsx")))
+  tmp <- withr::local_tempfile(fileext = ".xlsx")
+
+  # Every length through the header and the first sectors, which is where
+  # the header, the FAT and the directory live, then a sparse sweep over the
+  # rest. A cut anywhere must end the walk, not read past the end of it.
+  lengths <- c(0:200, seq(201L, length(src), by = 211L))
+  for (n in lengths) {
+    writeBin(src[seq_len(n)], tmp)
+    result <- tryCatch(read_xlsx(tmp), condition = function(e) class(e)[1])
+    expect_true(is.character(result), info = paste("truncated to", n))
+  }
+})
+
+test_that("a corrupted directory or FAT produces a condition", {
+  src <- readBin(ole2_fixture("two-sheets-encrypted.xlsx"), "raw",
+                 file.size(ole2_fixture("two-sheets-encrypted.xlsx")))
+  tmp <- withr::local_tempfile(fileext = ".xlsx")
+
+  # Seeded, so a failure is reproducible rather than something that happened
+  # once on somebody's machine.
+  withr::local_seed(20260920)
+  for (i in 1:150) {
+    x <- src
+    # Weighted towards the first 600 bytes: header, DIFAT and the sector the
+    # directory usually starts in.
+    pos <- sample(c(seq_len(600L), seq_along(x)), size = sample.int(6L, 1L))
+    x[pos] <- as.raw(sample.int(256L, length(pos), replace = TRUE) - 1L)
+    writeBin(x, tmp)
+    result <- tryCatch(read_xlsx(tmp), condition = function(e) class(e)[1])
+    expect_true(is.character(result), info = paste("corruption", i))
+  }
+})
+
+test_that("a self-referential FAT chain terminates", {
+  # The specific shape a bounded walk exists to survive: a directory sector
+  # whose FAT entry points back at itself. Unbounded, this is an infinite
+  # loop inside a .Call with no interrupt check.
+  src <- readBin(ole2_fixture("two-sheets-encrypted.xlsx"), "raw",
+                 file.size(ole2_fixture("two-sheets-encrypted.xlsx")))
+  tmp <- withr::local_tempfile(fileext = ".xlsx")
+
+  # The FAT is sector 0, which starts at byte 512. Point every one of its
+  # first entries at sector 0, so any chain through them cycles.
+  x <- src
+  for (i in 0:31) {
+    x[512L + i * 4L + 1L] <- as.raw(0L)
+    x[512L + i * 4L + 2L] <- as.raw(0L)
+    x[512L + i * 4L + 3L] <- as.raw(0L)
+    x[512L + i * 4L + 4L] <- as.raw(0L)
+  }
+  writeBin(x, tmp)
+  result <- tryCatch(read_xlsx(tmp), condition = function(e) class(e)[1])
+  expect_true(is.character(result))
 })

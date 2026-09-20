@@ -25,6 +25,11 @@
 #'     A valid workbook declares at least one worksheet.}
 #'   \item{`zuxlsx_sheet_error`}{The workbook opened, but the requested
 #'     worksheet is not in it.}
+#'   \item{`zuxlsx_encrypted_error`}{The workbook is password-protected. Its
+#'     contents are encrypted and this package cannot decrypt them. Raised in
+#'     preference to `zuxlsx_unsupported_format_error` so that "needs a
+#'     password" can be handled on its own -- it is the one unsupported
+#'     format the caller can do something about.}
 #'   \item{`zuxlsx_unsupported_format_error`}{The file is a spreadsheet, but
 #'     not one zuxlsx can read: an `.xlsb`, whose worksheets are binary rather
 #'     than XML, or an OLE2 file, which is either a legacy `.xls` or an
@@ -82,13 +87,33 @@ zuxlsx_unwrap <- function(res, path = NULL, call = sys.call(-1L)) {
         "."
       )
     ),
+    format_encrypted = list(
+      # A subclass, not a replacement. Code already catching
+      # zuxlsx_unsupported_format_error keeps working -- an encrypted
+      # workbook *is* a format this package does not support -- while code
+      # that wants to prompt for a password can catch the specific one.
+      class = c("zuxlsx_encrypted_error", "zuxlsx_unsupported_format_error"),
+      message = paste0(
+        "'", path, "' is a password-protected workbook.\n",
+        "Its contents are encrypted, and zuxlsx cannot decrypt them. ",
+        "Remove the password in Excel and save a copy, or decrypt the file ",
+        "with a tool that supports it."
+      )
+    ),
+    format_xls = list(
+      class = "zuxlsx_unsupported_format_error",
+      message = paste0(
+        "'", path, "' is a legacy .xls workbook, not an xlsx workbook.\n",
+        "An .xls stores its worksheets as BIFF binary records rather than ",
+        "XML. zuxlsx reads xlsx only. Open it in Excel and save as .xlsx."
+      )
+    ),
     format_ole2 = list(
       class = "zuxlsx_unsupported_format_error",
       message = paste0(
         "'", path, "' is an OLE2 file, not an xlsx workbook.\n",
-        "That is either a legacy .xls workbook or an encrypted, ",
-        "password-protected workbook. zuxlsx reads neither: it reads xlsx, ",
-        "and it cannot decrypt."
+        "Its directory names neither an encrypted package nor a BIFF ",
+        "workbook, so it is some other OLE2 document. zuxlsx reads xlsx only."
       )
     ),
     format_xlsb = list(
