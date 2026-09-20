@@ -68,6 +68,13 @@ A valid workbook declares at least one worksheet.</p></dd>
 <dd><p>The workbook opened, but the requested
 worksheet is not in it.</p></dd>
 
+<dt><code>zuxlsx_encrypted_error</code></dt>
+<dd><p>The workbook is password-protected. Its
+contents are encrypted and this package cannot decrypt them. Raised in
+preference to <code>zuxlsx_unsupported_format_error</code> so that "needs a
+password" can be handled on its own – it is the one unsupported
+format the caller can do something about.</p></dd>
+
 <dt><code>zuxlsx_unsupported_format_error</code></dt>
 <dd><p>The file is a spreadsheet, but
 not one zuxlsx can read: an <code>.xlsb</code>, whose worksheets are binary rather

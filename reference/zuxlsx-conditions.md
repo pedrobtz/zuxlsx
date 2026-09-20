@@ -31,6 +31,14 @@ stable. Every class below is a subclass of `zuxlsx_error`.
 
   The workbook opened, but the requested worksheet is not in it.
 
+- `zuxlsx_encrypted_error`:
+
+  The workbook is password-protected. Its contents are encrypted and
+  this package cannot decrypt them. Raised in preference to
+  `zuxlsx_unsupported_format_error` so that "needs a password" can be
+  handled on its own – it is the one unsupported format the caller can
+  do something about.
+
 - `zuxlsx_unsupported_format_error`:
 
   The file is a spreadsheet, but not one zuxlsx can read: an `.xlsb`,
