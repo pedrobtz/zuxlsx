@@ -1,0 +1,51 @@
+#!/bin/sh
+# Builds tools/fuzz/harness with AddressSanitizer and UndefinedBehaviorSanitizer.
+#
+#   tools/fuzz/build [extra cc flags...]
+#
+# A maintainer script. Nothing here ships: tools/fuzz is excluded from the
+# built package, and this needs a compiler configuration R CMD check does not
+# provide.
+#
+# The defines and include paths are the ones src/Makevars.in uses, because a
+# harness built differently from the package is testing something else. The
+# two static archives come from the installed siblings, resolved the way
+# configure resolves them.
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+cd "$ROOT"
+
+RSCRIPT=${RSCRIPT:-Rscript}
+lib_dir() {
+    "$RSCRIPT" --vanilla -e "arch <- .Platform\$r_arch; d <- if (nzchar(arch)) system.file('lib', arch, package = '$1') else ''; if (!nzchar(d)) d <- system.file('lib', package = '$1'); cat(d)"
+}
+inc_dir() {
+    "$RSCRIPT" --vanilla -e "cat(system.file('include', package = '$1'))"
+}
+
+ZUXML_LIB=$(lib_dir zuxml)
+ZUKOMP_LIB=$(lib_dir zukomp)
+ZUXML_INC=$(inc_dir zuxml)
+ZUKOMP_INC=$(inc_dir zukomp)
+
+for pair in "$ZUXML_LIB/libzuxml.a" "$ZUKOMP_LIB/libzukomp.a"; do
+    if [ ! -f "$pair" ]; then
+        echo "missing $pair -- install the siblings from GitHub first" >&2
+        exit 1
+    fi
+done
+
+SAN=${SAN:--fsanitize=address,undefined -fno-omit-frame-pointer}
+
+set -x
+cc -g -O1 $SAN \
+    -DBUILD_XLSXIO -DUSE_MINIZ -DMINIZ_NO_ZLIB_COMPATIBLE_NAMES \
+    -Isrc/vendor/xlsxio/include -Isrc/vendor/xlsxio/lib \
+    -I"$ZUXML_INC" -I"$ZUKOMP_INC" \
+    -o tools/fuzz/harness \
+    tools/fuzz/harness.c \
+    src/vendor/xlsxio/lib/xlsxio_read.c \
+    src/vendor/xlsxio/lib/xlsxio_read_sharedstrings.c \
+    "$ZUXML_LIB/libzuxml.a" "$ZUKOMP_LIB/libzukomp.a" \
+    "$@"

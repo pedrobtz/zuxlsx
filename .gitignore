@@ -4,3 +4,8 @@ src/Makevars.win
 
 # The external corpus is fetched, not committed.
 tools/corpus/files/
+
+# Fuzzing work directory: generated, never committed.
+tools/fuzz/work*/
+tools/fuzz/harness
+tools/fuzz/harness.dSYM/

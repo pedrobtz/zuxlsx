@@ -1305,22 +1305,48 @@ repack
 zuxlsx
 ```
 
-Useful mutations include:
+### Status, 2026-09-20: built, and it found a process crash
 
-- delete XML elements
-- duplicate elements
-- truncate XML
-- corrupt shared-string indices
-- alter relationship targets
-- duplicate ZIP members
-- reorder ZIP entries
-- inflate declared dimensions
-- create sparse extreme row numbers
-- mutate cell type attributes
+`tools/fuzz/` implements exactly the pipeline above, and it is tier 3 work:
+excluded from the build, run by hand rather than on every change, its result
+recorded here rather than its runtime repeated.
 
-This could later integrate naturally with a `zufuzz` package.
+**The sanitiser is the point, not the mutation.** The package's tests run
+inside R, and R is not built with one here or on most machines, so a heap
+overflow that does not land on something fatal produces a *passing* test: a
+value comes back, it looks plausible, nothing reports the read went out of
+bounds. `tools/fuzz/harness.c` drives the same calls `src/zuxlsx.c` makes,
+including the accessors the vendored patches add, so the C can be exercised
+under AddressSanitizer and UndefinedBehaviorSanitizer with no R in the way.
 
----
+Structure-awareness is what makes it reach anything. Mutating an `.xlsx` as a
+flat byte stream breaks the archive before a parser is reached in almost every
+case. Unpacking, mutating one part and repacking keeps the container valid:
+measured on a sample run, every mutant opened as an archive and about two
+thirds produced cells.
+
+Mutants are generated from `set.seed(index)`, so a finding is reproducible by
+its number and no binary has to be kept.
+
+**What it found.** At mutant 2421 of a 3000-run, a single byte flipped in
+`xl/_rels/workbook.xml.rels` turned `Id="rId1"` into `Kd="rId1"`. xlsxio read
+the now-absent attribute and compared it with `strcasecmp`, which does not
+accept NULL, so a `<Relationship>` carrying a worksheet `Type` and no `Id`
+dereferenced NULL.
+
+That is a *process crash*, not an error. A 1573-byte workbook ended the R
+session with SIGSEGV -- no condition, nothing to catch -- which is precisely
+what section 16 says malformed input must never do. Fixed by vendored patch
+0007 and regression-tested from a minimal reproducer rather than the mutant.
+Upstream xlsxio is affected.
+
+The whole file was audited for the same pattern afterwards. Every other
+`XML_Char_icmp` on an attribute result is either NULL-checked first or uses
+`XML_Char_icmp_ins`, which handles NULL itself; this was the only one.
+
+Baselines, for comparison against future runs: the 363-file external corpus
+reports no sanitiser finding at all, and a 3000-mutant campaign after the fix
+reports none either.
 
 ## 19. Portability
 

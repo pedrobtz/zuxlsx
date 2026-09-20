@@ -36,7 +36,9 @@ crc32_le <- function(bytes) {
   as.raw(vapply(1:4, function(i) (crc %/% (256^(i - 1L))) %% 256, numeric(1)))
 }
 
-# `parts` is a named list of part name -> character contents.
+# `parts` is a named list of part name -> contents, each either a string or a
+# raw vector. Raw is accepted so that a mutated part can hold bytes that are
+# not valid text at all, which is most of what a fuzzer produces.
 write_xlsx_parts <- function(path, parts) {
   local_blocks <- list()
   central_blocks <- list()
@@ -44,7 +46,7 @@ write_xlsx_parts <- function(path, parts) {
 
   for (nm in names(parts)) {
     name_raw <- charToRaw(nm)
-    data_raw <- charToRaw(parts[[nm]])
+    data_raw <- if (is.raw(parts[[nm]])) parts[[nm]] else charToRaw(parts[[nm]])
     n <- length(data_raw)
     crc <- crc32_le(data_raw)
 

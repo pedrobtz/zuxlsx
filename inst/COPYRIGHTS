@@ -58,12 +58,17 @@ in order. Neither is upstream.
       empty. Upstream matched the transitional spelling only. Written for
       zuxlsx.
 
-Running the six patches in order against the pristine 0.2.36 release archive
+  0007-null-relationship-id-crash.patch
+      Checks the relationship Id attribute for NULL before comparing it. A
+      <Relationship> with a worksheet Type and no Id crashed the process with
+      SIGSEGV; upstream is affected. Found by fuzzing. Written for zuxlsx.
+
+Running the seven patches in order against the pristine 0.2.36 release archive
 reproduces src/vendor/xlsxio/ byte for byte, including line endings. No other
 modification is made to the bundled code, and it is never edited in place:
 tools/vendor/fetch re-derives it, and tools/vendor/verify checks the result.
 
-Line endings are CRLF, as shipped by upstream, except on the lines the six
+Line endings are CRLF, as shipped by upstream, except on the lines the seven
 patches introduce. They are deliberately not normalised, so the kept files
 still match the release archive.
 

@@ -1,0 +1,62 @@
+#!/bin/sh
+# Structure-aware fuzzing of the native reader (design section 18).
+#
+#   tools/fuzz/run [count] [seed-glob]
+#
+# Builds the sanitiser harness, generates `count` mutants from the seed
+# workbooks, and reads each one under AddressSanitizer and
+# UndefinedBehaviorSanitizer. Default 500.
+#
+# A maintainer script; nothing here ships. This is the tier-3 work described
+# in tools/corpus/README.md: expensive, not run on every change, and its
+# result recorded rather than its runtime repeated.
+#
+# A mutant that is refused is not a failure -- most of them are malformed on
+# purpose and refusing them is correct. What this looks for is a sanitiser
+# report: a read that goes out of bounds, uses freed memory, or relies on
+# undefined behaviour, whether or not it produces a wrong answer or crashes.
+# That is the class of defect the package's own tests cannot see, because they
+# run inside R and a quiet overflow there just looks like a passing test.
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+cd "$ROOT"
+
+COUNT=${1:-500}
+SEEDS=${2:-}
+WORK=${FUZZ_WORK:-tools/fuzz/work}
+FINDINGS="$WORK/findings"
+
+printf '==> building harness\n'
+./tools/fuzz/build >/dev/null 2>&1 || { ./tools/fuzz/build; exit 1; }
+
+rm -rf "$WORK"
+mkdir -p "$WORK" "$FINDINGS"
+
+printf '==> generating %s mutants\n' "$COUNT"
+Rscript --vanilla tools/fuzz/generate.R "$COUNT" "$WORK" "$SEEDS"
+
+printf '==> reading them under the sanitiser\n'
+found=0
+read_count=0
+for f in "$WORK"/mutant-*.xlsx; do
+    [ -e "$f" ] || continue
+    read_count=$((read_count + 1))
+    if ! ASAN_OPTIONS=detect_leaks=0 ./tools/fuzz/harness "$f" \
+            >/dev/null 2>"$WORK/last.err"; then
+        found=$((found + 1))
+        cp "$f" "$FINDINGS/"
+        cp "$WORK/last.err" "$FINDINGS/$(basename "$f" .xlsx).err"
+        printf '    FINDING %s\n' "$(basename "$f")"
+        head -3 "$WORK/last.err" | sed 's/^/      /'
+    fi
+done
+rm -f "$WORK/last.err"
+
+printf '\n%s mutants read, %s finding(s)\n' "$read_count" "$found"
+if [ "$found" -ne 0 ]; then
+    printf 'kept in %s, with the sanitiser output beside each\n' "$FINDINGS"
+    printf 'reproduce one with: tools/fuzz/harness %s/<file>\n' "$FINDINGS"
+    exit 1
+fi
+printf 'no out-of-bounds read, use-after-free or undefined behaviour found\n'

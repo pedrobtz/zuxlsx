@@ -1035,7 +1035,11 @@ void main_sheet_get_sheetfile_expat_callback_element_start (void* callbackdata, 
       if ((reltype = get_expat_attr_by_name(atts, X("Type"))) != NULL) {
         if (reltype_is(reltype, X("worksheet"))) {
           const XML_Char* relid = get_expat_attr_by_name(atts, X("Id"));
-          if (XML_Char_icmp(relid, data->sheetrelid) == 0) {
+          /* zuxlsx: relid is NULL when the element carries no Id at all.
+             XML_Char_icmp is strcasecmp, which does not accept it: a
+             <Relationship> with a worksheet Type and no Id segfaulted the
+             process. The adjacent Target lookup below guards the same way. */
+          if (relid && XML_Char_icmp(relid, data->sheetrelid) == 0) {
             const XML_Char* filename = get_expat_attr_by_name(atts, X("Target"));
             if (filename && *filename) {
               data->sheetfile = join_basepath_filename(data->basepath, filename);

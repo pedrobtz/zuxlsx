@@ -157,3 +157,49 @@ test_that("a declared uncompressed size the entry cannot back is a zip error", {
 
   expect_error(xlsx_sheets(path), class = "zuxlsx_zip_error")
 })
+
+test_that("a relationship with no Id does not crash the process", {
+  # Found by fuzzing, and the worst kind of defect this package could have: a
+  # 1.5 KB workbook killed the whole R session with SIGSEGV. No condition, no
+  # recovery, nothing to catch -- the process simply died.
+  #
+  # xlsxio read the Id attribute and compared it without checking for NULL,
+  # and XML_Char_icmp is strcasecmp, which does not accept one. An element
+  # carrying a worksheet Type and no Id was enough. Fixed by vendored patch
+  # 0007; design section 16 requires that malformed input never do this.
+  #
+  # If this ever regresses the test does not fail, it takes the test process
+  # with it -- which is a loud enough signal, and the reason the assertion is
+  # simply that control returns at all.
+  path <- withr::local_tempfile(fileext = ".xlsx")
+  parts <- workbook_parts()
+  parts[["xl/_rels/workbook.xml.rels"]] <- paste0(
+    '<?xml version="1.0"?>',
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
+    '<Relationship',
+    ' Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"',
+    ' Target="worksheets/sheet1.xml"/></Relationships>'
+  )
+  write_workbook(path, parts)
+
+  expect_s3_class(read_xlsx(path), "data.frame")
+  expect_s3_class(xlsx_cells(path, 1), "data.frame")
+  expect_identical(xlsx_sheets(path), "Sheet1")
+})
+
+test_that("a relationship with an empty Id does not crash either", {
+  # The neighbouring case: present but empty, which is a different path
+  # through the same comparison.
+  path <- withr::local_tempfile(fileext = ".xlsx")
+  parts <- workbook_parts()
+  parts[["xl/_rels/workbook.xml.rels"]] <- paste0(
+    '<?xml version="1.0"?>',
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
+    '<Relationship Id=""',
+    ' Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"',
+    ' Target="worksheets/sheet1.xml"/></Relationships>'
+  )
+  write_workbook(path, parts)
+
+  expect_s3_class(read_xlsx(path), "data.frame")
+})
