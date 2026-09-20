@@ -42,6 +42,11 @@ msoffcrypto-tool -e -p zuxlsx two-sheets-stored.xlsx two-sheets-encrypted.xlsx
 
 ### Do not shrink the plaintext below 4081 bytes
 
+Reported upstream as
+<https://github.com/nolze/msoffcrypto-tool/issues/105>. When it is fixed and
+the pinned version moves past it, this constraint goes away and the plaintext
+can be `inst/extdata/two-sheets.xlsx` directly, without the stored repack.
+
 msoffcrypto-tool 6.0.0 writes a **corrupt container** when the encrypted
 package would be smaller than 4096 bytes, which happens for any plaintext at
 or below 4080 bytes. Under that size the package goes into the CFB mini
@@ -60,3 +65,14 @@ reads back correctly, so it is specific to the stream that crosses the
 allocation path for a large mini stream.
 
 `package = 8 + ceil16(plaintext)`, and the cliff is at `package < 4096`.
+
+The cause, from the report: the `EncryptedPackage` directory entry is given
+the same starting mini sector as `EncryptionInfo`, so reading it back returns
+the encryption descriptor XML in plaintext where the ciphertext should be.
+Above roughly 1472 bytes that is loud -- the short read leaves a
+non-block-aligned buffer and decryption raises. At or below it the corruption
+is silent, because the declared and readable lengths agree.
+
+Which is the reason the test asserting `EncryptedPackage >= 4096` is worth
+having even though it tests someone else's tool: a smaller fixture would not
+announce itself.
