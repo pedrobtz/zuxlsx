@@ -943,6 +943,52 @@ DLL_EXPORT_XLSXIO void xlsxioread_list_sheets (xlsxioreader handle, xlsxioread_l
 
 ////////////////////////////////////////////////////////////////////////
 
+/* zuxlsx: does a relationship Type name the given OOXML relationship?
+
+   ECMA-376 defines two namespace families. Transitional, which Excel writes
+   by default, roots relationship types at
+   http://schemas.openxmlformats.org/officeDocument/2006/relationships/ .
+   Strict -- the ISO/IEC 29500 variant Excel writes for "Strict Open XML
+   Spreadsheet" -- roots them at
+   http://purl.oclc.org/ooxml/officeDocument/relationships/ .
+
+   xlsxio compared against the transitional spelling only, so in a strict
+   workbook no worksheet, shared string table or styles part was ever located.
+   That failed silently rather than loudly: listing sheets still worked,
+   because it reads workbook.xml directly, and the worksheet then read as
+   empty with no error of any kind.
+
+   The base is matched case-insensitively and then the remainder compared, so
+   only these two families match: testing the last path component alone would
+   accept a "worksheet" relationship from any vocabulary at all. */
+static int reltype_is (const XML_Char* reltype, const XML_Char* name)
+{
+  static const char* const BASES[] = {
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/",
+    "http://purl.oclc.org/ooxml/officeDocument/relationships/"
+  };
+  size_t i;
+
+  if (!reltype || !name)
+    return 0;
+  for (i = 0; i < sizeof(BASES) / sizeof(BASES[0]); i++) {
+    const char* base = BASES[i];
+    size_t j = 0;
+    while (base[j] != '\0') {
+      char a = (char)reltype[j];
+      char b = base[j];
+      if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
+      if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
+      if (a != b)
+        break;
+      j++;
+    }
+    if (base[j] == '\0' && XML_Char_icmp(reltype + j, name) == 0)
+      return 1;
+  }
+  return 0;
+}
+
 //callback data structure used by main_sheet_get_sheetfile_callback
 struct main_sheet_get_rels_callback_data {
   XML_Parser xmlparser;
@@ -987,7 +1033,7 @@ void main_sheet_get_sheetfile_expat_callback_element_start (void* callbackdata, 
     if (XML_Char_icmp_ins(name, X("Relationship")) == 0) {
       const XML_Char* reltype;
       if ((reltype = get_expat_attr_by_name(atts, X("Type"))) != NULL) {
-        if (XML_Char_icmp(reltype, X("http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet")) == 0) {
+        if (reltype_is(reltype, X("worksheet"))) {
           const XML_Char* relid = get_expat_attr_by_name(atts, X("Id"));
           if (XML_Char_icmp(relid, data->sheetrelid) == 0) {
             const XML_Char* filename = get_expat_attr_by_name(atts, X("Target"));
@@ -995,12 +1041,12 @@ void main_sheet_get_sheetfile_expat_callback_element_start (void* callbackdata, 
               data->sheetfile = join_basepath_filename(data->basepath, filename);
             }
           }
-        } else if (XML_Char_icmp(reltype, X("http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings")) == 0) {
+        } else if (reltype_is(reltype, X("sharedStrings"))) {
           const XML_Char* filename = get_expat_attr_by_name(atts, X("Target"));
           if (filename && *filename) {
             data->sharedstringsfile = join_basepath_filename(data->basepath, filename);
           }
-        } else if (XML_Char_icmp(reltype, X("http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles")) == 0) {
+        } else if (reltype_is(reltype, X("styles"))) {
           const XML_Char* filename = get_expat_attr_by_name(atts, X("Target"));
           if (filename && *filename) {
             data->stylesfile = join_basepath_filename(data->basepath, filename);

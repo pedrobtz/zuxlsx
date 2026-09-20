@@ -1204,9 +1204,38 @@ themselves carry, which is independent of that padding. The quirk is pinned by
 a characterisation test rather than patched in xlsxio, since nothing above the
 cell layer needs the padding to be right.
 
-Still to build: `strict_ooxml.xlsx` and `zip64.xlsx`, which need a real
-producer rather than a hand-assembled archive, and the external corpora of
-17.1 to 17.3, which remain an open decision.
+### 17.4d Strict OOXML, 2026-09-20: found by looking, not by erroring
+
+`strict_ooxml.xlsx` was listed here as still to build, and needing a real
+producer. Both were wrong. Apache POI's corpus already carried four strict
+workbooks, and they were already being read -- as completely empty.
+
+ECMA-376 has two namespace families. Transitional is what Excel writes by
+default; strict is the ISO/IEC 29500 variant it writes for "Strict Open XML
+Spreadsheet", and the relationship `Type` attributes are among the URIs that
+differ. xlsxio matched the transitional spelling alone, so no worksheet,
+shared string table or styles part was ever located. Vendored patch 0006 fixes
+it; the four files went from 0 cells to 6, 15, 31 and 37.
+
+**The corpus recorded all four as `ok` the whole time**, because its criterion
+was "did reading raise a condition". A workbook that lists its worksheets and
+then yields nothing passes that test perfectly, which is precisely the failure
+a corpus exists to catch.
+
+So `expected.tsv` now records the sheet and cell counts as well as the
+outcome, and `run` compares all of them. Silent emptiness is visible, and so
+is a fix: under the old format the patch above changed nothing that the
+baseline could see.
+
+That immediately surfaced 25 further workbooks that list sheets and read no
+cells. Spot-checked rather than assumed: they contain no `<c>` elements at all,
+being POI fixtures for headers, tab colours and drawings. Genuinely empty, not
+more of the same.
+
+Still to build: `zip64.xlsx`. Unlike strict OOXML this one really is absent
+from the corpus, though it needs no real producer either -- a ZIP64 end of
+central directory record and locator can be assembled by hand the way the
+other adversarial archives already are.
 
 ---
 
