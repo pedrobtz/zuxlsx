@@ -781,6 +781,285 @@ SEXP C_xlsx_read_cells(SEXP path, SEXP sheet, SEXP callback, SEXP env,
   return res;
 }
 
+/* ------------------------------------------------------------------------ */
+/* Column building (design section 14).
+ *
+ * read_xlsx() used to receive the cells as R vectors and pivot them in R,
+ * which meant the text of every cell crossed into R whether or not any column
+ * needed it. On a 20000 by 10 sheet that text was 7.5 MB of a 12.8 MB
+ * intermediate, and seven of the ten columns were numeric and threw it away.
+ *
+ * Deciding each column's type here instead means only what a column actually
+ * is gets built: a numeric column emits doubles and its text is never
+ * allocated in R at all. Fidelity is unaffected, which is the point of doing
+ * it this way rather than streaming -- promotion to character still returns
+ * each cell as it was written, because the text is still here in C when the
+ * decision is made.
+ *
+ * The type rules mirror R's build_column() exactly, and the two are held
+ * together by the same tests rather than by inspection. */
+
+#define TYPEMASK(t) (1u << (t))
+
+static int column_kind(unsigned int mask) {
+  /* Nothing but blanks: logical NA, which promotes to anything without a
+     coercion warning. */
+  if (mask == 0u) {
+    return ZU_CELL_BLANK;
+  }
+  if (mask == TYPEMASK(ZU_CELL_BOOLEAN)) {
+    return ZU_CELL_BOOLEAN;
+  }
+  if (mask == TYPEMASK(ZU_CELL_NUMBER)) {
+    return ZU_CELL_NUMBER;
+  }
+  if (mask == TYPEMASK(ZU_CELL_DATE)) {
+    return ZU_CELL_DATE;
+  }
+  /* A string, a cell error, or any mixture: character. */
+  return ZU_CELL_STRING;
+}
+
+SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds) {
+  const char *file;
+  const char *sheetname;
+  cell_list *cells;
+  xlsxioreader reader;
+  xlsxioreadersheet worksheet;
+  SEXP bag, out, res, r_cols, r_header, r_isdate;
+  size_t i;
+  size_t rownr = 0;
+  int date1904 = 0;
+  int header = 0;
+  double min_row = NA_REAL, max_row = NA_REAL;
+  double min_col = NA_REAL, max_col = NA_REAL;
+  double first_row = 0, last_row = 0;
+  size_t ncol = 0, nrow = 0, body_first = 0;
+  unsigned int *mask = NULL;
+  int *kind = NULL;
+
+  if (TYPEOF(path) != STRSXP || XLENGTH(path) < 1 ||
+      STRING_ELT(path, 0) == NA_STRING ||
+      TYPEOF(sheet) != STRSXP || XLENGTH(sheet) < 1 ||
+      STRING_ELT(sheet, 0) == NA_STRING ||
+      TYPEOF(col_names) != LGLSXP || XLENGTH(col_names) < 1) {
+    return result(STATUS_BAD_PATH, R_NilValue);
+  }
+  header = (LOGICAL(col_names)[0] == TRUE);
+  if (bounds != R_NilValue) {
+    if (TYPEOF(bounds) != REALSXP || XLENGTH(bounds) != 4) {
+      return result(STATUS_BAD_PATH, R_NilValue);
+    }
+    min_row = REAL(bounds)[0];
+    max_row = REAL(bounds)[1];
+    min_col = REAL(bounds)[2];
+    max_col = REAL(bounds)[3];
+  }
+  file = Rf_translateCharUTF8(STRING_ELT(path, 0));
+  sheetname = Rf_translateCharUTF8(STRING_ELT(sheet, 0));
+
+  if (file_is_ole2(file)) {
+    return result(STATUS_OLE2, R_NilValue);
+  }
+
+  cells = (cell_list *)calloc(1, sizeof(cell_list));
+  if (cells == NULL) {
+    return result(STATUS_MEMORY, R_NilValue);
+  }
+  bag = PROTECT(R_MakeExternalPtr(cells, R_NilValue, R_NilValue));
+  R_RegisterCFinalizerEx(bag, cell_list_finalizer, TRUE);
+
+  /* No R allocation until xlsxioread_close(). */
+  reader = xlsxioread_open(file);
+  if (reader == NULL) {
+    cell_list_finalizer(bag);
+    UNPROTECT(1);
+    return result(STATUS_ZIP_OPEN, R_NilValue);
+  }
+  worksheet = xlsxioread_sheet_open(reader, sheetname, XLSXIOREAD_SKIP_NONE);
+  if (worksheet == NULL) {
+    xlsxioread_close(reader);
+    cell_list_finalizer(bag);
+    UNPROTECT(1);
+    return result(STATUS_NO_SHEET, R_NilValue);
+  }
+
+  while (xlsxioread_sheet_next_row(worksheet)) {
+    size_t colnr = 0;
+    char *value;
+    rownr++;
+    while ((value = xlsxioread_sheet_next_cell(worksheet)) != NULL) {
+      double num;
+      int type = classify_cell(xlsxioread_sheet_last_cell_type(worksheet),
+                               xlsxioread_sheet_last_cell_is_date(worksheet),
+                               value, &num);
+      colnr++;
+      /* Cells outside the range are dropped here rather than after the fact,
+         so a range never pays for the rest of the worksheet in memory. */
+      if (!ISNA(min_row) && ((double)rownr < min_row || (double)rownr > max_row)) {
+        free(value);
+        continue;
+      }
+      if (!ISNA(min_col) && ((double)colnr < min_col || (double)colnr > max_col)) {
+        free(value);
+        continue;
+      }
+      if (cell_list_push(cells, rownr, colnr, type, value, num) != 0) {
+        free(value);
+        break;
+      }
+      free(value);
+    }
+    if (cells->oom) {
+      break;
+    }
+  }
+  date1904 = xlsxioread_sheet_date1904(worksheet);
+  xlsxioread_sheet_close(worksheet);
+  xlsxioread_close(reader);
+
+  if (cells->oom) {
+    cell_list_finalizer(bag);
+    UNPROTECT(1);
+    return result(STATUS_MEMORY, R_NilValue);
+  }
+  if (cells->n == 0) {
+    cell_list_finalizer(bag);
+    UNPROTECT(1);
+    return result(STATUS_OK, R_NilValue);
+  }
+
+  /* Shift so the top-left of the range is row 1, column 1. */
+  if (!ISNA(min_row) || !ISNA(min_col)) {
+    for (i = 0; i < cells->n; i++) {
+      if (!ISNA(min_row)) cells->row[i] -= (size_t)min_row - 1;
+      if (!ISNA(min_col)) cells->col[i] -= (size_t)min_col - 1;
+    }
+  }
+
+  /* A range asks for its own rectangle whether or not cells fill it; without
+     one the extent is whatever the worksheet used. Rows are spanned rather
+     than taken from the rows that carry a cell, so an omitted row stays a
+     row -- see R's build_column() for why that matters. */
+  first_row = (double)cells->row[0];
+  last_row = first_row;
+  for (i = 0; i < cells->n; i++) {
+    if ((double)cells->row[i] < first_row) first_row = (double)cells->row[i];
+    if ((double)cells->row[i] > last_row) last_row = (double)cells->row[i];
+    if (cells->col[i] > ncol) ncol = cells->col[i];
+  }
+  if (!ISNA(min_row)) {
+    first_row = 1;
+    last_row = max_row - min_row + 1;
+  }
+  if (!ISNA(min_col)) {
+    ncol = (size_t)(max_col - min_col + 1);
+  }
+  body_first = (size_t)first_row + (header ? 1u : 0u);
+  nrow = (last_row >= (double)body_first) ? (size_t)(last_row - (double)body_first + 1) : 0;
+
+  mask = (unsigned int *)calloc(ncol, sizeof(unsigned int));
+  kind = (int *)calloc(ncol, sizeof(int));
+  if (mask == NULL || kind == NULL) {
+    free(mask);
+    free(kind);
+    cell_list_finalizer(bag);
+    UNPROTECT(1);
+    return result(STATUS_MEMORY, R_NilValue);
+  }
+  for (i = 0; i < cells->n; i++) {
+    if (cells->row[i] < body_first || cells->type[i] == ZU_CELL_BLANK) {
+      continue;
+    }
+    mask[cells->col[i] - 1] |= TYPEMASK(cells->type[i]);
+  }
+  for (i = 0; i < ncol; i++) {
+    kind[i] = column_kind(mask[i]);
+  }
+
+  r_cols = PROTECT(Rf_allocVector(VECSXP, (R_xlen_t)ncol));
+  r_header = PROTECT(Rf_allocVector(STRSXP, (R_xlen_t)ncol));
+  r_isdate = PROTECT(Rf_allocVector(LGLSXP, (R_xlen_t)ncol));
+  for (i = 0; i < ncol; i++) {
+    SEXP col;
+    R_xlen_t k;
+    SET_STRING_ELT(r_header, (R_xlen_t)i, NA_STRING);
+    LOGICAL(r_isdate)[i] = (kind[i] == ZU_CELL_DATE);
+    switch (kind[i]) {
+      case ZU_CELL_BOOLEAN:
+      case ZU_CELL_BLANK:
+        col = Rf_allocVector(LGLSXP, (R_xlen_t)nrow);
+        for (k = 0; k < (R_xlen_t)nrow; k++) LOGICAL(col)[k] = NA_LOGICAL;
+        break;
+      case ZU_CELL_STRING:
+        col = Rf_allocVector(STRSXP, (R_xlen_t)nrow);
+        for (k = 0; k < (R_xlen_t)nrow; k++) SET_STRING_ELT(col, k, NA_STRING);
+        break;
+      default:
+        col = Rf_allocVector(REALSXP, (R_xlen_t)nrow);
+        for (k = 0; k < (R_xlen_t)nrow; k++) REAL(col)[k] = NA_REAL;
+        break;
+    }
+    SET_VECTOR_ELT(r_cols, (R_xlen_t)i, col);
+  }
+
+  for (i = 0; i < cells->n; i++) {
+    size_t c = cells->col[i] - 1;
+    SEXP col;
+    R_xlen_t at;
+    if (c >= ncol) {
+      continue;
+    }
+    if (header && cells->row[i] == (size_t)first_row) {
+      if (cells->text[i] != NULL && cells->text[i][0] != '\0') {
+        SET_STRING_ELT(r_header, (R_xlen_t)c, Rf_mkCharCE(cells->text[i], CE_UTF8));
+      }
+      continue;
+    }
+    if (cells->row[i] < body_first) {
+      continue;
+    }
+    at = (R_xlen_t)(cells->row[i] - body_first);
+    if (at < 0 || at >= (R_xlen_t)nrow || cells->type[i] == ZU_CELL_BLANK) {
+      continue;
+    }
+    col = VECTOR_ELT(r_cols, (R_xlen_t)c);
+    switch (kind[c]) {
+      case ZU_CELL_BOOLEAN:
+        LOGICAL(col)[at] = (cells->number[i] != 0.0);
+        break;
+      case ZU_CELL_STRING:
+        /* The cell as it was written. Reformatting the stored double here
+           would turn "1.50" into "1.5" in any column that promotes. */
+        if (cells->text[i] != NULL) {
+          SET_STRING_ELT(col, at, Rf_mkCharCE(cells->text[i], CE_UTF8));
+        }
+        break;
+      case ZU_CELL_BLANK:
+        break;
+      default:
+        REAL(col)[at] = cells->number[i];
+        break;
+    }
+  }
+
+  free(mask);
+  free(kind);
+  cell_list_finalizer(bag);
+
+  {
+    const char *fields[] = {"columns", "header", "is_date", "date1904", ""};
+    out = PROTECT(Rf_mkNamed(VECSXP, fields));
+    SET_VECTOR_ELT(out, 0, r_cols);
+    SET_VECTOR_ELT(out, 1, r_header);
+    SET_VECTOR_ELT(out, 2, r_isdate);
+    SET_VECTOR_ELT(out, 3, Rf_ScalarLogical(date1904));
+    res = PROTECT(result(STATUS_OK, out));
+  }
+  UNPROTECT(6);
+  return res;
+}
+
 SEXP C_zuxlsx_native(void) {
   const char *fields[] = {"xlsxio", "expat", "miniz", ""};
   SEXP out = PROTECT(Rf_mkNamed(VECSXP, fields));
