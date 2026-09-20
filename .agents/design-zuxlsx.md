@@ -1239,10 +1239,37 @@ cells. Spot-checked rather than assumed: they contain no `<c>` elements at all,
 being POI fixtures for headers, tab colours and drawings. Genuinely empty, not
 more of the same.
 
-Still to build: `zip64.xlsx`. Unlike strict OOXML this one really is absent
-from the corpus, though it needs no real producer either -- a ZIP64 end of
-central directory record and locator can be assembled by hand the way the
-other adversarial archives already are.
+### 17.4e ZIP64, 2026-09-20
+
+Built by hand, as suspected, and no producer was needed. ZIP64 lifts the
+format's 32-bit limits: a field that will not fit is stored as all-ones and
+the real value moves into a ZIP64 extra field, with a ZIP64 end of central
+directory record and locator ahead of the ordinary one. `write_zip64()`
+produces tiny archives that use those structures anyway, which is how the
+format is covered without a four gigabyte fixture -- and is what writers
+themselves do when streaming, not knowing the final size in advance.
+
+All three places the escaping can happen are covered: the end-of-central-
+directory counts and offsets, the per-entry sizes and local header offset, and
+both together. A reader handling only one of them fails on real archives. The
+fixtures were cross-checked against system `unzip`, which accepts them, so
+they are well-formed ZIP64 rather than merely readable by miniz.
+
+The negative controls matter more than the positive ones here, because a
+reader that ignored ZIP64 entirely would pass the positive tests. Destroying
+the ZIP64 end-of-central-directory signature, or the central directory offset
+inside it, both give `zuxlsx_zip_error` -- so those structures are genuinely
+being read.
+
+**Characterised, not required: the ZIP64 locator is not consulted.** miniz
+finds the record by scanning for its signature rather than by following the
+locator, so a locator pointing far past the end of the file changes nothing.
+That is permissive rather than wrong, since the record it finds is the right
+one, but it means an archive malformed in exactly that way is read rather than
+refused. Pinned by a test, because a future miniz that began honouring the
+locator would change it silently.
+
+With this, section 17.4's tree is complete.
 
 ---
 

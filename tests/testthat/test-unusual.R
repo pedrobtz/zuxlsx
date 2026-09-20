@@ -104,3 +104,101 @@ test_that("a conforming workbook is unaffected by that tolerance", {
 
   expect_identical(xlsx_sheets(path), "Sheet1")
 })
+
+test_that("a ZIP64 archive reads, however its limits are escaped", {
+  # ZIP64 lifts the format's 32-bit limits. A field that will not fit is
+  # stored as all-ones and the real value moves to a ZIP64 extra field, with a
+  # ZIP64 end of central directory record and locator ahead of the ordinary
+  # one. The three cases below are the three places that escaping can happen,
+  # and a reader that handles only one of them fails on real archives.
+  #
+  # These are tiny and use the structures anyway, which is how the format can
+  # be covered without a four gigabyte fixture. Writers do the same when
+  # streaming, not knowing the final size in advance.
+  for (where in c("eocd", "entry", "both")) {
+    path <- withr::local_tempfile(fileext = ".xlsx")
+    write_zip64_workbook(path, where = where)
+
+    expect_identical(xlsx_sheets(path), "Sheet1")
+    # Listing sheets is not enough: it reads xl/workbook.xml and stops. The
+    # cells prove the per-entry offsets were resolved as well.
+    expect_identical(nrow(xlsx_cells(path, 1)), 1L)
+  }
+})
+
+test_that("a ZIP64 workbook gives the same answer as a plain one", {
+  # Same parts, two container encodings. The bytes of the archive differ; what
+  # comes out must not.
+  parts <- styled_workbook_parts(list(
+    c(txt("A1", "n"), txt("B1", "s")),
+    c(num("A2", 42.5), txt("B2", "x")),
+    c(num("A3", -1), txt("B3", "y"))
+  ))
+
+  plain <- withr::local_tempfile(fileext = ".xlsx")
+  zip64 <- withr::local_tempfile(fileext = ".xlsx")
+  write_workbook(plain, parts)
+  write_zip64_workbook(zip64, parts, where = "both")
+
+  expect_false(identical(
+    readBin(plain, "raw", file.size(plain)),
+    readBin(zip64, "raw", file.size(zip64))
+  ))
+  expect_identical(read_xlsx(zip64), read_xlsx(plain))
+  expect_identical(read_xlsx(zip64)$n, c(42.5, -1))
+})
+
+test_that("the ZIP64 end of central directory record is actually used", {
+  # The negative control. Without it the tests above would prove only that a
+  # ZIP64 archive can be read, not that its ZIP64 structures were read --
+  # a reader ignoring them entirely would pass just as well.
+  path <- withr::local_tempfile(fileext = ".xlsx")
+  write_zip64_workbook(path, where = "both")
+  bytes <- readBin(path, "raw", file.size(path))
+
+  at <- find_zip_signature(bytes, c(0x50, 0x4b, 0x06, 0x06))
+  expect_length(at, 1L)
+
+  # Destroying the record leaves an archive whose ordinary end-of-central-
+  # directory says only "look in the ZIP64 one", so it cannot be read.
+  bytes[at + 0:3] <- as.raw(0)
+  writeBin(bytes, path)
+  expect_error(xlsx_sheets(path), class = "zuxlsx_zip_error")
+})
+
+test_that("the central directory offset is read from the ZIP64 record", {
+  # More specific than the above: not just that the record is present, but
+  # that the offset inside it is what is followed.
+  path <- withr::local_tempfile(fileext = ".xlsx")
+  write_zip64_workbook(path, where = "both")
+  bytes <- readBin(path, "raw", file.size(path))
+  at <- find_zip_signature(bytes, c(0x50, 0x4b, 0x06, 0x06))
+
+  # The offset of the central directory is the last 8 bytes of the record.
+  bytes[at + 48:55] <- as.raw(c(0xff, 0xff, 0xff, 0x7f, 0, 0, 0, 0))
+  writeBin(bytes, path)
+  expect_error(xlsx_sheets(path), class = "zuxlsx_zip_error")
+})
+
+test_that("KNOWN: the ZIP64 locator is not consulted", {
+  # Characterisation, not a requirement. miniz finds the ZIP64 end of central
+  # directory record by scanning for its signature rather than by following
+  # the locator that precedes the ordinary record, so a locator pointing far
+  # past the end of the file changes nothing.
+  #
+  # That is permissive rather than wrong -- the record it finds is the right
+  # one -- but it is worth pinning, because an archive that is malformed in
+  # exactly this way is read rather than refused, and a future miniz that
+  # started honouring the locator would change that silently.
+  path <- withr::local_tempfile(fileext = ".xlsx")
+  write_zip64_workbook(path, where = "both")
+  bytes <- readBin(path, "raw", file.size(path))
+
+  at <- find_zip_signature(bytes, c(0x50, 0x4b, 0x06, 0x07))
+  expect_length(at, 1L)
+  # The locator's 8-byte offset field follows its signature and disk number.
+  bytes[at + 8:15] <- as.raw(c(0xff, 0xff, 0xff, 0x7f, 0, 0, 0, 0))
+  writeBin(bytes, path)
+
+  expect_identical(xlsx_sheets(path), "Sheet1")
+})

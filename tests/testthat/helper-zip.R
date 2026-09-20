@@ -372,3 +372,128 @@ strict_workbook_parts <- function(sheets = "Sheet1", cells = NULL) {
     )
   )
 }
+
+
+# --- ZIP64 -------------------------------------------------------------------
+#
+# ZIP64 lifts the original format's 32-bit limits: sizes and offsets above
+# 4 GB, and more than 65535 entries. A field that will not fit is stored as
+# all-ones and the real value moves into a ZIP64 extra field, with a ZIP64 end
+# of central directory record and locator ahead of the ordinary one.
+#
+# The archives below are tiny and use those structures anyway, which is what
+# lets the format be tested without a four gigabyte fixture. Writers do this
+# in practice too, either by request or when they cannot know the final size
+# while streaming.
+
+MAX32 <- 4294967295  # 0xFFFFFFFF, the "look in the ZIP64 field" marker
+MAX16 <- 65535       # 0xFFFF, the same for counts
+
+# `where` chooses which limits are escaped to ZIP64:
+#   "eocd"    only the end-of-central-directory counts and offsets
+#   "entry"   only the per-entry sizes and local header offset
+#   "both"    both, which is what a real large archive looks like
+write_zip64 <- function(path, entries, where = "both") {
+  entry_64 <- where %in% c("entry", "both")
+  eocd_64 <- where %in% c("eocd", "both")
+
+  local_blocks <- list()
+  central_blocks <- list()
+  offset <- 0
+
+  for (e in entries) {
+    name_raw <- charToRaw(e$name)
+    n <- length(e$data)
+
+    local <- c(
+      as.raw(c(0x50, 0x4b, 0x03, 0x04)),
+      le(if (entry_64) 45 else 20, 2), le(0, 2), le(0, 2),
+      le(0, 2), le(0, 2),
+      e$crc, le(n, 4), le(n, 4),
+      le(length(name_raw), 2), le(0, 2)
+    )
+
+    # The ZIP64 extended information field. Order is fixed by the format:
+    # uncompressed size, compressed size, local header offset -- and only the
+    # ones actually escaped are present.
+    extra <- raw(0)
+    if (entry_64) {
+      extra <- c(
+        le(1, 2), le(24, 2),
+        le(n, 8), le(n, 8), le(offset, 8)
+      )
+    }
+    central <- c(
+      as.raw(c(0x50, 0x4b, 0x01, 0x02)),
+      le(45, 2), le(if (entry_64) 45 else 20, 2),
+      le(0, 2), le(0, 2),
+      le(0, 2), le(0, 2),
+      e$crc,
+      le(if (entry_64) MAX32 else n, 4),
+      le(if (entry_64) MAX32 else n, 4),
+      le(length(name_raw), 2), le(length(extra), 2), le(0, 2),
+      le(0, 2), le(0, 2), le(0, 4),
+      le(if (entry_64) MAX32 else offset, 4)
+    )
+
+    local_blocks[[length(local_blocks) + 1L]] <- c(local, name_raw, e$data)
+    central_blocks[[length(central_blocks) + 1L]] <- c(central, name_raw, extra)
+    offset <- offset + length(local) + length(name_raw) + n
+  }
+
+  local_bytes <- unlist(local_blocks, use.names = FALSE)
+  central_bytes <- unlist(central_blocks, use.names = FALSE)
+  cd_offset <- length(local_bytes)
+  n_entries <- length(entries)
+
+  zip64_eocd <- c(
+    as.raw(c(0x50, 0x4b, 0x06, 0x06)),
+    le(44, 8),                       # size of the record after this field
+    le(45, 2), le(45, 2),            # version made by, version needed
+    le(0, 4), le(0, 4),              # this disk, disk with central directory
+    le(n_entries, 8), le(n_entries, 8),
+    le(length(central_bytes), 8), le(cd_offset, 8)
+  )
+  locator <- c(
+    as.raw(c(0x50, 0x4b, 0x06, 0x07)),
+    le(0, 4),
+    le(cd_offset + length(central_bytes), 8),  # where the record above starts
+    le(1, 4)
+  )
+  eocd <- c(
+    as.raw(c(0x50, 0x4b, 0x05, 0x06)),
+    le(0, 2), le(0, 2),
+    le(if (eocd_64) MAX16 else n_entries, 2),
+    le(if (eocd_64) MAX16 else n_entries, 2),
+    le(if (eocd_64) MAX32 else length(central_bytes), 4),
+    le(if (eocd_64) MAX32 else cd_offset, 4),
+    le(0, 2)
+  )
+
+  writeBin(
+    c(local_bytes, central_bytes, zip64_eocd, locator, eocd),
+    path
+  )
+  path
+}
+
+write_zip64_workbook <- function(path, parts = workbook_parts(), where = "both") {
+  entries <- lapply(names(parts), function(n) zip_entry(n, parts[[n]]))
+  write_zip64(path, entries, where = where)
+}
+
+
+# Offsets (1-based) of every occurrence of a four-byte signature. Used by the
+# ZIP64 tests to find a structure rather than hard-coding where it landed.
+find_zip_signature <- function(bytes, sig) {
+  sig <- as.raw(sig)
+  n <- length(bytes)
+  if (n < 4L) {
+    return(integer(0))
+  }
+  hit <- rep(TRUE, n - 3L)
+  for (k in 0:3) {
+    hit <- hit & bytes[seq.int(1L + k, n - 3L + k)] == sig[k + 1L]
+  }
+  which(hit)
+}
