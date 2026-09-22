@@ -42,12 +42,12 @@ Everything else described below is unstarted.
 The doc was written before `zuxml` and `zukomp` reached v1, and three of its assumptions did not hold against the packages as shipped at v1. **Both sibling PRs merged on 2026-09-18 and this is now settled**; the history is kept because it explains why two v1 packages were widened, and because a future reader hitting a link error will want it.
 
 - **§3/§7 "`LinkingTo` only, no `R_GetCCallable()`" is not how those packages work.** `zuxml/inst/include/zuxml.h` and `zukomp/inst/include/zukomp-r.h` document the opposite contract: `Imports:` + `LinkingTo:`, resolving a versioned function table at runtime (`zuxml_api_get()` → `R_GetCCallable("zuxml", "zuxml_api_v2")`; `zukomp_api()` → `zukomp_get_api`). That is the supported path.
-- **§4 `inst/lib/libzuxml.a` / `libzukomp.a` do not exist**, and neither package installs `expat.h` or `miniz.h`. `inst/include/` contains only `zuxml.h`, `zukomp.h`, `zukomp-r.h` — deliberately standalone-C99 headers naming no vendored type. So xlsxio cannot be handed the raw Expat API as §4 assumes.
-- **§5 assumes miniz's ZIP reader is available through `zukomp`. It is not.** `zukomp/src/Makevars` compiles miniz with `-DMINIZ_NO_ARCHIVE_APIS -DMINIZ_NO_ARCHIVE_WRITING_APIS -DMINIZ_NO_STDIO`, and zukomp's own `test-abi.R` asserts no `mz_zip_*` symbol is exported. zukomp gives raw DEFLATE/zlib/gzip over memory buffers only — no central directory, no local headers, no entry lookup.
+- **§4 `inst/lib/libzuxml.a` / `libzukomp.a` did not exist at v1**, and neither package installed `expat.h` or `miniz.h`; `inst/include/` held only `zuxml.h`, `zukomp.h`, `zukomp-r.h`. So xlsxio could not be handed the raw Expat API as §4 assumes. **Both archives and both vendored headers are installed today** — see *What the siblings install now* below.
+- **§5 assumes miniz's ZIP reader is available through `zukomp`. At v1 it was not.** `zukomp/src/Makevars` compiles miniz with `-DMINIZ_NO_ARCHIVE_APIS -DMINIZ_NO_ARCHIVE_WRITING_APIS -DMINIZ_NO_STDIO`, and zukomp's own `test-abi.R` asserts no `mz_zip_*` symbol is exported. zukomp gives raw DEFLATE/zlib/gzip over memory buffers only — no central directory, no local headers, no entry lookup.
 
 Both are now installable straight from GitHub `main`; see **Commands** below.
 
-**The vendored xlsxio makes this concrete.** It `#include`s `<expat.h>` and calls `XML_ParserCreate`/`XML_GetBuffer`/`XML_ParseBuffer`/`XML_StopParser` directly, and under `USE_MINIZ` it calls `mz_zip_*` directly. Neither symbol set is reachable through `LinkingTo: zuxml, zukomp` today.
+**The vendored xlsxio makes this concrete.** It `#include`s `<expat.h>` and calls `XML_ParserCreate`/`XML_GetBuffer`/`XML_ParseBuffer`/`XML_StopParser` directly, and under `USE_MINIZ` it calls `mz_zip_*` directly. Neither symbol set was reachable through `LinkingTo: zuxml, zukomp` at v1, which is what the two sibling PRs below changed.
 
 **Decided (2026-09-17): widen the siblings to match the design, rather than changing the design. Both merged 2026-09-18.**
 
@@ -60,9 +60,24 @@ Proven end to end before the PRs were opened: `src/vendor/xlsxio/` compiles agai
 
 Rejected alternatives, for the record: vendoring Expat and miniz here as well (compiles today, but duplicates the siblings and contradicts §3/§6), and retargeting xlsxio onto the `zux_parser_*` wrapper API (blocked on `zuxml` having no `XML_StopParser` equivalent).
 
+## What the siblings install now
+
+Current as of 2026-09-22, and the contract this package is built on. An installed `zuxml` carries:
+
+```
+zuxml/include/expat.h          zuxml/include/zuxml.h
+zuxml/include/expat_external.h zuxml/lib/libzuxml.a
+```
+
+`LinkingTo: zuxml` puts that `include` directory on the compiler's path, and `libzuxml.a` holds the Expat objects only — no R glue, so nothing collides inside `zuxlsx.so`. `zukomp` is the same shape for miniz (`include/miniz.h`, `lib/libzukomp.a`). Neither header exists under the siblings' `inst/include/` in *source* form: zuxml copies them out of its vendored tree during `src/install.libs.R`, so the header always matches the objects in the archive. Looking at a sibling's git tree and concluding the header is missing is the mistake to avoid.
+
+The feature policy comes with it. zuxml compiles Expat with `XML_GE 0` and never defines `XML_DTD`, so entity references beyond the five built-ins are parse errors here too, and defining `XML_GE=1` in this package's `PKG_CPPFLAGS` would declare billion-laughs limiters that `libzuxml.a` does not define. zuxml's `vignette("linking")` and its `CLAUDE.md` are the reference; `zuxml/tools/zuxmltest/` is a minimal package in exactly this shape.
+
+**Do not test for a version.** zuxml 0.1.0 exists both with and without the archive, so `./configure` checks for the file on disk, and any message about it should say that rather than naming a version.
+
 ## Commands
 
-Nothing native builds until `zuxml` and `zukomp` are installed **from GitHub** — the CRAN-style released versions have no `inst/lib/*.a`, and `./configure` stops with a message saying so. `@main` is fine and is what `DESCRIPTION` asks for; a *feature* branch suffix is not, since those are deleted on merge.
+Nothing native builds until `zuxml` and `zukomp` are installed **from GitHub** — an older installed copy may predate the archives, and `./configure` stops with a message when it cannot find one. Version numbers do not settle it (zuxml 0.1.0 exists both ways); the file on disk does. `@main` is fine and is what `DESCRIPTION` asks for; a *feature* branch suffix is not, since those are deleted on merge.
 
 ```sh
 Rscript -e 'pak::pak(c("pedrobtz/zuxml", "pedrobtz/zukomp"))'

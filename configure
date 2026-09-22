@@ -31,8 +31,9 @@ lib_dir() {
 fail() {
   echo "configure: $1/lib/$2 was not found." >&2
   echo "" >&2
-  echo "  zuxlsx links it statically. It ships with $1 0.1.0 and later;" >&2
-  echo "  an older installed $1 does not have it. Reinstall with:" >&2
+  echo "  zuxlsx links it statically. An older installed $1 predates the" >&2
+  echo "  archive; its version does not tell you, which is why this checks" >&2
+  echo "  for the file. Reinstall with:" >&2
   echo "" >&2
   echo "    pak::pak(\"pedrobtz/$1\")" >&2
   exit 1
