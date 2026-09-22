@@ -1,0 +1,3 @@
+id	bytes	sha256	url	referer	note
+xlsx100mb	105709047	dc582a7215cbeeefbd1f680e618a819dee8598f2a6f6035e5353e17dadb7d48a	https://examplefile.com/file-download/588	https://examplefile.com/document/xlsx/100-mb-xlsx	4 sheets, 986029 rows on the largest, 8844372 shared string refs over 1246650 unique; 550 MB inflated, 160 MB sharedStrings.xml; no <dimension>; trailing styled-empty rows to 1043928
+xlsx10mb			https://examplefile.com/file-download/561	https://examplefile.com/document/xlsx/10-mb-xlsx	smaller tier for quick runs; sha256 unrecorded until first fetch --record

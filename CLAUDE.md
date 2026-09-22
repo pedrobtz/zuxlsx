@@ -93,6 +93,16 @@ Offline, `check()` emits a spurious `checking for future file timestamps ... NOT
 Rscript -e 'devtools::check(env_vars = c("_R_CHECK_SYSTEM_CLOCK_" = "0"))'
 ```
 
+Benchmarks against readxl and openxlsx2 are in [tools/bench/](tools/bench/), maintainer-only and `.Rbuildignore`d like `tools/corpus` and `tools/fuzz`. The workbooks are large (100 MB+) and of unestablished provenance, so they are cached outside the repository and are never fixtures:
+
+```sh
+./tools/bench/fetch-workbooks xlsx100mb        # -> ${ZUXLSX_BENCH_DIR:-~/.cache/zuxlsx-bench}
+Rscript tools/bench/bench-read.R               # xlsx100mb, sheet 1
+Rscript tools/bench/bench-read.R xlsx100mb 4   # workbook (id or path), sheet (index or name)
+```
+
+It times two things over `bench::mark()`: listing the worksheets, and reading one sheet. Listing is where the streaming design shows up — on a 105 MB workbook zuxlsx is ~2.5 ms against readxl's 1.6 s and openxlsx2's 19 s, because it is the only one of the three that stops after `xl/workbook.xml`. Reading is ~15% faster than readxl at a quarter of its R-level allocation. It does not check the three against each other; [tools/corpus/sweep.R](tools/corpus/sweep.R) is what compares values.
+
 CI is [R-CMD-check.yaml](.github/workflows/R-CMD-check.yaml) (macOS/Windows/Ubuntu × devel/release/oldrel-1) and [pkgdown.yaml](.github/workflows/pkgdown.yaml).
 
 ## Conventions inherited from the `zu*` siblings
