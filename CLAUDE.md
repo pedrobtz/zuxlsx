@@ -10,27 +10,54 @@ system XML or ZIP dependency, built on the sibling `zu*` packages:
 `zuxml` (Expat-backed XML) and `zukomp` (miniz-backed DEFLATE), with
 vendored `xlsxio` supplying the OOXML logic.
 
-## Current state: it builds and reads workbooks
+## Current state: 0.1.0, and the reader is done
 
-The native stack compiles, links and runs:
-[`xlsx_sheets()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_sheets.md)
-opens a real `.xlsx` and lists its worksheets, which means miniz (from
-`zukomp`) opened the ZIP, Expat (from `zuxml`) parsed `xl/workbook.xml`,
-and vendored xlsxio drove both. 41 tests pass, shuffled, and
-`R CMD check --as-cran` is 0 errors / 0 warnings / 1 note (the note is
-“New submission” plus the two non-CRAN `LinkingTo` packages).
+The reading API of design §12 is implemented and the package is
+CRAN-ready apart from the two steps that must happen on submission day,
+which are in
+[.agents/release-checklist.md](https://pedrobtz.github.io/zuxlsx/.agents/release-checklist.md).
+870 tests pass, shuffled, and `R CMD check --as-cran` is 0 errors / 0
+warnings / 0 notes.
 
-**This is a build slice, not the reading API.**
-[`read_xlsx()`](https://pedrobtz.github.io/zuxlsx/reference/read_xlsx.md),
-the cell event model and the column builders (design §12–§14) are
-unstarted. The two exported functions exist so that a broken native
-build is a failing test rather than something discovered later:
+What is exported:
 
-- `xlsx_sheets(path)` — exercises both archives on a real file.
+- `read_xlsx(path, sheet = 1, col_names = TRUE, range = NULL)` — a
+  worksheet as a data frame. Column types are inferred by promotion:
+  blanks are logical, booleans stay logical, numbers give a double,
+  anything mixed or holding a string or a cell error becomes character,
+  and a column of dates becomes `Date` or `POSIXct`. `range` is A1
+  notation and either corner may name a cell, a column or a row, so
+  `"B2:D10"`, `"A:C"` and `"2:10"` all work.
+- `xlsx_cells(path, sheet = 1)` — one row per cell: position, type,
+  text, numeric value. The view underneath
+  [`read_xlsx()`](https://pedrobtz.github.io/zuxlsx/reference/read_xlsx.md),
+  for sheets that are not rectangular.
+- `xlsx_rows(path, sheet = 1)` — a worksheet row by row as text, padded
+  so the nth element of each row is the nth column.
+- `xlsx_read_cells(path, sheet = 1, callback, chunk_size = 10000L)` —
+  chunked streaming read; returning `FALSE` stops it. **The only entry
+  point that calls R while the archive and the parser are open**, which
+  is why both are owned by external pointers with registered finalizers
+  rather than by the C stack.
+- `xlsx_sheets(path)` — worksheet names, in workbook order.
 - [`zuxlsx_native()`](https://pedrobtz.github.io/zuxlsx/reference/zuxlsx_native.md)
   — reports `xlsxio` 0.2.36, `expat_2.8.4`, miniz `11.3.2`. It calls
   `XML_ExpatVersion()` rather than reading a macro, so a header on the
   include path without the archive behind it fails at link time.
+
+Both Excel epochs are handled, chosen per workbook by `date1904`, and
+the 1900 system’s phantom 29 February is accounted for: serial 60 is
+`NA`, serial 61 is 1 March 1900. Errors are seven classed conditions
+under `zuxlsx_error` — see
+[`?"zuxlsx-conditions"`](https://pedrobtz.github.io/zuxlsx/reference/zuxlsx-conditions.md)
+and design §15. An encrypted workbook (OLE2, not ZIP) and an `.xlsb` are
+reported as `zuxlsx_unsupported_format_error` rather than as damage.
+
+Out of scope or not done: writing workbooks, `.xlsb`, decrypting an
+encrypted workbook, evaluating formulas (the cached value is returned),
+and configurable limits on part size or sheet count — today’s defenses
+are Expat’s and miniz’s own. Column building is a post-pass rather than
+streaming; design §14’s status note says why.
 
 The build:
 
@@ -62,47 +89,77 @@ The build:
   [.agents/release-checklist.md](https://pedrobtz.github.io/zuxlsx/.agents/release-checklist.md).
 - `src/Makevars` is generated and `.gitignore`d. `cleanup` removes it.
 
-Vendored and copied from the working `utopp/pkg-xlsx` prototype at
-`/Users/pbtz/Documents/repos/gh/utopp/pkg-xlsx`:
+The native layer is
+[src/zuxlsx.c](https://pedrobtz.github.io/zuxlsx/src/zuxlsx.c) — every
+`.Call` entry point, the cell reader and the column builders in one
+translation unit — plus
+[src/init.c](https://pedrobtz.github.io/zuxlsx/src/init.c) for
+registration.
+
+Vendored, and the corpora:
 
 - [src/vendor/xlsxio/](https://pedrobtz.github.io/zuxlsx/src/vendor/xlsxio/)
   — xlsxio 0.2.36, **reader only** (`xlsxio_read.c`,
   `xlsxio_read_sharedstrings.c`, headers, `LICENSE.txt`). The writer is
   not bundled; writing is out of scope (§21). Upstream CRLF line endings
   are kept deliberately.
+
 - [tools/patches/xlsxio/](https://pedrobtz.github.io/zuxlsx/tools/patches/xlsxio/)
-  — two patches, applied in order. `0001-miniz-zip-backend.patch` is
-  **design §5’s “main adaptation cost”, already solved**: it adds a
-  `USE_MINIZ` backend beside xlsxio’s minizip/minizip-ng/libzip ones,
-  mapping `unzOpen`/`unzLocateFile`/`unzReadCurrentFile` onto
-  `mz_zip_reader_init_file` / `_locate_file_v2` / `_extract_iter_read`.
-  `0002-namespace-insensitive-relationship-id.patch` looks a worksheet’s
-  relationship id up as `id` rather than `r:id`, so a workbook binding
-  the relationships namespace to another prefix still resolves. The pair
-  reproduces the committed copy byte for byte from the pristine 0.2.36
-  tarball. Provenance is in
+  — **seven patches**, applied in order, reproducing the committed copy
+  byte for byte from the pristine 0.2.36 tarball:
+
+  | Patch | What it does |
+  |----|----|
+  | `0001-miniz-zip-backend` | design §5’s “main adaptation cost”: a `USE_MINIZ` backend beside xlsxio’s minizip/minizip-ng/libzip ones, mapping `unzOpen`/`unzLocateFile`/`unzReadCurrentFile` onto `mz_zip_reader_init_file` / `_locate_file_v2` / `_extract_iter_read` |
+  | `0002-namespace-insensitive-relationship-id` | looks a worksheet’s relationship id up as `id` rather than `r:id`, so a workbook binding the relationships namespace to another prefix still resolves |
+  | `0003-expose-cell-type-and-number-format` | reports a cell’s OOXML type and whether its number format is a date — without it xlsxio hands back text and nothing else, and no typing or date handling is possible |
+  | `0004-expose-workbook-date-epoch` | reports the workbook’s `date1904` setting |
+  | `0005-tolerant-part-name-lookup` | matches archive members the way OOXML consumers compare part names |
+  | `0006-strict-ooxml-relationship-types` | accepts strict OOXML relationship namespaces as well as transitional ones |
+  | `0007-null-relationship-id-crash` | a missing relationship `Id` reached `strcasecmp` as `NULL`; found by the fuzzer, reported upstream |
+
+  Provenance is in
   [tools/vendor/manifest.tsv](https://pedrobtz.github.io/zuxlsx/tools/vendor/manifest.tsv),
   [tools/vendor/checksums.sha256](https://pedrobtz.github.io/zuxlsx/tools/vendor/checksums.sha256)
   and
   [inst/COPYRIGHTS](https://pedrobtz.github.io/zuxlsx/inst/COPYRIGHTS);
   **`tools/vendor/verify` checks all of it offline and is the thing to
   run after touching anything under `src/vendor/`.**
+
 - [tests/testthat/sheets/](https://pedrobtz.github.io/zuxlsx/tests/testthat/sheets/)
   — seven readxl interoperability workbooks (inline strings, missing
   parts, nonstandard namespace prefix, UTF-8 sheet names, blanks), MIT,
   with provenance and checksums in `MANIFEST.tsv` there, all verified
-  byte for byte against readxl at commit `47f8aeac`. The generated §17.4
-  corpus is still to be built.
+  byte for byte against readxl at commit `47f8aeac`. `test-corpus.R`
+  asserts their content, not just that they open.
+
+- [tests/testthat/fixtures/ole2/](https://pedrobtz.github.io/zuxlsx/tests/testthat/fixtures/ole2/)
+  — OLE2 containers for the format classifier: synthetic ones reproduced
+  by `tools/make-ole2.R --check`, and two real Agile-encrypted files
+  that cannot be reproduced byte for byte because the encryption draws a
+  random salt.
+
+- [tools/corpus/](https://pedrobtz.github.io/zuxlsx/tools/corpus/) — 352
+  Apache POI `.xlsx` files, fetched rather than committed, run in CI
+  only. It reports outcomes that *changed* against `expected.tsv`;
+  errors are often the correct result there.
+
+- [tools/fuzz/](https://pedrobtz.github.io/zuxlsx/tools/fuzz/) —
+  structure-aware mutation under ASan/UBSan, outside R because R is not
+  built with a sanitiser. It found the crash that `0007` fixes.
+
+- [tools/bench/](https://pedrobtz.github.io/zuxlsx/tools/bench/) —
+  timings against readxl and openxlsx2; see **Commands**.
+
 - [.agents/reference-native-api.md](https://pedrobtz.github.io/zuxlsx/.agents/reference-native-api.md)
   — function map of the xlsxio reader, Expat and miniz ZIP APIs the
   vendored code uses.
 
-The prototype also holds a `USE_MINIZ` patch for `xlsxio_write.c`, a
-working `src/bindings.c` + `R/xlsxio.R` read/write path, and research
-notes (`ROADMAP.md`, `calamine.md`, `libs.md`). None of that was copied;
-go back for it if writing or a quick end-to-end spike is wanted.
-
-Everything else described below is unstarted.
+The `utopp/pkg-xlsx` prototype at
+`/Users/pbtz/Documents/repos/gh/utopp/pkg-xlsx` is where the vendored
+tree came from. It also holds a `USE_MINIZ` patch for `xlsxio_write.c`
+and research notes (`ROADMAP.md`, `calamine.md`, `libs.md`); none of
+that was copied, so go back for it if writing is ever in scope.
 
 ## The design doc is the spec
 
@@ -316,11 +373,20 @@ unless the design doc says otherwise.
   by snapshots. Tests are self-sufficient (inputs built inside each
   `test_that()`), self-contained (`withr::local_*()`), and must pass
   under `devtools::test(shuffle = TRUE)`.
-- **Fixtures are committed, never generated at test time**, with
-  provenance in a `MANIFEST.tsv` and a `tools/` generator that supports
-  `--check` for reproducibility. CRAN guarantees no Python and no
-  external tooling. Design §17.4 specifies the `valid/` `unusual/`
-  `invalid/` corpus layout.
+- **Two kinds of test input, and they are not interchangeable.** A
+  workbook shaped for one assertion is *built in the test*, through the
+  byte-by-byte writers in `helper-zip.R` (`write_workbook()`,
+  `styled_workbook_parts()`, `grid_workbook()`,
+  `strict_workbook_parts()`) — the adversarial cases need a central
+  directory that disagrees with the local headers, or a member declared
+  at a size it cannot back, and no ZIP library will produce those on
+  request. A file that proves *interoperability* is committed, with
+  provenance in a `MANIFEST.tsv` and, where it can be reproduced, a
+  `tools/` generator supporting `--check`. CRAN guarantees no Python and
+  no external tooling, so nothing may be produced at test time by an
+  external program. Design §17.4’s `valid/` `unusual-valid/` `invalid/`
+  `hostile/` categories are `test-valid.R`, `test-unusual.R`,
+  `test-malformed.R` and `test-hostile.R`.
 - **Vendored third-party code under `src/vendor/` is never edited in
   place** — patches live in `tools/patches/`, provenance in
   `tools/vendor/manifest.tsv`, per-file checksums in

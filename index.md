@@ -13,24 +13,42 @@ package has to be installed or loadable once zuxlsx is built.
 
 Writing workbooks is out of scope.
 
-## Status
-
-**Early. This is a build slice, not the reading API.**
-
-Two functions exist so far, and they are there mainly so that a broken
-native build fails a test rather than being discovered later:
+## Usage
 
 ``` r
 
 library(zuxlsx)
 
-xlsx_sheets(path)   # worksheet names, in workbook order
-zuxlsx_native()     # the xlsxio, Expat and miniz versions actually linked in
+path <- system.file("extdata", "two-sheets.xlsx", package = "zuxlsx")
+
+xlsx_sheets(path)                      # "readings" "notes"
+read_xlsx(path)                        # first worksheet as a data frame
+read_xlsx(path, sheet = "readings", range = "A1:B3")
 ```
 
-[`read_xlsx()`](https://pedrobtz.github.io/zuxlsx/reference/read_xlsx.md),
-the cell reader and the column builders are not written yet. The design
-they will follow is in `.agents/design-zuxlsx.md`.
+[`read_xlsx()`](https://pedrobtz.github.io/zuxlsx/reference/read_xlsx.md)
+gives each column the type its cells support: logical, double,
+character, `Date` or `POSIXct`. A column that cannot hold its cells
+becomes character rather than failing. `range` takes A1 notation, and
+either corner may name a cell, a column or a row, so `"B2:D10"`, `"A:C"`
+and `"2:10"` are all accepted.
+
+Both Excel date systems are handled. The workbook’s own `date1904`
+setting decides which is used, and the 1900 system’s phantom 29 February
+1900 is accounted for, so dates before March 1900 are not a day early.
+
+Underneath, for worksheets that are not rectangular enough for a data
+frame:
+
+``` r
+
+xlsx_cells(path)     # one row per cell: position, type, text, numeric value
+xlsx_rows(path)      # a worksheet row by row as text, padded to a rectangle
+
+# A chunk at a time; returning FALSE stops the read, so finding something
+# near the top of a large worksheet does not pay for the rest.
+xlsx_read_cells(path, callback = function(cells) { str(cells); FALSE })
+```
 
 ## Installation
 

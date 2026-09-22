@@ -40,14 +40,24 @@
 <p><code>zuxlsx</code> is an R package for <strong>reading <code>.xlsx</code> workbooks</strong> with no system XML or ZIP dependency, built on the sibling <code>zu*</code> packages: <code>zuxml</code> (Expat-backed XML) and <code>zukomp</code> (miniz-backed DEFLATE), with vendored <code>xlsxio</code> supplying the OOXML logic.</p>
 </div>
 <div class="section level2">
-<h2 id="current-state-it-builds-and-reads-workbooks">Current state: it builds and reads workbooks<a class="anchor" aria-label="anchor" href="#current-state-it-builds-and-reads-workbooks"></a></h2>
-<p>The native stack compiles, links and runs: <code><a href="reference/xlsx_sheets.html">xlsx_sheets()</a></code> opens a real <code>.xlsx</code> and lists its worksheets, which means miniz (from <code>zukomp</code>) opened the ZIP, Expat (from <code>zuxml</code>) parsed <code>xl/workbook.xml</code>, and vendored xlsxio drove both. 41 tests pass, shuffled, and <code>R CMD check --as-cran</code> is 0 errors / 0 warnings / 1 note (the note is “New submission” plus the two non-CRAN <code>LinkingTo</code> packages).</p>
-<p><strong>This is a build slice, not the reading API.</strong> <code><a href="reference/read_xlsx.html">read_xlsx()</a></code>, the cell event model and the column builders (design §12–§14) are unstarted. The two exported functions exist so that a broken native build is a failing test rather than something discovered later:</p>
+<h2 id="current-state-010-and-the-reader-is-done">Current state: 0.1.0, and the reader is done<a class="anchor" aria-label="anchor" href="#current-state-010-and-the-reader-is-done"></a></h2>
+<p>The reading API of design §12 is implemented and the package is CRAN-ready apart from the two steps that must happen on submission day, which are in <a href=".agents/release-checklist.html">.agents/release-checklist.md</a>. 870 tests pass, shuffled, and <code>R CMD check --as-cran</code> is 0 errors / 0 warnings / 0 notes.</p>
+<p>What is exported:</p>
 <ul><li>
-<code>xlsx_sheets(path)</code> — exercises both archives on a real file.</li>
+<code>read_xlsx(path, sheet = 1, col_names = TRUE, range = NULL)</code> — a worksheet as a data frame. Column types are inferred by promotion: blanks are logical, booleans stay logical, numbers give a double, anything mixed or holding a string or a cell error becomes character, and a column of dates becomes <code>Date</code> or <code>POSIXct</code>. <code>range</code> is A1 notation and either corner may name a cell, a column or a row, so <code>"B2:D10"</code>, <code>"A:C"</code> and <code>"2:10"</code> all work.</li>
+<li>
+<code>xlsx_cells(path, sheet = 1)</code> — one row per cell: position, type, text, numeric value. The view underneath <code><a href="reference/read_xlsx.html">read_xlsx()</a></code>, for sheets that are not rectangular.</li>
+<li>
+<code>xlsx_rows(path, sheet = 1)</code> — a worksheet row by row as text, padded so the nth element of each row is the nth column.</li>
+<li>
+<code>xlsx_read_cells(path, sheet = 1, callback, chunk_size = 10000L)</code> — chunked streaming read; returning <code>FALSE</code> stops it. <strong>The only entry point that calls R while the archive and the parser are open</strong>, which is why both are owned by external pointers with registered finalizers rather than by the C stack.</li>
+<li>
+<code>xlsx_sheets(path)</code> — worksheet names, in workbook order.</li>
 <li>
 <code><a href="reference/zuxlsx_native.html">zuxlsx_native()</a></code> — reports <code>xlsxio</code> 0.2.36, <code>expat_2.8.4</code>, miniz <code>11.3.2</code>. It calls <code>XML_ExpatVersion()</code> rather than reading a macro, so a header on the include path without the archive behind it fails at link time.</li>
-</ul><p>The build:</p>
+</ul><p>Both Excel epochs are handled, chosen per workbook by <code>date1904</code>, and the 1900 system’s phantom 29 February is accounted for: serial 60 is <code>NA</code>, serial 61 is 1 March 1900. Errors are seven classed conditions under <code>zuxlsx_error</code> — see <code><a href="reference/zuxlsx-conditions.html">?"zuxlsx-conditions"</a></code> and design §15. An encrypted workbook (OLE2, not ZIP) and an <code>.xlsb</code> are reported as <code>zuxlsx_unsupported_format_error</code> rather than as damage.</p>
+<p>Out of scope or not done: writing workbooks, <code>.xlsb</code>, decrypting an encrypted workbook, evaluating formulas (the cached value is returned), and configurable limits on part size or sheet count — today’s defenses are Expat’s and miniz’s own. Column building is a post-pass rather than streaming; design §14’s status note says why.</p>
+<p>The build:</p>
 <ul><li>
 <a href="configure">configure</a> / <a href="configure.win">configure.win</a> resolve <code>system.file("lib", package = ...)</code> for <code>zuxml</code> and <code>zukomp</code> and substitute them into <a href="src/Makevars.in">src/Makevars.in</a>. <code>LinkingTo</code> puts the <em>headers</em> on the path by itself (<code>CLINK_CPPFLAGS</code>); there is no equivalent for a library, and the alternatives are worse — <code>$(shell …)</code> would force <code>SystemRequirements: GNU make</code>, and an <code>Imports:</code> entry would add a runtime dependency that nothing needs, since the archives are linked statically.</li>
 <li>
@@ -56,18 +66,37 @@
 <strong><code>Remotes:</code> tracks <code>pedrobtz/zuxml@main</code> and <code>pedrobtz/zukomp@main</code></strong>, since neither is on CRAN. <code>@main</code> is deliberate and is not a version pin: the three packages are developed together, so zuxlsx builds against what the siblings actually are, and a sibling release that breaks this package is a bug to fix in the sibling rather than a version to freeze away from. That has real cost — a zukomp release broke Windows here on 2026-09-19 — and it is the cost being chosen. Do not pin a <em>feature</em> branch: those are deleted on merge and the ref then 404s. Drop <code>Remotes:</code> entirely before any CRAN submission – on submission day, not before, since it is what makes a GitHub install work. The full sequence, including why the siblings must reach CRAN first, is in <a href=".agents/release-checklist.html">.agents/release-checklist.md</a>.</li>
 <li>
 <code>src/Makevars</code> is generated and <code>.gitignore</code>d. <code>cleanup</code> removes it.</li>
-</ul><p>Vendored and copied from the working <code>utopp/pkg-xlsx</code> prototype at <code>/Users/pbtz/Documents/repos/gh/utopp/pkg-xlsx</code>:</p>
-<ul><li>
-<a href="src/vendor/xlsxio/">src/vendor/xlsxio/</a> — xlsxio 0.2.36, <strong>reader only</strong> (<code>xlsxio_read.c</code>, <code>xlsxio_read_sharedstrings.c</code>, headers, <code>LICENSE.txt</code>). The writer is not bundled; writing is out of scope (§21). Upstream CRLF line endings are kept deliberately.</li>
+</ul><p>The native layer is <a href="src/zuxlsx.c">src/zuxlsx.c</a> — every <code>.Call</code> entry point, the cell reader and the column builders in one translation unit — plus <a href="src/init.c">src/init.c</a> for registration.</p>
+<p>Vendored, and the corpora:</p>
+<ul><li><p><a href="src/vendor/xlsxio/">src/vendor/xlsxio/</a> — xlsxio 0.2.36, <strong>reader only</strong> (<code>xlsxio_read.c</code>, <code>xlsxio_read_sharedstrings.c</code>, headers, <code>LICENSE.txt</code>). The writer is not bundled; writing is out of scope (§21). Upstream CRLF line endings are kept deliberately.</p></li>
 <li>
-<a href="tools/patches/xlsxio/">tools/patches/xlsxio/</a> — two patches, applied in order. <code>0001-miniz-zip-backend.patch</code> is <strong>design §5’s “main adaptation cost”, already solved</strong>: it adds a <code>USE_MINIZ</code> backend beside xlsxio’s minizip/minizip-ng/libzip ones, mapping <code>unzOpen</code>/<code>unzLocateFile</code>/<code>unzReadCurrentFile</code> onto <code>mz_zip_reader_init_file</code> / <code>_locate_file_v2</code> / <code>_extract_iter_read</code>. <code>0002-namespace-insensitive-relationship-id.patch</code> looks a worksheet’s relationship id up as <code>id</code> rather than <code>r:id</code>, so a workbook binding the relationships namespace to another prefix still resolves. The pair reproduces the committed copy byte for byte from the pristine 0.2.36 tarball. Provenance is in <a href="tools/vendor/manifest.tsv">tools/vendor/manifest.tsv</a>, <a href="tools/vendor/checksums.sha256">tools/vendor/checksums.sha256</a> and <a href="inst/COPYRIGHTS">inst/COPYRIGHTS</a>; <strong><code>tools/vendor/verify</code> checks all of it offline and is the thing to run after touching anything under <code>src/vendor/</code>.</strong>
+<p><a href="tools/patches/xlsxio/">tools/patches/xlsxio/</a> — <strong>seven patches</strong>, applied in order, reproducing the committed copy byte for byte from the pristine 0.2.36 tarball:</p>
+<table class="table"><colgroup><col width="50%"><col width="50%"></colgroup><thead><tr><th>Patch</th>
+<th>What it does</th>
+</tr></thead><tbody><tr><td><code>0001-miniz-zip-backend</code></td>
+<td>design §5’s “main adaptation cost”: a <code>USE_MINIZ</code> backend beside xlsxio’s minizip/minizip-ng/libzip ones, mapping <code>unzOpen</code>/<code>unzLocateFile</code>/<code>unzReadCurrentFile</code> onto <code>mz_zip_reader_init_file</code> / <code>_locate_file_v2</code> / <code>_extract_iter_read</code>
+</td>
+</tr><tr><td><code>0002-namespace-insensitive-relationship-id</code></td>
+<td>looks a worksheet’s relationship id up as <code>id</code> rather than <code>r:id</code>, so a workbook binding the relationships namespace to another prefix still resolves</td>
+</tr><tr><td><code>0003-expose-cell-type-and-number-format</code></td>
+<td>reports a cell’s OOXML type and whether its number format is a date — without it xlsxio hands back text and nothing else, and no typing or date handling is possible</td>
+</tr><tr><td><code>0004-expose-workbook-date-epoch</code></td>
+<td>reports the workbook’s <code>date1904</code> setting</td>
+</tr><tr><td><code>0005-tolerant-part-name-lookup</code></td>
+<td>matches archive members the way OOXML consumers compare part names</td>
+</tr><tr><td><code>0006-strict-ooxml-relationship-types</code></td>
+<td>accepts strict OOXML relationship namespaces as well as transitional ones</td>
+</tr><tr><td><code>0007-null-relationship-id-crash</code></td>
+<td>a missing relationship <code>Id</code> reached <code>strcasecmp</code> as <code>NULL</code>; found by the fuzzer, reported upstream</td>
+</tr></tbody></table><p>Provenance is in <a href="tools/vendor/manifest.tsv">tools/vendor/manifest.tsv</a>, <a href="tools/vendor/checksums.sha256">tools/vendor/checksums.sha256</a> and <a href="inst/COPYRIGHTS">inst/COPYRIGHTS</a>; <strong><code>tools/vendor/verify</code> checks all of it offline and is the thing to run after touching anything under <code>src/vendor/</code>.</strong></p>
 </li>
-<li>
-<a href="tests/testthat/sheets/">tests/testthat/sheets/</a> — seven readxl interoperability workbooks (inline strings, missing parts, nonstandard namespace prefix, UTF-8 sheet names, blanks), MIT, with provenance and checksums in <code>MANIFEST.tsv</code> there, all verified byte for byte against readxl at commit <code>47f8aeac</code>. The generated §17.4 corpus is still to be built.</li>
-<li>
-<a href=".agents/reference-native-api.html">.agents/reference-native-api.md</a> — function map of the xlsxio reader, Expat and miniz ZIP APIs the vendored code uses.</li>
-</ul><p>The prototype also holds a <code>USE_MINIZ</code> patch for <code>xlsxio_write.c</code>, a working <code>src/bindings.c</code> + <code>R/xlsxio.R</code> read/write path, and research notes (<code>ROADMAP.md</code>, <code>calamine.md</code>, <code>libs.md</code>). None of that was copied; go back for it if writing or a quick end-to-end spike is wanted.</p>
-<p>Everything else described below is unstarted.</p>
+<li><p><a href="tests/testthat/sheets/">tests/testthat/sheets/</a> — seven readxl interoperability workbooks (inline strings, missing parts, nonstandard namespace prefix, UTF-8 sheet names, blanks), MIT, with provenance and checksums in <code>MANIFEST.tsv</code> there, all verified byte for byte against readxl at commit <code>47f8aeac</code>. <code>test-corpus.R</code> asserts their content, not just that they open.</p></li>
+<li><p><a href="tests/testthat/fixtures/ole2/">tests/testthat/fixtures/ole2/</a> — OLE2 containers for the format classifier: synthetic ones reproduced by <code>tools/make-ole2.R --check</code>, and two real Agile-encrypted files that cannot be reproduced byte for byte because the encryption draws a random salt.</p></li>
+<li><p><a href="tools/corpus/">tools/corpus/</a> — 352 Apache POI <code>.xlsx</code> files, fetched rather than committed, run in CI only. It reports outcomes that <em>changed</em> against <code>expected.tsv</code>; errors are often the correct result there.</p></li>
+<li><p><a href="tools/fuzz/">tools/fuzz/</a> — structure-aware mutation under ASan/UBSan, outside R because R is not built with a sanitiser. It found the crash that <code>0007</code> fixes.</p></li>
+<li><p><a href="tools/bench/">tools/bench/</a> — timings against readxl and openxlsx2; see <strong>Commands</strong>.</p></li>
+<li><p><a href=".agents/reference-native-api.html">.agents/reference-native-api.md</a> — function map of the xlsxio reader, Expat and miniz ZIP APIs the vendored code uses.</p></li>
+</ul><p>The <code>utopp/pkg-xlsx</code> prototype at <code>/Users/pbtz/Documents/repos/gh/utopp/pkg-xlsx</code> is where the vendored tree came from. It also holds a <code>USE_MINIZ</code> patch for <code>xlsxio_write.c</code> and research notes (<code>ROADMAP.md</code>, <code>calamine.md</code>, <code>libs.md</code>); none of that was copied, so go back for it if writing is ever in scope.</p>
 </div>
 <div class="section level2">
 <h2 id="the-design-doc-is-the-spec">The design doc is the spec<a class="anchor" aria-label="anchor" href="#the-design-doc-is-the-spec"></a></h2>
@@ -138,7 +167,7 @@ zuxml/include/expat_external.h zuxml/lib/libzuxml.a</code></pre>
 <li>
 <strong>Tests assert on condition classes, never message text</strong> (<code>expect_error(..., class = "zuxlsx_zip_error")</code>); wording is covered by snapshots. Tests are self-sufficient (inputs built inside each <code>test_that()</code>), self-contained (<code>withr::local_*()</code>), and must pass under <code>devtools::test(shuffle = TRUE)</code>.</li>
 <li>
-<strong>Fixtures are committed, never generated at test time</strong>, with provenance in a <code>MANIFEST.tsv</code> and a <code>tools/</code> generator that supports <code>--check</code> for reproducibility. CRAN guarantees no Python and no external tooling. Design §17.4 specifies the <code>valid/</code> <code>unusual/</code> <code>invalid/</code> corpus layout.</li>
+<strong>Two kinds of test input, and they are not interchangeable.</strong> A workbook shaped for one assertion is <em>built in the test</em>, through the byte-by-byte writers in <code>helper-zip.R</code> (<code>write_workbook()</code>, <code>styled_workbook_parts()</code>, <code>grid_workbook()</code>, <code>strict_workbook_parts()</code>) — the adversarial cases need a central directory that disagrees with the local headers, or a member declared at a size it cannot back, and no ZIP library will produce those on request. A file that proves <em>interoperability</em> is committed, with provenance in a <code>MANIFEST.tsv</code> and, where it can be reproduced, a <code>tools/</code> generator supporting <code>--check</code>. CRAN guarantees no Python and no external tooling, so nothing may be produced at test time by an external program. Design §17.4’s <code>valid/</code> <code>unusual-valid/</code> <code>invalid/</code> <code>hostile/</code> categories are <code>test-valid.R</code>, <code>test-unusual.R</code>, <code>test-malformed.R</code> and <code>test-hostile.R</code>.</li>
 <li>
 <strong>Vendored third-party code under <code>src/vendor/</code> is never edited in place</strong> — patches live in <code>tools/patches/</code>, provenance in <code>tools/vendor/manifest.tsv</code>, per-file checksums in <code>tools/vendor/checksums.sha256</code>. <code>tools/vendor/fetch</code> re-derives the tree from the upstream tarball, <code>record</code> rewrites the checksums, and <strong><code>verify</code> checks offline that the committed tree, both manifests, <code>src/Makevars.in</code>’s defines and <code>inst/COPYRIGHTS</code> all agree</strong> — run it after touching anything under <code>src/vendor/</code>, <code>tools/patches/</code> or the fixtures. It exists precisely because a hand edit to <code>xlsxio_read.c</code> once shipped undocumented while three files claimed the patch set reproduced the tree byte for byte.</li>
 </ul></div>
