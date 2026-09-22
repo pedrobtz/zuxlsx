@@ -8,8 +8,20 @@ writer API, are dropped: both formats and workbook writing are out of scope
 per design §21.
 
 Read this as a map of the C surface the vendored reader in `src/vendor/xlsxio/`
-depends on. What `zuxlsx` will actually be allowed to call is not settled yet
-— see "Where the design doc and reality currently disagree" in CLAUDE.md.
+depends on. What `zuxlsx` may call was settled on 2026-09-18, when both sibling
+packages were widened to install the archives and the headers: `src/zuxlsx.c`
+calls the xlsxio reader, and Expat and miniz are linked but reached only
+through it, except on the failure path where a workbook that declared no
+worksheet is re-parsed with Expat directly to say *which* part is broken. See
+"Where the design doc and reality disagreed" in CLAUDE.md for the history.
+
+**Three accessors below are not upstream's.** `xlsxioread_sheet_last_cell_type()`
+and `xlsxioread_sheet_last_cell_is_date()` come from
+`0003-expose-cell-type-and-number-format.patch`, and
+`xlsxioread_sheet_date1904()` from `0004-expose-workbook-date-epoch.patch`.
+Without them xlsxio hands back text and nothing else, and neither type
+inference nor dates would be possible. They are listed here because
+`tools/fuzz/harness.c` and `src/zuxlsx.c` both call them.
 
 ## xlsxio
 

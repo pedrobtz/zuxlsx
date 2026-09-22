@@ -23,7 +23,7 @@ explanatory message if they are absent, rather than failing at link time.
 ## Bundled and linked third-party code
 
 `src/vendor/xlsxio/` contains a reduced copy of the xlsxio reader (MIT), with
-five local patches recorded in `tools/patches/xlsxio/`. Expat and miniz are
+seven local patches recorded in `tools/patches/xlsxio/`. Expat and miniz are
 not bundled, but are linked statically and are therefore redistributed in the
 built package; both are MIT.
 
