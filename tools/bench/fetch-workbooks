@@ -1,0 +1,79 @@
+#!/bin/sh
+# Download the benchmark workbooks named in tools/bench/workbooks.tsv.
+#
+#   tools/bench/fetch-workbooks [--record] [id ...]      (default: every id)
+#
+# The files are large (100 MB and up) and their provenance and licence are not
+# established, so they are cached OUTSIDE the repository and are never fixtures:
+# committed fixtures live in tests/testthat/sheets/ with a MANIFEST.tsv. The
+# cache is $ZUXLSX_BENCH_DIR, or ${XDG_CACHE_HOME:-~/.cache}/zuxlsx-bench.
+#
+# A workbook with a recorded sha256 is verified against it and refetched only
+# when absent. --record writes back the sha256 and size of what was fetched,
+# for a row that has none yet.
+#
+# Network is required. This is a maintainer script; it is never run during
+# R CMD check, and nothing in the package depends on its output.
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+cd "$ROOT"
+MANIFEST=tools/bench/workbooks.tsv
+. tools/vendor/common.sh
+
+record=0
+ids=""
+for arg in "$@"; do
+    case "$arg" in
+        --record) record=1 ;;
+        -*) echo "unknown option: $arg" >&2; exit 2 ;;
+        *) ids="$ids $arg" ;;
+    esac
+done
+[ -n "$ids" ] || ids=$(awk 'NR > 1 { print $1 }' FS='\t' "$MANIFEST")
+
+cache=${ZUXLSX_BENCH_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/zuxlsx-bench}
+mkdir -p "$cache"
+
+for id in $ids; do
+    url=$(manifest_field "$id" url)
+    referer=$(manifest_field "$id" referer)
+    want=$(manifest_field "$id" sha256)
+    dest="$cache/$id.xlsx"
+
+    if [ -f "$dest" ] && [ -n "$want" ] && [ "$(sha256_of "$dest")" = "$want" ]; then
+        printf '==> %s already cached: %s\n' "$id" "$dest"
+        continue
+    fi
+
+    printf '==> %s %s\n' "$id" "$url"
+    # examplefile.com serves the file only with a Referer of its landing page
+    # and sends no Content-Length, so there is no progress total to show.
+    curl -fL --retry 2 -A 'Mozilla/5.0' -e "$referer" -o "$dest.part" "$url"
+    mv "$dest.part" "$dest"
+
+    got=$(sha256_of "$dest")
+    bytes=$(wc -c < "$dest" | tr -d ' ')
+
+    if [ -n "$want" ] && [ "$got" != "$want" ]; then
+        printf 'FAIL %s changed upstream\n      expected %s\n      got      %s\n' \
+            "$id" "$want" "$got" >&2
+        printf '      keeping %s; rerun with --record if the new file is wanted\n' "$dest" >&2
+        exit 1
+    fi
+
+    if [ -z "$want" ] && [ "$record" -eq 1 ]; then
+        tmp=$(mktemp)
+        awk -v id="$id" -v sum="$got" -v n="$bytes" '
+            BEGIN { FS = OFS = "\t" }
+            $1 == id { $2 = n; $3 = sum }
+            { print }
+        ' "$MANIFEST" > "$tmp"
+        mv "$tmp" "$MANIFEST"
+        printf '    recorded %s %s bytes\n' "$got" "$bytes"
+    elif [ -z "$want" ]; then
+        printf '    sha256 %s (%s bytes); rerun with --record to pin it\n' "$got" "$bytes"
+    fi
+
+    printf '    %s\n' "$dest"
+done

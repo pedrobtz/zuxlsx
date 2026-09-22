@@ -11,3 +11,4 @@
 ^tools/corpus$
 ^cran-comments\.md$
 ^tools/fuzz$
+^tools/bench$
