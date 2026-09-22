@@ -836,7 +836,7 @@ zuxlsx_sheet_error
 zuxlsx_type_error
 ```
 
-### Status, 2026-09-18: the mechanism exists, four classes of it
+### Status, 2026-09-18, extended to 2026-09-21: seven classes are raised
 
 `R/conditions.R` implements the nesting -- every class above is followed by
 `zuxlsx_error`, so `tryCatch(zuxlsx_error = ...)` catches all of them -- and
@@ -927,6 +927,15 @@ invalid relationships beyond a dangling `r:id`, invalid shared-string indices,
 extreme row and column indices, and integer overflow in cell references.
 Compression bombs are also untested: every hand-built archive here uses stored
 entries, so a real bomb needs a DEFLATE writer the test helper does not have.
+
+**Update, 2026-09-21.** Relationships are now covered further than that line
+says: a dangling `r:id`, a self-referential relationship, a relationship with
+no `Id` and one with an empty `Id` all have tests, the last two because the
+fuzzer found a NULL dereference there (`0007-null-relationship-id-crash`).
+`test-hostile.R` also pins one defect rather than hiding it -- a corrupt
+CRC-32 is not detected, and the test says so in its name. Invalid
+shared-string indices, extreme row and column indices, integer overflow in
+cell references and compression bombs remain uncovered.
 
 No configurable limits exist yet. Nothing in the reader caps a part size, a
 string length or a sheet count; the defenses that hold today come from Expat's
@@ -1591,6 +1600,24 @@ Known limitations rather than missing items: column building is a post-pass
 rather than streaming (section 14), `xlsx_read_cells()` is unimplemented
 (section 12), and `zuxlsx_xml_error` and `zuxlsx_type_error` remain unraised
 (section 15).
+
+### Status, 2026-09-21: 11 of 11
+
+Item 11 is done too. The corpus question resolved both ways: the shaped cases
+of 17.4 are built inside the tests that need them rather than committed
+(`test-valid.R`, `test-unusual.R`, `test-malformed.R`, `test-hostile.R`), and
+the external corpora of 17.1 to 17.3 are answered by `tools/corpus/` -- 352
+Apache POI workbooks, fetched rather than committed, run in CI against a
+recorded outcome per file. `strict_ooxml.xlsx` and `zip64.xlsx` no longer need
+a real producer: strict OOXML is written by `strict_workbook_parts()` and read
+via `0006-strict-ooxml-relationship-types`, and ZIP64 archives have their own
+tests.
+
+Of the limitations listed above, only one still holds: column building is
+still a post-pass. `xlsx_read_cells()` shipped, and `zuxlsx_xml_error` is
+raised with the part and line. `zuxlsx_type_error` is still unraised and
+probably always will be -- a column that cannot hold its cells becomes
+character rather than failing.
 
 ---
 

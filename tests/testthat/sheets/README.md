@@ -15,8 +15,14 @@ SHA-256, its upstream path and commit, its license, and what it exercises.
 it so that a fixture added without its own test still has to open.
 
 They are real-world interoperability workbooks, and cover part of what design
-§17 asks for. The generated per-case corpus under `tests/xlsx/` described in
-§17.4 is still to be built; these do not replace it.
+§17 asks for: files this package did not write, which is what makes them worth
+asserting on. `test-corpus.R` checks their content, not only that they open.
+
+The §17.4 categories are covered a different way than the doc first imagined.
+Rather than a committed `tests/xlsx/` tree, the shaped cases are built inside
+the tests that need them, by the writers in `helper-zip.R` — see `test-valid.R`,
+`test-unusual.R`, `test-malformed.R` and `test-hostile.R`. These files do not
+replace those, and those do not replace these.
 
 | File | What it exercises (verified from the archive contents) |
 | --- | --- |
