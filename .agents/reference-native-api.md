@@ -11,8 +11,10 @@ Read this as a map of the C surface the vendored reader in `src/vendor/xlsxio/`
 depends on. What `zuxlsx` may call was settled on 2026-09-18, when both sibling
 packages were widened to install the archives and the headers: `src/zuxlsx.c`
 calls the xlsxio reader, and Expat and miniz are linked but reached only
-through it, except on the failure path where a workbook that declared no
-worksheet is re-parsed with Expat directly to say *which* part is broken. See
+through it, except in three places: on the failure path where a workbook that
+declared no worksheet is reopened with miniz and re-parsed with Expat directly
+to say *which* part is broken, or checked for `xl/workbook.bin` to recognise
+an `.xlsb`; and `zuxlsx_native()`, which calls `XML_ExpatVersion()`. See
 "Where the design doc and reality disagreed" in CLAUDE.md for the history.
 
 **Three accessors below are not upstream's.** `xlsxioread_sheet_last_cell_type()`
@@ -171,7 +173,7 @@ Main functions:
 | `mz_zip_reader_init_cfile()` | Open from an existing C file handle. |
 | `mz_zip_reader_get_num_files()` | Count central-directory entries. |
 | `mz_zip_reader_get_filename()` | Read an entry name by index. |
-| `mz_zip_reader_locate_file()`, `mz_zip_reader_locate_file_v2()` | Find an entry by archive path. The patched xlsxio code uses `_v2()` with `MZ_ZIP_FLAG_CASE_SENSITIVE`. |
+| `mz_zip_reader_locate_file()`, `mz_zip_reader_locate_file_v2()` | Find an entry by archive path. Since patch 0005 the vendored xlsxio calls neither: `zu_locate_member()` scans the central directory with `mz_zip_reader_get_num_files()`/`mz_zip_reader_get_filename()`, folds case and backslashes, and takes the first match, because `_v2()` resolves a duplicated name differently depending on `MZ_ZIP_FLAG_CASE_SENSITIVE`. `src/zuxlsx.c` still uses `_v2()` with flags `0` in its failure-path helpers (`file_is_xlsb()`, `first_malformed_part()`). |
 | `mz_zip_reader_file_stat()` | Fill an `mz_zip_archive_file_stat` with metadata for an entry. |
 | `mz_zip_reader_is_file_a_directory()`, `mz_zip_reader_is_file_encrypted()`, `mz_zip_reader_is_file_supported()` | Inspect entry capabilities before extraction. |
 | `mz_zip_reader_extract_iter_new()`, `mz_zip_reader_extract_iter_read()`, `mz_zip_reader_extract_iter_free()` | Stream an entry out in chunks. xlsxio uses this path for XML parsing. |
