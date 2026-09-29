@@ -29,6 +29,7 @@
 #include <xlsxio_version.h>
 
 #include "agile.h"
+#include "cfb.h"
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -54,6 +55,8 @@ static const char *const STATUS_AGILE_MALFORMED = "agile_malformed";
 static const char *const STATUS_AGILE_UNSUPPORTED = "agile_unsupported";
 static const char *const STATUS_AGILE_PASSWORD_UTF8 = "agile_password_utf8";
 static const char *const STATUS_AGILE_CRYPTO = "agile_crypto";
+static const char *const STATUS_CFB_NOT_CFB = "cfb_not_cfb";
+static const char *const STATUS_CFB_MALFORMED = "cfb_malformed";
 
 static SEXP result(const char *status, SEXP value) {
   const char *fields[] = {"status", "value", ""};
@@ -1416,4 +1419,100 @@ SEXP C_agile_decrypt(SEXP params, SEXP password, SEXP package) {
   out = PROTECT(result(STATUS_OK, out));
   UNPROTECT(2);
   return out;
+}
+
+/* Streams at the root of a CFB container held in memory (design section
+   21c, step 1). One raw vector per name, or NULL where there is no such
+   stream; a container too damaged to read is a status, not a partial list.
+
+   The streams are read into C memory while the container is open, and no R
+   allocation happens until cfb_close(). The buffers themselves then outlive
+   that, while each is copied into R, so they belong to an external pointer
+   whose finalizer frees them: an allocation failure part way through the
+   copy unwinds past this function, and the finalizer is what still runs. */
+typedef struct {
+  uint8_t **data;
+  size_t *lens;
+  size_t n;
+} stream_bufs;
+
+static void stream_bufs_finalizer(SEXP ptr) {
+  stream_bufs *b = (stream_bufs *) R_ExternalPtrAddr(ptr);
+  size_t i;
+
+  if (b == NULL) return;
+  for (i = 0; i < b->n; i++) free(b->data[i]);
+  free(b->data);
+  free(b->lens);
+  free(b);
+  R_ClearExternalPtr(ptr);
+}
+
+SEXP C_cfb_streams(SEXP bytes, SEXP names) {
+  cfb c;
+  cfb_status st;
+  R_xlen_t i, n;
+  stream_bufs *b;
+  const char *status = NULL;
+  SEXP bag, out, res;
+
+  if (TYPEOF(bytes) != RAWSXP || TYPEOF(names) != STRSXP) {
+    return result(STATUS_CFB_MALFORMED, NULL);
+  }
+  n = XLENGTH(names);
+
+  b = (stream_bufs *) calloc(1, sizeof *b);
+  bag = PROTECT(R_MakeExternalPtr(b, R_NilValue, R_NilValue));
+  R_RegisterCFinalizerEx(bag, stream_bufs_finalizer, TRUE);
+  if (b == NULL) {
+    UNPROTECT(1);
+    return result(STATUS_MEMORY, NULL);
+  }
+  b->data = (uint8_t **) calloc((size_t) n + 1, sizeof *b->data);
+  b->lens = (size_t *) calloc((size_t) n + 1, sizeof *b->lens);
+  if (b->data == NULL || b->lens == NULL) {
+    stream_bufs_finalizer(bag);
+    UNPROTECT(1);
+    return result(STATUS_MEMORY, NULL);
+  }
+  b->n = (size_t) n;
+
+  /* No R allocation between cfb_open() and cfb_close(). */
+  st = cfb_open(&c, RAW(bytes), (size_t) XLENGTH(bytes));
+  if (st == CFB_OK) {
+    for (i = 0; i < n && status == NULL; i++) {
+      cfb_status s;
+      if (STRING_ELT(names, i) == NA_STRING) continue;
+      s = cfb_stream(&c, CHAR(STRING_ELT(names, i)), &b->data[i], &b->lens[i]);
+      if (s == CFB_MEMORY) {
+        status = STATUS_MEMORY;
+      } else if (s != CFB_OK && s != CFB_NOT_FOUND) {
+        status = STATUS_CFB_MALFORMED;
+      }
+    }
+    cfb_close(&c);
+  } else {
+    status = st == CFB_NOT_CFB ? STATUS_CFB_NOT_CFB
+           : st == CFB_MEMORY ? STATUS_MEMORY : STATUS_CFB_MALFORMED;
+  }
+  if (status != NULL) {
+    stream_bufs_finalizer(bag);
+    UNPROTECT(1);
+    return result(status, NULL);
+  }
+
+  /* A stream that was found has a non-NULL buffer even when it is empty. */
+  out = PROTECT(Rf_allocVector(VECSXP, n));
+  for (i = 0; i < n; i++) {
+    if (b->data[i] != NULL) {
+      SEXP raw = Rf_allocVector(RAWSXP, (R_xlen_t) b->lens[i]);
+      if (b->lens[i] > 0) memcpy(RAW(raw), b->data[i], b->lens[i]);
+      SET_VECTOR_ELT(out, i, raw);
+    }
+  }
+  Rf_setAttrib(out, R_NamesSymbol, names);
+  stream_bufs_finalizer(bag);
+  res = PROTECT(result(STATUS_OK, out));
+  UNPROTECT(3);
+  return res;
 }

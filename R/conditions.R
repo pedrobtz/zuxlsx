@@ -165,6 +165,20 @@ zuxlsx_unwrap <- function(res, path = NULL, call = sys.call(-1L)) {
         "SHA-2, which is what Excel has written since 2013."
       )
     ),
+    cfb_not_cfb = list(
+      class = "zuxlsx_input_error",
+      message = paste0("'", path, "' is not an OLE2 container.")
+    ),
+    cfb_malformed = list(
+      # The container an encrypted workbook arrives in, damaged: the same
+      # answer as a damaged encryption header inside it.
+      class = "zuxlsx_integrity_error",
+      message = paste0(
+        "'", path, "' is a damaged OLE2 container.\n",
+        "Its sector tables or directory are inconsistent, so the streams in ",
+        "it cannot be read."
+      )
+    ),
     agile_password_utf8 = list(
       class = "zuxlsx_input_error",
       message = "`password` must be a single non-missing string of valid text."
