@@ -7,8 +7,9 @@ with code in this repository.
 
 `zuxlsx` is an R package for **reading `.xlsx` workbooks** with no
 system XML or ZIP dependency, built on the sibling `zu*` packages:
-`zuxml` (Expat-backed XML) and `zukomp` (miniz-backed DEFLATE), with
-vendored `xlsxio` supplying the OOXML logic.
+`zuxml` (Expat-backed XML), `zukomp` (miniz-backed DEFLATE) and
+`zucrypt` (TF-PSA-Crypto, for decrypting password-protected workbooks),
+with vendored `xlsxio` supplying the OOXML logic.
 
 ## Current state: 0.1.0, and the reader is done
 
@@ -41,8 +42,9 @@ What is exported:
   rather than by the C stack.
 - `xlsx_sheets(path)` — worksheet names, in workbook order.
 - [`zuxlsx_native()`](https://pedrobtz.github.io/zuxlsx/reference/zuxlsx_native.md)
-  — reports `xlsxio` 0.2.36, `expat_2.8.4`, miniz `11.3.2`. It calls
-  `XML_ExpatVersion()` rather than reading a macro, so a header on the
+  — reports `xlsxio` 0.2.36, `expat_2.8.4`, miniz `11.3.2`,
+  TF-PSA-Crypto `1.1.1`. It calls `XML_ExpatVersion()` and
+  `zuc_get_info()` rather than reading macros, so a header on the
   include path without the archive behind it fails at link time.
 
 Both Excel epochs are handled, chosen per workbook by `date1904`, and
@@ -53,18 +55,30 @@ under `zuxlsx_error` — see
 and design §15. An encrypted workbook (OLE2, not ZIP) and an `.xlsb` are
 reported as `zuxlsx_unsupported_format_error` rather than as damage.
 
+**Decryption is in progress (#22, design §21c/§21d).** Step 3, the agile
+decryption core in C over `libzucrypt.a`, is done:
+[src/agile.c](https://pedrobtz.github.io/zuxlsx/src/agile.c) decrypts
+the real fixture byte for byte, with the `EncryptionInfo` parameters
+read in R by `tests/testthat/helper-ole2.R`. `agile_decrypt()` is
+internal; no exported function reaches it until steps 1, 2 and 4 (CFB
+stream reading, `EncryptionInfo` parsing, handing the plaintext to
+xlsxio) land. zucrypt freezes its ABI 1 on this code; findings go on
+pedrobtz/zucrypt#43.
+
 Out of scope or not done: writing workbooks, `.xlsb`, decrypting an
-encrypted workbook, evaluating formulas (the cached value is returned),
-and configurable limits on part size or sheet count — today’s defenses
-are Expat’s and miniz’s own. Column building is a post-pass rather than
-streaming; design §14’s status note says why.
+encrypted workbook from an exported function (above), evaluating
+formulas (the cached value is returned), and configurable limits on part
+size or sheet count — today’s defenses are Expat’s and miniz’s own.
+Column building is a post-pass rather than streaming; design §14’s
+status note says why.
 
 The build:
 
 - [configure](https://pedrobtz.github.io/zuxlsx/configure) /
   [configure.win](https://pedrobtz.github.io/zuxlsx/configure.win)
-  resolve `system.file("lib", package = ...)` for `zuxml` and `zukomp`
-  and substitute them into
+  resolve `system.file("lib", package = ...)` for `zuxml`, `zukomp` and
+  `zucrypt` (arch-specific `lib/x64` first, then `lib`) and substitute
+  them into
   [src/Makevars.in](https://pedrobtz.github.io/zuxlsx/src/Makevars.in).
   `LinkingTo` puts the *headers* on the path by itself
   (`CLINK_CPPFLAGS`); there is no equivalent for a library, and the
@@ -72,10 +86,10 @@ The build:
   `SystemRequirements: GNU make`, and an `Imports:` entry would add a
   runtime dependency that nothing needs, since the archives are linked
   statically.
-- `DESCRIPTION` has `LinkingTo: zukomp, zuxml` and **no `Imports:`**,
-  which is what design §3 asks for.
-- **`Remotes:` tracks `pedrobtz/zuxml@main` and
-  `pedrobtz/zukomp@main`**, since neither is on CRAN. `@main` is
+- `DESCRIPTION` has `LinkingTo: zucrypt, zukomp, zuxml` and **no
+  `Imports:`**, which is what design §3 asks for.
+- **`Remotes:` tracks `pedrobtz/zuxml@main`, `pedrobtz/zukomp@main` and
+  `pedrobtz/zucrypt@main`**, since none is on CRAN. `@main` is
   deliberate and is not a version pin: the three packages are developed
   together, so zuxlsx builds against what the siblings actually are, and
   a sibling release that breaks this package is a bug to fix in the
@@ -94,7 +108,11 @@ The native layer is
 `.Call` entry point, the cell reader and the column builders in one
 translation unit — plus
 [src/init.c](https://pedrobtz.github.io/zuxlsx/src/init.c) for
-registration.
+registration and the zucrypt backend’s lifetime (`zuc_init()` on load,
+`zuc_shutdown()` on unload), and
+[src/agile.c](https://pedrobtz.github.io/zuxlsx/src/agile.c), the
+decryption core. `agile.c` includes no R header, so it can be fuzzed
+outside R (#45).
 
 Vendored, and the corpora:
 
@@ -283,7 +301,7 @@ disk does. `@main` is fine and is what `DESCRIPTION` asks for; a
 *feature* branch suffix is not, since those are deleted on merge.
 
 ``` sh
-Rscript -e 'pak::pak(c("pedrobtz/zuxml", "pedrobtz/zukomp"))'
+Rscript -e 'pak::pak(c("pedrobtz/zuxml", "pedrobtz/zukomp", "pedrobtz/zucrypt"))'
 ```
 
 ``` sh
@@ -306,7 +324,7 @@ rewritten, not a read-only check; `./cleanup` removes it.
 ``` sh
 Rscript -e 'zuxlsx::zuxlsx_native()'   # versions actually linked in
 R_HOME="$(Rscript -e 'cat(R.home())')" ./configure && grep PKG_LIBS src/Makevars
-nm -gu src/zuxlsx.so | grep -E 'XML_|mz_zip'   # must print nothing
+nm -gu src/zuxlsx.so | grep -E 'XML_|mz_zip|zuc_'   # must print nothing
 ./tools/vendor/verify                  # vendored tree + fixtures vs their manifests
 ```
 
@@ -405,7 +423,9 @@ xlsxio is MIT and its notices are preserved in
 [src/vendor/xlsxio/LICENSE.txt](https://pedrobtz.github.io/zuxlsx/src/vendor/xlsxio/LICENSE.txt)
 and [inst/COPYRIGHTS](https://pedrobtz.github.io/zuxlsx/inst/COPYRIGHTS)
 (design §20). `DESCRIPTION` carries Pedro Baltazar as `aut`/`cre`/`cph`
-and Brecht Sanders as `cph` for xlsxio. Expat and miniz are *linked*,
-not vendored here, so their notices stay with `zuxml` and `zukomp`;
-design §20 asks for that to be reviewed again before a CRAN submission,
-since static linking still redistributes them.
+and Brecht Sanders as `cph` for xlsxio. Expat, miniz and TF-PSA-Crypto
+are *linked*, not vendored here, but static linking still redistributes
+them, so their licences are installed in `inst/licenses/` and described
+in `inst/COPYRIGHTS`. TF-PSA-Crypto is Apache-2.0 (dual with
+GPL-2.0-or-later upstream; taken under Apache-2.0). Design §20 asks for
+this to be reviewed again before a CRAN submission.
