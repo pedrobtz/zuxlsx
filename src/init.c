@@ -12,6 +12,8 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds);
 SEXP C_zuxlsx_native(void);
 SEXP C_agile_decrypt(SEXP params, SEXP password, SEXP package);
 SEXP C_cfb_streams(SEXP bytes, SEXP names);
+SEXP C_encryption_info(SEXP stream);
+SEXP C_decrypt_ole2(SEXP bytes, SEXP password);
 
 static const R_CallMethodDef call_entries[] = {
   {"C_xlsx_sheets",   (DL_FUNC) &C_xlsx_sheets,   1},
@@ -21,6 +23,8 @@ static const R_CallMethodDef call_entries[] = {
   {"C_zuxlsx_native", (DL_FUNC) &C_zuxlsx_native, 0},
   {"C_agile_decrypt", (DL_FUNC) &C_agile_decrypt, 3},
   {"C_cfb_streams",   (DL_FUNC) &C_cfb_streams,   2},
+  {"C_encryption_info", (DL_FUNC) &C_encryption_info, 1},
+  {"C_decrypt_ole2",  (DL_FUNC) &C_decrypt_ole2,  2},
   {NULL, NULL, 0}
 };
 

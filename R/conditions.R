@@ -179,6 +179,48 @@ zuxlsx_unwrap <- function(res, path = NULL, call = sys.call(-1L)) {
         "it cannot be read."
       )
     ),
+    cfb_not_encrypted = list(
+      class = "zuxlsx_unsupported_format_error",
+      message = paste0(
+        "'", path, "' is an OLE2 container, but not an encrypted workbook.\n",
+        "It holds no EncryptionInfo and EncryptedPackage streams."
+      )
+    ),
+    # The four below are encrypted workbooks this package will not decrypt,
+    # each named for what it is. None is zuxlsx_encrypted_error: no password
+    # would help, so a handler prompting for one must not see them.
+    encryption_standard = list(
+      class = "zuxlsx_unsupported_format_error",
+      message = paste0(
+        "'", path, "' uses standard encryption, which zuxlsx does not ",
+        "decrypt.\n",
+        "That is Office 2007's scheme (AES-128, SHA-1). zuxlsx decrypts agile ",
+        "encryption, which Excel has written since 2013: open the file in ",
+        "Excel and save it again to convert it."
+      )
+    ),
+    encryption_extensible = list(
+      class = "zuxlsx_unsupported_format_error",
+      message = paste0(
+        "'", path, "' uses extensible encryption, from a third-party ",
+        "provider, which zuxlsx does not decrypt."
+      )
+    ),
+    encryption_unknown = list(
+      class = "zuxlsx_unsupported_format_error",
+      message = paste0(
+        "'", path, "' is encrypted with a scheme whose version zuxlsx does ",
+        "not recognise."
+      )
+    ),
+    encryption_certificate = list(
+      class = "zuxlsx_unsupported_format_error",
+      message = paste0(
+        "'", path, "' can only be opened with a certificate, not a ",
+        "password.\n",
+        "zuxlsx decrypts password-protected workbooks only."
+      )
+    ),
     agile_password_utf8 = list(
       class = "zuxlsx_input_error",
       message = "`password` must be a single non-missing string of valid text."

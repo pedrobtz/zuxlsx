@@ -259,3 +259,50 @@ with_length <- function(package, n) {
   package[1:8] <- as.raw(floor(n / 256^(0:7)) %% 256)
   package
 }
+
+# The agile descriptor XML of the real fixture, for tests that rewrite it.
+fixture_encryption_xml <- function() {
+  path <- ole2_fixture("two-sheets-encrypted.xlsx")
+  info <- cfb_stream(path, "EncryptionInfo")
+  rawToChar(info[-(1:8)])
+}
+
+# An EncryptionInfo stream: version, flags, then the XML.
+encryption_info_stream <- function(xml, major = 4, minor = 4, flags = 0x40) {
+  c(as.raw(c(major, 0, minor, 0)),
+    as.raw(floor(flags / 256^(0:3)) %% 256),
+    charToRaw(xml))
+}
+
+# The status the C parser reports, for cases that share a class.
+encryption_info_status <- function(stream) {
+  .Call(C_encryption_info, stream)$status
+}
+
+# The fixture repacked with a replacement EncryptionInfo, for end-to-end
+# cases. cfb_build() writes a spec-shaped container, so what differs from the
+# fixture is only what the test changed.
+encrypted_container <- function(info = NULL) {
+  path <- ole2_fixture("two-sheets-encrypted.xlsx")
+  cfb_build(list(
+    EncryptionInfo = info %||% cfb_stream(path, "EncryptionInfo"),
+    EncryptedPackage = cfb_stream(path, "EncryptedPackage")
+  ))
+}
+
+`%||%` <- function(x, y) if (is.null(x)) y else x
+
+base64_encode <- function(bytes) {
+  alphabet <- c(LETTERS, letters, 0:9, "+", "/")
+  n <- length(bytes)
+  if (n == 0L) return("")
+  padded <- c(as.integer(bytes), integer((-n) %% 3))
+  groups <- matrix(padded, nrow = 3L)
+  v <- groups[1, ] * 65536 + groups[2, ] * 256 + groups[3, ]
+  chars <- rbind(alphabet[v %/% 262144 + 1], alphabet[(v %/% 4096) %% 64 + 1],
+                 alphabet[(v %/% 64) %% 64 + 1], alphabet[v %% 64 + 1])
+  out <- paste(chars, collapse = "")
+  pad <- (-n) %% 3
+  if (pad > 0) substr(out, nchar(out) - pad + 1, nchar(out)) <- strrep("=", pad)
+  out
+}

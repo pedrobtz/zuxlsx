@@ -1738,6 +1738,52 @@ which [MS-CFB] does not allow, because it only ever needed the directory.
 Under ASan and UBSan, outside R: every truncation of four containers (the
 two real fixtures, a built v3 and v4) and 160,000 randomly damaged copies,
 with no report. The proper fuzzer is #45's.
+
+### 21f. Step 2, parsing EncryptionInfo: done, 2026-09-29
+
+`src/encinfo.c` reads the `EncryptionInfo` stream into the same
+`agile_params` the core takes, and `C_decrypt_ole2()` now runs steps 1 to 3
+in one call: container bytes and a password in, the plaintext package out.
+`decrypt_ole2()` in `R/decrypt.R` is its internal R entry point; step 4 --
+handing the result to xlsxio, and a `password =` argument -- is what exposes
+it.
+
+**The version prefix is read before any XML**, and decides: 4.4 is agile;
+2.2, 3.2 and 4.2 are standard encryption; 3.3 and 4.3 are extensible; any
+other is unknown. Each non-agile scheme gets its own status and a message
+naming it, all `zuxlsx_unsupported_format_error` and none
+`zuxlsx_encrypted_error`, since no password will help. This is #22's fourth
+missing item: standard encryption refused by name. Agile's reserved flags
+must be exactly `0x40`, as 2.3.4.10 fixes them.
+
+**Expat, in namespace mode.** Elements are matched as `uri|local`, never by
+prefix: a producer may bind the encryption namespace to any prefix, or the
+password namespace as a default on the element, and the result is the same.
+Patch 0002 fixed exactly that prefix mistake in xlsxio. The document element
+must be `<encryption>` in the encryption namespace; `keyData`,
+`dataIntegrity` and `keyEncryptors` are recognised only as its children, and
+the password `encryptedKey` only inside a `keyEncryptor` whose `uri` is the
+password key encryptor's. A certificate-only file is its own status, since it
+is well formed and simply cannot be opened with a password. Two `keyData`,
+two `dataIntegrity` or two password keys are malformed rather than a choice.
+Unknown elements and attributes are ignored, as the schema is extensible.
+
+**A DOCTYPE is refused outright**, internal subset or not, through a
+start-DOCTYPE handler that stops the parser. zuxml's Expat already treats
+every entity beyond the five built-ins as an error (`XML_GE 0`); this makes
+the refusal explicit and independent of that build choice.
+
+**Values are parsed, not judged.** Counts are decimal digits only, at most
+`INT_MAX`; base64 is strict RFC 4648, whole quanta, padding only at the end.
+Anything else becomes `NA` or `NULL`, and `agile_decrypt()` -- which checks
+every parameter anyway -- reports the file as malformed. One place decides
+what is acceptable, whichever parser supplied the values.
+
+The C parser is checked against `helper-ole2.R`'s on both fixtures with
+`identical()`, and every other case rewrites the fixture's descriptor and
+repacks it with `cfb_build()`. Under ASan and UBSan, linked to zuxml's Expat
+archive: every truncation of the stream and 100,000 randomly damaged or
+spliced copies, with no report.
 ### Status, 2026-09-19: 10 of 11
 
 Done: 1 open the archive, 2 enumerate sheets, 3 parse relationships, 4 parse
