@@ -13,6 +13,7 @@
 #' @return A list with one character vector per row, from the first row of the
 #'   worksheet to the last. Every vector is as long as the widest row, so the
 #'   nth element of each is the nth column. Blank cells are `NA`.
+#' @inheritParams xlsx_sheets
 #' @export
 #' @seealso [xlsx_cells()] for typed cells, [read_xlsx()] for a data frame.
 #' @examples
@@ -23,8 +24,8 @@
 #' # type inference: a number is its text.
 #' rows[[1]]
 #' rows[[2]]
-xlsx_rows <- function(path, sheet = 1) {
-  cells <- xlsx_cells(path, sheet)
+xlsx_rows <- function(path, sheet = 1, password = NULL) {
+  cells <- xlsx_cells(path, sheet, password)
   if (nrow(cells) == 0L) {
     return(list())
   }

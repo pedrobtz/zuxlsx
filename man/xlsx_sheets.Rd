@@ -4,10 +4,17 @@
 \alias{xlsx_sheets}
 \title{List the worksheets in an xlsx workbook}
 \usage{
-xlsx_sheets(path)
+xlsx_sheets(path, password = NULL)
 }
 \arguments{
 \item{path}{Path to an \code{.xlsx} file.}
+
+\item{password}{The password of a password-protected workbook, or \code{NULL}
+(the default) for one without. The workbook is decrypted in memory and
+never written to disk. Agile encryption -- what Excel has written since
+2013 -- is supported; the older standard encryption is not, and is
+reported as such. Ignored for a workbook that is not encrypted. R cannot
+erase a string, so the password may stay in memory after the call.}
 }
 \value{
 A character vector of worksheet names, in workbook order. A workbook

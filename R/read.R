@@ -31,6 +31,7 @@
 #'   is `TRUE` the first row of the range supplies the names.
 #'
 #' @return A data frame.
+#' @inheritParams xlsx_sheets
 #' @export
 #' @seealso [xlsx_cells()] for the cells themselves, and [xlsx_sheets()] to
 #'   list the worksheets.
@@ -48,7 +49,8 @@
 #'
 #' # Without a header row, columns are named by position.
 #' read_xlsx(path, range = "A2:B4", col_names = FALSE)
-read_xlsx <- function(path, sheet = 1, col_names = TRUE, range = NULL) {
+read_xlsx <- function(path, sheet = 1, col_names = TRUE, range = NULL,
+                      password = NULL) {
   if (!is.logical(col_names) || length(col_names) != 1L || is.na(col_names)) {
     zuxlsx_stop(
       "zuxlsx_input_error",
@@ -57,7 +59,8 @@ read_xlsx <- function(path, sheet = 1, col_names = TRUE, range = NULL) {
   }
   bounds <- if (is.null(range)) NULL else parse_range(range)
   path <- check_path(path)
-  sheet <- resolve_sheet(path, sheet)
+  password <- check_optional_password(password)
+  sheet <- resolve_sheet(path, sheet, password)
 
   # Columns are built in C, from the cells it already holds. Doing it there
   # rather than here means a column's text is only ever allocated in R if the
@@ -70,7 +73,8 @@ read_xlsx <- function(path, sheet = 1, col_names = TRUE, range = NULL) {
         NULL
       } else {
         as.numeric(c(bounds$min_row, bounds$max_row, bounds$min_col, bounds$max_col))
-      }
+      },
+      password
     ),
     path = path
   )

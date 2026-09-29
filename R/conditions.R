@@ -25,16 +25,25 @@
 #'     A valid workbook declares at least one worksheet.}
 #'   \item{`zuxlsx_sheet_error`}{The workbook opened, but the requested
 #'     worksheet is not in it.}
-#'   \item{`zuxlsx_encrypted_error`}{The workbook is password-protected. Its
-#'     contents are encrypted and this package cannot decrypt them. Raised in
-#'     preference to `zuxlsx_unsupported_format_error` so that "needs a
-#'     password" can be handled on its own -- it is the one unsupported
-#'     format the caller can do something about.}
+#'   \item{`zuxlsx_encrypted_error`}{The workbook is password-protected and
+#'     no `password` was given. Raised in preference to
+#'     `zuxlsx_unsupported_format_error` so that "needs a password" can be
+#'     handled on its own.}
+#'   \item{`zuxlsx_password_error`}{The `password` given is not the
+#'     workbook's. A subclass of `zuxlsx_encrypted_error`, so one handler
+#'     covers a password that is missing and one that is wrong. A damaged
+#'     encryption header is indistinguishable from a wrong password, by
+#'     design of the format.}
+#'   \item{`zuxlsx_integrity_error`}{A password-protected workbook is damaged:
+#'     its encrypted package does not match the integrity code stored with
+#'     it, or its container or encryption parameters are inconsistent.
+#'     Nothing is decrypted from a file that fails this check.}
 #'   \item{`zuxlsx_unsupported_format_error`}{The file is a spreadsheet, but
 #'     not one zuxlsx can read: an `.xlsb`, whose worksheets are binary rather
-#'     than XML, or an OLE2 file, which is either a legacy `.xls` or an
-#'     encrypted workbook. Raised in preference to reporting such a file as
-#'     corrupt, which is what it otherwise looks like.}
+#'     than XML; a legacy `.xls`; or a workbook encrypted with a scheme other
+#'     than agile encryption, such as Office 2007's standard encryption.
+#'     Raised in preference to reporting such a file as corrupt, which is
+#'     what it otherwise looks like.}
 #'   \item{`zuxlsx_memory_error`}{An allocation failed while reading.}
 #' }
 #'
@@ -95,9 +104,7 @@ zuxlsx_unwrap <- function(res, path = NULL, call = sys.call(-1L)) {
       class = c("zuxlsx_encrypted_error", "zuxlsx_unsupported_format_error"),
       message = paste0(
         "'", path, "' is a password-protected workbook.\n",
-        "Its contents are encrypted, and zuxlsx cannot decrypt them. ",
-        "Remove the password in Excel and save a copy, or decrypt the file ",
-        "with a tool that supports it."
+        "Pass its password as `password = ` to read it."
       )
     ),
     format_xls = list(

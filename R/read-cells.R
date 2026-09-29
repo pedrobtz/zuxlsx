@@ -23,6 +23,7 @@
 #'
 #' @return `TRUE` if `callback` stopped the read, `FALSE` if the worksheet was
 #'   read to the end. Returned invisibly.
+#' @inheritParams xlsx_sheets
 #' @export
 #' @seealso [xlsx_cells()], which reads a whole worksheet at once, and
 #'   [read_xlsx()], which builds columns from it.
@@ -45,9 +46,11 @@
 #'   }
 #' })
 #' first
-xlsx_read_cells <- function(path, sheet = 1, callback, chunk_size = 10000L) {
+xlsx_read_cells <- function(path, sheet = 1, callback, chunk_size = 10000L,
+                            password = NULL) {
   path <- check_path(path)
-  sheet <- resolve_sheet(path, sheet)
+  password <- check_optional_password(password)
+  sheet <- resolve_sheet(path, sheet, password)
   if (!is.function(callback)) {
     zuxlsx_stop("zuxlsx_input_error", "`callback` must be a function.")
   }
@@ -78,7 +81,7 @@ xlsx_read_cells <- function(path, sheet = 1, callback, chunk_size = 10000L) {
   stopped <- zuxlsx_unwrap(
     .Call(
       C_xlsx_read_cells, path, sheet, wrapped, environment(),
-      as.integer(chunk_size)
+      as.integer(chunk_size), password
     ),
     path = path
   )

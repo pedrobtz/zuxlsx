@@ -4,13 +4,20 @@
 \alias{xlsx_rows}
 \title{Read a worksheet as rows}
 \usage{
-xlsx_rows(path, sheet = 1)
+xlsx_rows(path, sheet = 1, password = NULL)
 }
 \arguments{
 \item{path}{Path to an \code{.xlsx} file.}
 
 \item{sheet}{The worksheet to read: either its name, or its position in the
 workbook.}
+
+\item{password}{The password of a password-protected workbook, or \code{NULL}
+(the default) for one without. The workbook is decrypted in memory and
+never written to disk. Agile encryption -- what Excel has written since
+2013 -- is supported; the older standard encryption is not, and is
+reported as such. Ignored for a workbook that is not encrypted. R cannot
+erase a string, so the password may stay in memory after the call.}
 }
 \value{
 A list with one character vector per row, from the first row of the
