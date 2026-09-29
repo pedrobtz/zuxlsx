@@ -46,5 +46,6 @@ OBJECTS = \
   init.o \
   zuxlsx.o \
   agile.o \
+  cfb.o \
   vendor/xlsxio/lib/xlsxio_read.o \
   vendor/xlsxio/lib/xlsxio_read_sharedstrings.o

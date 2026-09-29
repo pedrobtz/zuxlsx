@@ -1682,6 +1682,62 @@ sets. That is the specification rather than a policy, and it bounds a hostile
 file at about 7 seconds; a lower configurable cap, and one on the decrypted
 size, are #26's. The fixture's 100000 costs 70 ms in all, at 0.70 us per
 iteration against OpenSSL's 0.50 us for one SHA-512 of the same 68 bytes.
+
+### 21e. Step 1, reading CFB streams: done, 2026-09-29
+
+`src/cfb.c` reads a stream's contents out of a CFB container held in memory:
+header, DIFAT (the header's 109 entries and any DIFAT sectors after them),
+FAT, directory, miniFAT and the mini stream in the root entry's chain,
+versions 3 and 4. Like `agile.c` it is plain C with no R header, and the
+`.Call` wrapper does no R allocation while the container is open; the stream
+buffers it copies from afterwards belong to an external pointer, so an
+allocation failure part way through cannot leak them. `cfb_streams()` in
+`R/cfb.R` is internal, like `agile_decrypt()`.
+
+It works over a buffer rather than a `FILE *`, unlike `ole2_kind()`, because
+decryption needs the whole package in memory regardless -- 21b's "decryption
+cannot stream" -- and because #25 wants reading from memory anyway.
+`ole2_kind()` keeps reading only the header and directory from the file,
+which is what a classifier should cost; replacing it with this reader is a
+decision for #25.
+
+Where it is stricter than some readers, deliberately:
+
+- **Streams are found by walking the root's child tree** (2.6.4), not by
+  scanning every entry. `Version` and `DataSpaceMap` exist in every
+  encrypted workbook, inside the `\006DataSpaces` storage; a scan would find
+  them at the root, and would find an `EncryptedPackage` planted in a
+  storage just as readily. The walk visits each entry once, however the
+  sibling ids loop.
+- **A name at the root twice is malformed.** [MS-CFB] forbids it, and
+  choosing one would be guessing which the producer meant.
+- **A chain that revisits a sector is malformed**, in the FAT and in the
+  miniFAT. Bounding the walk by the sector count is not enough: a stream
+  that needs twenty sectors can point its first at itself and be read as
+  one sector twenty times without the walk ever growing long.
+- **A stream's size must be backed by its chain** before anything is copied,
+  and can never exceed the buffer, so the allocation is bounded by the
+  input rather than by the file's word for it.
+- **A sector the buffer does not wholly contain is unreadable.** A truncated
+  final sector is not zero-padded, as olefile does; a stream needing it is
+  malformed.
+- The header's fixed fields are checked -- version and sector shift
+  agreeing, byte order, mini sector shift, the 4096-byte cutoff -- and a v3
+  size's high 32 bits are ignored, as 2.6.3 requires, while a v4 size is 64
+  bits.
+
+The test containers are built in the test, by `cfb_build()` in
+`tests/testthat/helper-cfb.R`: a spec-shaped writer covering what no
+committed fixture does -- version 4, a DIFAT sector (a 7.3 MB stream), and
+streams of every size class either side of the mini stream cutoff. The C is
+checked against it and against `helper-ole2.R`'s reader, written
+separately. `tools/make-ole2.R`'s synthetic fixtures are *not* valid input
+here and are not used: its writer puts small streams in regular sectors,
+which [MS-CFB] does not allow, because it only ever needed the directory.
+
+Under ASan and UBSan, outside R: every truncation of four containers (the
+two real fixtures, a built v3 and v4) and 160,000 randomly damaged copies,
+with no report. The proper fuzzer is #45's.
 ### Status, 2026-09-19: 10 of 11
 
 Done: 1 open the archive, 2 enumerate sheets, 3 parse relationships, 4 parse
