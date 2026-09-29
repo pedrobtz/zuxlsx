@@ -55,15 +55,19 @@ under `zuxlsx_error` — see
 and design §15. An encrypted workbook (OLE2, not ZIP) and an `.xlsb` are
 reported as `zuxlsx_unsupported_format_error` rather than as damage.
 
-**Decryption is in progress (#22, design §21c–§21e).** Step 1, reading
-CFB streams in C, is done (§21e). Step 3, the agile decryption core in C
-over `libzucrypt.a`, is done:
-[src/agile.c](https://pedrobtz.github.io/zuxlsx/src/agile.c) decrypts
-the real fixture byte for byte, with the `EncryptionInfo` parameters
-read in R by `tests/testthat/helper-ole2.R`. `agile_decrypt()` and
-`cfb_streams()` are internal; no exported function reaches them until
-steps 2 and 4 (`EncryptionInfo` parsing, handing the plaintext to
-xlsxio) land. zucrypt freezes its ABI 1 on this code; findings go on
+**Decryption is in progress (#22, design §21c–§21f).** Steps 1–3 are
+done: reading CFB streams in C
+([src/cfb.c](https://pedrobtz.github.io/zuxlsx/src/cfb.c), §21e),
+parsing `EncryptionInfo` with Expat and refusing standard/extensible
+encryption by name
+([src/encinfo.c](https://pedrobtz.github.io/zuxlsx/src/encinfo.c),
+§21f), and the agile decryption core over `libzucrypt.a`
+([src/agile.c](https://pedrobtz.github.io/zuxlsx/src/agile.c), §21d).
+`decrypt_ole2()` goes from container bytes and a password to the
+plaintext package. It and `agile_decrypt()`, `cfb_streams()` and
+`encryption_info()` are internal; no exported function reaches them
+until step 4 (handing the plaintext to xlsxio, and a `password =`
+argument) lands. zucrypt freezes its ABI 1 on this code; findings go on
 pedrobtz/zucrypt#43.
 
 Out of scope or not done: writing workbooks, `.xlsb`, decrypting an
@@ -112,10 +116,12 @@ translation unit — plus
 registration and the zucrypt backend’s lifetime (`zuc_init()` on load,
 `zuc_shutdown()` on unload),
 [src/agile.c](https://pedrobtz.github.io/zuxlsx/src/agile.c), the
-decryption core, and
+decryption core,
 [src/cfb.c](https://pedrobtz.github.io/zuxlsx/src/cfb.c), which reads
-stream contents out of a CFB container in memory. Neither includes an R
-header, so both can be fuzzed outside R (#45).
+stream contents out of a CFB container in memory, and
+[src/encinfo.c](https://pedrobtz.github.io/zuxlsx/src/encinfo.c), which
+parses `EncryptionInfo`. None includes an R header, so all three can be
+fuzzed outside R (#45).
 
 Vendored, and the corpora:
 
