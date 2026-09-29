@@ -1,12 +1,13 @@
 #!/bin/sh
-# Windows counterpart of ./configure. Resolves the two static archives that LinkingTo cannot point at.
+# Windows counterpart of ./configure. Resolves the three static archives that LinkingTo cannot point at.
 #
 # LinkingTo gets the *headers* onto the include path by itself. There is no
 # equivalent for a library, and the alternatives are worse: $(shell ...) in
 # Makevars would force SystemRequirements: GNU make, and an Imports: entry
 # would add a runtime dependency the design does not want -- nothing in
-# zuxlsx calls R code in zuxml or zukomp, and the archives are linked in
-# statically, so neither package needs to be loadable at run time.
+# zuxlsx calls R code in zuxml, zukomp or zucrypt, and the archives are
+# linked in statically, so none of the three needs to be loadable at run
+# time.
 set -eu
 
 : "${R_HOME:?configure must be run by R CMD INSTALL, which sets R_HOME}"
@@ -14,11 +15,11 @@ RSCRIPT="${R_HOME}/bin/Rscript"
 
 # Where a sibling installed its static archive.
 #
-# zukomp installs under R_ARCH, so on Windows the archive is in lib/x64 rather
-# than lib; zuxml still installs to a plain lib. R_ARCH is empty on every
-# single-arch platform, which is all of them except Windows since R 4.2
-# dropped 32-bit builds, so the two spellings coincide everywhere else and the
-# difference only shows up on the one platform.
+# zukomp and zucrypt install under R_ARCH, so on Windows the archive is in
+# lib/x64 rather than lib; zuxml still installs to a plain lib. R_ARCH is
+# empty on every single-arch platform, which is all of them except Windows
+# since R 4.2 dropped 32-bit builds, so the two spellings coincide everywhere
+# else and the difference only shows up on the one platform.
 #
 # Asking for the arch-specific path first and falling back to the plain one is
 # correct for either convention, and stays correct when the siblings agree
@@ -41,13 +42,17 @@ fail() {
 
 ZUXML_LIB=$(lib_dir zuxml)
 ZUKOMP_LIB=$(lib_dir zukomp)
+ZUCRYPT_LIB=$(lib_dir zucrypt)
 
 [ -n "${ZUXML_LIB}" ] && [ -f "${ZUXML_LIB}/libzuxml.a" ] || fail zuxml libzuxml.a
 [ -n "${ZUKOMP_LIB}" ] && [ -f "${ZUKOMP_LIB}/libzukomp.a" ] || fail zukomp libzukomp.a
+[ -n "${ZUCRYPT_LIB}" ] && [ -f "${ZUCRYPT_LIB}/libzucrypt.a" ] || fail zucrypt libzucrypt.a
 
 sed \
   -e "s|@ZUXML_LIB@|${ZUXML_LIB}|g" \
   -e "s|@ZUKOMP_LIB@|${ZUKOMP_LIB}|g" \
+  -e "s|@ZUCRYPT_LIB@|${ZUCRYPT_LIB}|g" \
   src/Makevars.in > src/Makevars.win
 
-echo "configure: linking ${ZUXML_LIB}/libzuxml.a and ${ZUKOMP_LIB}/libzukomp.a"
+echo "configure: linking ${ZUXML_LIB}/libzuxml.a, ${ZUKOMP_LIB}/libzukomp.a"
+echo "configure:     and ${ZUCRYPT_LIB}/libzucrypt.a"

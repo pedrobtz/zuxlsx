@@ -28,6 +28,8 @@
 #include <xlsxio_read.h>
 #include <xlsxio_version.h>
 
+#include "agile.h"
+
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -46,6 +48,12 @@ static const char *const STATUS_ENCRYPTED = "format_encrypted";
 static const char *const STATUS_XLS = "format_xls";
 static const char *const STATUS_XLSB = "format_xlsb";
 static const char *const STATUS_XML = "xml_malformed";
+static const char *const STATUS_AGILE_PASSWORD = "agile_password";
+static const char *const STATUS_AGILE_INTEGRITY = "agile_integrity";
+static const char *const STATUS_AGILE_MALFORMED = "agile_malformed";
+static const char *const STATUS_AGILE_UNSUPPORTED = "agile_unsupported";
+static const char *const STATUS_AGILE_PASSWORD_UTF8 = "agile_password_utf8";
+static const char *const STATUS_AGILE_CRYPTO = "agile_crypto";
 
 static SEXP result(const char *status, SEXP value) {
   const char *fields[] = {"status", "value", ""};
@@ -1249,9 +1257,10 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds) {
 }
 
 SEXP C_zuxlsx_native(void) {
-  const char *fields[] = {"xlsxio", "expat", "miniz", ""};
+  const char *fields[] = {"xlsxio", "expat", "miniz", "tf_psa_crypto", ""};
   SEXP out = PROTECT(Rf_mkNamed(VECSXP, fields));
   SEXP res;
+  zuc_info info;
 
   SET_VECTOR_ELT(out, 0, Rf_mkString(XLSXIO_VERSION_STRING));
   /* A real call into libzuxml.a, not a macro: a header that is on the path
@@ -1259,8 +1268,152 @@ SEXP C_zuxlsx_native(void) {
      that fail at link time instead. */
   SET_VECTOR_ELT(out, 1, Rf_mkString(XML_ExpatVersion()));
   SET_VECTOR_ELT(out, 2, Rf_mkString(MZ_VERSION));
+  /* The same for libzucrypt.a: zucrypt.h carries no backend version at all,
+     so this can only come from the archive. NA if zuc_init() failed when the
+     DLL loaded, which is then also what every decryption reports. */
+  memset(&info, 0, sizeof info);
+  info.struct_size = (uint32_t) sizeof info;
+  SET_VECTOR_ELT(out, 3, zuc_get_info(&info) == ZUC_OK
+                 ? Rf_mkString(info.backend_version)
+                 : Rf_ScalarString(NA_STRING));
 
   res = PROTECT(result(STATUS_OK, out));
   UNPROTECT(2);
   return res;
+}
+
+/* Agile decryption, with the EncryptionInfo parameters supplied from R (design
+   section 21c, step 3). The parameters are a named list mirroring
+   agile_params; anything missing, mistyped or out of range reaches the core as
+   a value it refuses, so a malformed EncryptionInfo is reported the same way
+   whether R or, later, the C parser read it.
+
+   The plaintext buffer is allocated before the core runs, which is what keeps
+   R's allocator -- and its longjmp -- away from the zucrypt handles and the
+   key material the core holds. The size it is allocated at is bounded by the
+   ciphertext actually present, never by the length the file declares. */
+
+static SEXP list_elt(SEXP list, const char *name) {
+  SEXP names = Rf_getAttrib(list, R_NamesSymbol);
+  R_xlen_t i;
+
+  if (TYPEOF(list) != VECSXP || TYPEOF(names) != STRSXP) return R_NilValue;
+  for (i = 0; i < XLENGTH(list); i++) {
+    if (strcmp(CHAR(STRING_ELT(names, i)), name) == 0) return VECTOR_ELT(list, i);
+  }
+  return R_NilValue;
+}
+
+static const char *param_string(SEXP list, const char *name) {
+  SEXP x = list_elt(list, name);
+  if (TYPEOF(x) != STRSXP || XLENGTH(x) != 1 || STRING_ELT(x, 0) == NA_STRING) {
+    return NULL;
+  }
+  return CHAR(STRING_ELT(x, 0));
+}
+
+/* -1 for anything that is not a whole number in range, which every check in
+   the core refuses. */
+static long param_long(SEXP list, const char *name) {
+  SEXP x = list_elt(list, name);
+  double v;
+
+  if (TYPEOF(x) == INTSXP && XLENGTH(x) == 1) {
+    return INTEGER(x)[0] == NA_INTEGER ? -1 : (long) INTEGER(x)[0];
+  }
+  if (TYPEOF(x) != REALSXP || XLENGTH(x) != 1) return -1;
+  v = REAL(x)[0];
+  if (!R_FINITE(v) || v < 0 || v > 2147483647.0 || v != (double) (long) v) return -1;
+  return (long) v;
+}
+
+static const uint8_t *param_raw(SEXP list, const char *name, size_t *len) {
+  SEXP x = list_elt(list, name);
+  if (TYPEOF(x) != RAWSXP) {
+    *len = 0;
+    return NULL;
+  }
+  *len = (size_t) XLENGTH(x);
+  return RAW(x);
+}
+
+static void param_cipher(SEXP list, agile_cipher *out) {
+  out->cipher_algorithm = param_string(list, "cipher_algorithm");
+  out->cipher_chaining = param_string(list, "cipher_chaining");
+  out->hash_algorithm = param_string(list, "hash_algorithm");
+  out->salt_size = param_long(list, "salt_size");
+  out->block_size = param_long(list, "block_size");
+  out->key_bits = param_long(list, "key_bits");
+  out->hash_size = param_long(list, "hash_size");
+  out->salt = param_raw(list, "salt", &out->salt_len);
+}
+
+static const char *agile_status_string(agile_status st) {
+  switch (st) {
+  case AGILE_OK: return STATUS_OK;
+  case AGILE_WRONG_PASSWORD: return STATUS_AGILE_PASSWORD;
+  case AGILE_INTEGRITY: return STATUS_AGILE_INTEGRITY;
+  case AGILE_MALFORMED: return STATUS_AGILE_MALFORMED;
+  case AGILE_UNSUPPORTED: return STATUS_AGILE_UNSUPPORTED;
+  case AGILE_BAD_PASSWORD: return STATUS_AGILE_PASSWORD_UTF8;
+  case AGILE_MEMORY: return STATUS_MEMORY;
+  case AGILE_CRYPTO: return STATUS_AGILE_CRYPTO;
+  }
+  return STATUS_AGILE_CRYPTO;
+}
+
+SEXP C_agile_decrypt(SEXP params, SEXP password, SEXP package) {
+  agile_params p;
+  agile_status st;
+  zuc_status crypto = ZUC_OK;
+  size_t size = 0;
+  const char *pw;
+  SEXP out;
+
+  if (TYPEOF(package) != RAWSXP || TYPEOF(params) != VECSXP) {
+    return result(STATUS_AGILE_MALFORMED, NULL);
+  }
+  /* R has already made this UTF-8 and checked it is valid; the core checks
+     again, since it is the layer that encodes it. */
+  if (TYPEOF(password) != STRSXP || XLENGTH(password) != 1 ||
+      STRING_ELT(password, 0) == NA_STRING) {
+    return result(STATUS_AGILE_PASSWORD_UTF8, NULL);
+  }
+  pw = CHAR(STRING_ELT(password, 0));
+
+  memset(&p, 0, sizeof p);
+  param_cipher(list_elt(params, "key_data"), &p.key_data);
+  p.encrypted_hmac_key =
+    param_raw(params, "encrypted_hmac_key", &p.encrypted_hmac_key_len);
+  p.encrypted_hmac_value =
+    param_raw(params, "encrypted_hmac_value", &p.encrypted_hmac_value_len);
+  param_cipher(list_elt(params, "password"), &p.password);
+  p.spin_count = param_long(list_elt(params, "password"), "spin_count");
+  p.encrypted_verifier_hash_input =
+    param_raw(list_elt(params, "password"), "encrypted_verifier_hash_input",
+              &p.encrypted_verifier_hash_input_len);
+  p.encrypted_verifier_hash_value =
+    param_raw(list_elt(params, "password"), "encrypted_verifier_hash_value",
+              &p.encrypted_verifier_hash_value_len);
+  p.encrypted_key_value =
+    param_raw(list_elt(params, "password"), "encrypted_key_value",
+              &p.encrypted_key_value_len);
+
+  st = agile_package_size(RAW(package), (size_t) XLENGTH(package), &size);
+  if (st != AGILE_OK) return result(agile_status_string(st), NULL);
+
+  out = PROTECT(Rf_allocVector(RAWSXP, (R_xlen_t) size));
+  st = agile_decrypt(&p, pw, strlen(pw), RAW(package), (size_t) XLENGTH(package),
+                     RAW(out), size, &crypto);
+  if (st != AGILE_OK) {
+    /* The zucrypt status by name, never by number (zucrypt.h). */
+    SEXP why = PROTECT(st == AGILE_CRYPTO
+                       ? Rf_mkString(zuc_status_name(crypto)) : R_NilValue);
+    SEXP res = PROTECT(result(agile_status_string(st), why));
+    UNPROTECT(3);
+    return res;
+  }
+  out = PROTECT(result(STATUS_OK, out));
+  UNPROTECT(2);
+  return out;
 }

@@ -852,6 +852,9 @@ conditions carry the offending `path`. Implemented so far:
 
 `zuxlsx_input_error`, `zuxlsx_memory_error` and
 `zuxlsx_unsupported_format_error` are additions to the list above.
+Decryption adds two more, `zuxlsx_password_error` and
+`zuxlsx_integrity_error`, provisionally and not yet reachable from an
+exported function; see section 21d.
 `zuxlsx_sheet_error` arrived with `xlsx_cells()`, and `zuxlsx_xml_error` is
 raised as of 2026-09-19, naming the offending part and line.
 
@@ -1583,6 +1586,102 @@ it is the only part of this that is genuinely independent.
 The three consequences recorded in 21b stand unchanged: decryption cannot
 stream, a password passed from R cannot be wiped, and known-answer vectors are
 what make correctness meaningful rather than "it decrypted something".
+
+**Revised 2026-09-29: the order, and the release.** Password-protected
+workbooks ship in 0.1.0, after zucrypt 0.1.0 reaches CRAN, rather than in a
+later release. Step 3 comes first, because zucrypt freezes its ABI 1 on the
+code that calls it (pedrobtz/zucrypt#43); steps 1, 2 and 4 do not call zucrypt
+and follow. #25 (reading from memory), #26 (limits) and #45 (fuzzing this
+package's own C) are prerequisites for shipping it.
+
+### 21d. Step 3, the decryption core: done, 2026-09-29
+
+`src/agile.c` is the core, over `libzucrypt.a`, and step 3's test is met:
+given the `EncryptionInfo` parameters, it decrypts
+`two-sheets-encrypted.xlsx` to exactly the bytes msoffcrypto-tool encrypted.
+The parameters are read in R for now, by `tests/testthat/helper-ole2.R`,
+which reads CFB stream contents (FAT, miniFAT, mini stream) and the XML by
+pattern -- test code only, and the specification for steps 1 and 2 in C.
+`agile_decrypt()` in `R/decrypt.R` is the R entry point, and is internal: no
+exported function reaches it until the reader finds the two streams itself.
+
+**Linking.** `LinkingTo: zucrypt` and a third `lib_dir()` in `configure`, in
+the same shape as the other two; no define is needed, since `zucrypt.h` names
+no backend type. zucrypt's symbols stay local to `zuxlsx.so` (its archive is
+compiled with hidden visibility), and zucrypt's own namespace can be loaded
+alongside -- two private copies of the backend, which do not interfere.
+TF-PSA-Crypto's Apache-2.0 licence is installed as
+`inst/licenses/tf-psa-crypto-LICENSE` and recorded in `inst/COPYRIGHTS`.
+`zuxlsx_native()` reports its version, from a call into the archive.
+
+**The backend's lifetime** belongs to the DLL: `zuc_init()` in
+`R_init_zuxlsx()` and `zuc_shutdown()` in `R_unload_zuxlsx()`, which
+`.onUnload` makes run. Not per call: every decryption would pay for it, and
+nothing gains. A failed `zuc_init()` is remembered rather than raised, since
+`R_init_` must not longjmp; decryption then reports `ZUC_ERR_NOT_READY` and
+`zuxlsx_native()` reports `NA`.
+
+**No R below the `.Call`.** `agile.c` includes no R header. Every zucrypt
+handle is created and freed within one call, and every buffer that held key
+material -- the password as UTF-16, each hash in the chain, the derived keys,
+the intermediate key, the HMAC key -- is wiped with `zuc_secure_zero()` on
+every path out. The output vector is allocated before the core runs, at the
+size the ciphertext can back, so R's allocator never runs while a key is
+live. The core has no interrupt check: the spin count is capped (below), so
+the longest possible run is about seven seconds.
+
+What the four items #22 found missing from 21c now say:
+
+1. **dataIntegrity is verified before plaintext exists.** The order is
+   verifier, then HMAC over the ciphertext, then the segment loop; a file
+   that fails either check has had nothing decrypted. The HMAC covers the
+   whole `EncryptedPackage` stream *including* its eight-byte length, which
+   is what msoffcrypto-tool computes and what [MS-OFFCRYPTO] 2.3.4.14 says,
+   so a length altered to a smaller, still-consistent value is caught, and
+   so are trailing bytes.
+2. **The password is UTF-16LE**, converted in C from UTF-8 that R has already
+   made UTF-8 and validated. The C decoder is strict anyway -- overlong forms,
+   encoded surrogates and code points past U+10FFFF are refused, never
+   repaired, since a repaired password is a different password -- and a
+   character outside the BMP becomes a surrogate pair. A second fixture,
+   `two-sheets-encrypted-utf16.xlsx`, has the password `zü✓🔑` to prove it.
+3. **A `password =` argument** is not added yet: it arrives with step 4, when
+   the reader can use it. The note it needs is in `R/decrypt.R` already --
+   the password cannot be wiped, because R strings are immutable and may
+   have been copied before they arrive.
+4. **Refusing standard encryption by name** is step 2's, since the version
+   prefix is in `EncryptionInfo`. The core does its share: it refuses by name
+   any cipher but AES, any chaining but CBC, and any hash but SHA-1 and
+   SHA-2, before looking at a single size.
+
+**Conditions**, provisional until the `password =` API settles them, and
+reachable only through the internal function today:
+
+| Class | Raised when |
+| --- | --- |
+| `zuxlsx_password_error`, under `zuxlsx_encrypted_error` | the verifier does not match |
+| `zuxlsx_integrity_error` | the HMAC does not match, or the parameters or package are inconsistent |
+| `zuxlsx_unsupported_format_error` | a well-formed description of an algorithm this does not implement |
+
+A wrong password sits under `zuxlsx_encrypted_error` so one handler covers
+"needs a password" and "that one was wrong". An unsupported algorithm does
+not, because no password will help and a handler that prompts for one must
+not see it. A wrong password and a damaged verifier are indistinguishable by
+construction, and the message says so; a damaged intermediate key is not,
+because the verifier passes and the HMAC then fails.
+
+**Parameters are checked before use**, and a size that contradicts the named
+algorithm is malformed rather than a hint to try another: block size 16, key
+bits 128, 192 or 256, hash size equal to the named hash's, salt size
+1..65536 and equal to the salt's length, every encrypted field whole blocks
+and long enough for what it decrypts to, and the declared plaintext length
+no longer than the ciphertext present can back -- checked before allocating.
+
+**The spin count is capped at 10,000,000**, the limit [MS-OFFCRYPTO] 2.3.4.10
+sets. That is the specification rather than a policy, and it bounds a hostile
+file at about 7 seconds; a lower configurable cap, and one on the decrypted
+size, are #26's. The fixture's 100000 costs 70 ms in all, at 0.70 us per
+iteration against OpenSSL's 0.50 us for one SHA-512 of the same 68 bytes.
 ### Status, 2026-09-19: 10 of 11
 
 Done: 1 open the archive, 2 enumerate sheets, 3 parse relationships, 4 parse

@@ -1,10 +1,11 @@
-# The LinkingTo wiring: <expat.h> and <miniz.h> found through LinkingTo,
-# libzuxml.a and libzukomp.a found by ./configure and linked in. None of it is
+# The LinkingTo wiring: <expat.h>, <miniz.h> and <zucrypt.h> found through
+# LinkingTo, libzuxml.a, libzukomp.a and libzucrypt.a found by ./configure and
+# linked in. None of it is
 # visible from R except by calling something that cannot work without it.
 
 test_that("the native libraries are the ones we linked", {
   native <- zuxlsx_native()
-  expect_named(native, c("xlsxio", "expat", "miniz"))
+  expect_named(native, c("xlsxio", "expat", "miniz", "tf_psa_crypto"))
 
   # xlsxio is vendored here, so its version is pinned by
   # tools/vendor/manifest.tsv rather than by whatever is installed.
@@ -12,11 +13,13 @@ test_that("the native libraries are the ones we linked", {
   # vendored header, which the tests cannot read: tools/ is not installed.
   expect_identical(native$xlsxio, "0.2.36")
 
-  # These two came out of the archives. Asserting the shape rather than exact
-  # versions: a zuxml or zukomp update should not fail this, but a build that
-  # somehow linked nothing should.
+  # These came out of the archives. Asserting the shape rather than exact
+  # versions: a zuxml, zukomp or zucrypt update should not fail this, but a
+  # build that somehow linked nothing should. TF-PSA-Crypto's is NA only if
+  # zuc_init() failed when the DLL loaded.
   expect_match(native$expat, "^expat_[0-9]+\\.[0-9]+\\.[0-9]+$")
   expect_match(native$miniz, "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+  expect_match(native$tf_psa_crypto, "^[0-9]+\\.[0-9]+\\.[0-9]+$")
 })
 
 test_that("a workbook's sheets can be listed", {

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`zuxlsx` is an R package for **reading `.xlsx` workbooks** with no system XML or ZIP dependency, built on the sibling `zu*` packages: `zuxml` (Expat-backed XML) and `zukomp` (miniz-backed DEFLATE), with vendored `xlsxio` supplying the OOXML logic.
+`zuxlsx` is an R package for **reading `.xlsx` workbooks** with no system XML or ZIP dependency, built on the sibling `zu*` packages: `zuxml` (Expat-backed XML), `zukomp` (miniz-backed DEFLATE) and `zucrypt` (TF-PSA-Crypto, for decrypting password-protected workbooks), with vendored `xlsxio` supplying the OOXML logic.
 
 ## Current state: 0.1.0, and the reader is done
 
@@ -17,20 +17,22 @@ What is exported:
 - `xlsx_rows(path, sheet = 1)` — a worksheet row by row as text, padded so the nth element of each row is the nth column.
 - `xlsx_read_cells(path, sheet = 1, callback, chunk_size = 10000L)` — chunked streaming read; returning `FALSE` stops it. **The only entry point that calls R while the archive and the parser are open**, which is why both are owned by external pointers with registered finalizers rather than by the C stack.
 - `xlsx_sheets(path)` — worksheet names, in workbook order.
-- `zuxlsx_native()` — reports `xlsxio` 0.2.36, `expat_2.8.4`, miniz `11.3.2`. It calls `XML_ExpatVersion()` rather than reading a macro, so a header on the include path without the archive behind it fails at link time.
+- `zuxlsx_native()` — reports `xlsxio` 0.2.36, `expat_2.8.4`, miniz `11.3.2`, TF-PSA-Crypto `1.1.1`. It calls `XML_ExpatVersion()` and `zuc_get_info()` rather than reading macros, so a header on the include path without the archive behind it fails at link time.
 
 Both Excel epochs are handled, chosen per workbook by `date1904`, and the 1900 system's phantom 29 February is accounted for: serial 60 is `NA`, serial 61 is 1 March 1900. Errors are seven classed conditions under `zuxlsx_error` — see `?"zuxlsx-conditions"` and design §15. An encrypted workbook (OLE2, not ZIP) and an `.xlsb` are reported as `zuxlsx_unsupported_format_error` rather than as damage.
 
-Out of scope or not done: writing workbooks, `.xlsb`, decrypting an encrypted workbook, evaluating formulas (the cached value is returned), and configurable limits on part size or sheet count — today's defenses are Expat's and miniz's own. Column building is a post-pass rather than streaming; design §14's status note says why.
+**Decryption is in progress (#22, design §21c/§21d).** Step 3, the agile decryption core in C over `libzucrypt.a`, is done: [src/agile.c](src/agile.c) decrypts the real fixture byte for byte, with the `EncryptionInfo` parameters read in R by `tests/testthat/helper-ole2.R`. `agile_decrypt()` is internal; no exported function reaches it until steps 1, 2 and 4 (CFB stream reading, `EncryptionInfo` parsing, handing the plaintext to xlsxio) land. zucrypt freezes its ABI 1 on this code; findings go on pedrobtz/zucrypt#43.
+
+Out of scope or not done: writing workbooks, `.xlsb`, decrypting an encrypted workbook from an exported function (above), evaluating formulas (the cached value is returned), and configurable limits on part size or sheet count — today's defenses are Expat's and miniz's own. Column building is a post-pass rather than streaming; design §14's status note says why.
 
 The build:
 
-- [configure](configure) / [configure.win](configure.win) resolve `system.file("lib", package = ...)` for `zuxml` and `zukomp` and substitute them into [src/Makevars.in](src/Makevars.in). `LinkingTo` puts the *headers* on the path by itself (`CLINK_CPPFLAGS`); there is no equivalent for a library, and the alternatives are worse — `$(shell …)` would force `SystemRequirements: GNU make`, and an `Imports:` entry would add a runtime dependency that nothing needs, since the archives are linked statically.
-- `DESCRIPTION` has `LinkingTo: zukomp, zuxml` and **no `Imports:`**, which is what design §3 asks for.
-- **`Remotes:` tracks `pedrobtz/zuxml@main` and `pedrobtz/zukomp@main`**, since neither is on CRAN. `@main` is deliberate and is not a version pin: the three packages are developed together, so zuxlsx builds against what the siblings actually are, and a sibling release that breaks this package is a bug to fix in the sibling rather than a version to freeze away from. That has real cost — a zukomp release broke Windows here on 2026-09-19 — and it is the cost being chosen. Do not pin a *feature* branch: those are deleted on merge and the ref then 404s. Drop `Remotes:` entirely before any CRAN submission -- on submission day, not before, since it is what makes a GitHub install work. The full sequence, including why the siblings must reach CRAN first, is in [.agents/release-checklist.md](.agents/release-checklist.md).
+- [configure](configure) / [configure.win](configure.win) resolve `system.file("lib", package = ...)` for `zuxml`, `zukomp` and `zucrypt` (arch-specific `lib/x64` first, then `lib`) and substitute them into [src/Makevars.in](src/Makevars.in). `LinkingTo` puts the *headers* on the path by itself (`CLINK_CPPFLAGS`); there is no equivalent for a library, and the alternatives are worse — `$(shell …)` would force `SystemRequirements: GNU make`, and an `Imports:` entry would add a runtime dependency that nothing needs, since the archives are linked statically.
+- `DESCRIPTION` has `LinkingTo: zucrypt, zukomp, zuxml` and **no `Imports:`**, which is what design §3 asks for.
+- **`Remotes:` tracks `pedrobtz/zuxml@main`, `pedrobtz/zukomp@main` and `pedrobtz/zucrypt@main`**, since none is on CRAN. `@main` is deliberate and is not a version pin: the three packages are developed together, so zuxlsx builds against what the siblings actually are, and a sibling release that breaks this package is a bug to fix in the sibling rather than a version to freeze away from. That has real cost — a zukomp release broke Windows here on 2026-09-19 — and it is the cost being chosen. Do not pin a *feature* branch: those are deleted on merge and the ref then 404s. Drop `Remotes:` entirely before any CRAN submission -- on submission day, not before, since it is what makes a GitHub install work. The full sequence, including why the siblings must reach CRAN first, is in [.agents/release-checklist.md](.agents/release-checklist.md).
 - `src/Makevars` is generated and `.gitignore`d. `cleanup` removes it.
 
-The native layer is [src/zuxlsx.c](src/zuxlsx.c) — every `.Call` entry point, the cell reader and the column builders in one translation unit — plus [src/init.c](src/init.c) for registration.
+The native layer is [src/zuxlsx.c](src/zuxlsx.c) — every `.Call` entry point, the cell reader and the column builders in one translation unit — plus [src/init.c](src/init.c) for registration and the zucrypt backend's lifetime (`zuc_init()` on load, `zuc_shutdown()` on unload), and [src/agile.c](src/agile.c), the decryption core. `agile.c` includes no R header, so it can be fuzzed outside R (#45).
 
 Vendored, and the corpora:
 
@@ -104,7 +106,7 @@ The feature policy comes with it. zuxml compiles Expat with `XML_GE 0` and never
 Nothing native builds until `zuxml` and `zukomp` are installed **from GitHub** — an older installed copy may predate the archives, and `./configure` stops with a message when it cannot find one. Version numbers do not settle it (zuxml 0.1.0 exists both ways); the file on disk does. `@main` is fine and is what `DESCRIPTION` asks for; a *feature* branch suffix is not, since those are deleted on merge.
 
 ```sh
-Rscript -e 'pak::pak(c("pedrobtz/zuxml", "pedrobtz/zukomp"))'
+Rscript -e 'pak::pak(c("pedrobtz/zuxml", "pedrobtz/zukomp", "pedrobtz/zucrypt"))'
 ```
 
 ```sh
@@ -122,7 +124,7 @@ To check the link itself rather than trust it — which archive was used, and wh
 ```sh
 Rscript -e 'zuxlsx::zuxlsx_native()'   # versions actually linked in
 R_HOME="$(Rscript -e 'cat(R.home())')" ./configure && grep PKG_LIBS src/Makevars
-nm -gu src/zuxlsx.so | grep -E 'XML_|mz_zip'   # must print nothing
+nm -gu src/zuxlsx.so | grep -E 'XML_|mz_zip|zuc_'   # must print nothing
 ./tools/vendor/verify                  # vendored tree + fixtures vs their manifests
 ```
 
@@ -157,4 +159,4 @@ These are established in `zukomp` and `zuxml` (see `~/src/github.com/pedrobtz/zu
 
 ## Licensing
 
-xlsxio is MIT and its notices are preserved in [src/vendor/xlsxio/LICENSE.txt](src/vendor/xlsxio/LICENSE.txt) and [inst/COPYRIGHTS](inst/COPYRIGHTS) (design §20). `DESCRIPTION` carries Pedro Baltazar as `aut`/`cre`/`cph` and Brecht Sanders as `cph` for xlsxio. Expat and miniz are *linked*, not vendored here, so their notices stay with `zuxml` and `zukomp`; design §20 asks for that to be reviewed again before a CRAN submission, since static linking still redistributes them.
+xlsxio is MIT and its notices are preserved in [src/vendor/xlsxio/LICENSE.txt](src/vendor/xlsxio/LICENSE.txt) and [inst/COPYRIGHTS](inst/COPYRIGHTS) (design §20). `DESCRIPTION` carries Pedro Baltazar as `aut`/`cre`/`cph` and Brecht Sanders as `cph` for xlsxio. Expat, miniz and TF-PSA-Crypto are *linked*, not vendored here, but static linking still redistributes them, so their licences are installed in `inst/licenses/` and described in `inst/COPYRIGHTS`. TF-PSA-Crypto is Apache-2.0 (dual with GPL-2.0-or-later upstream; taken under Apache-2.0). Design §20 asks for this to be reviewed again before a CRAN submission.
