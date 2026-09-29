@@ -30,6 +30,7 @@
 
 #include "agile.h"
 #include "cfb.h"
+#include "encinfo.h"
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -57,6 +58,11 @@ static const char *const STATUS_AGILE_PASSWORD_UTF8 = "agile_password_utf8";
 static const char *const STATUS_AGILE_CRYPTO = "agile_crypto";
 static const char *const STATUS_CFB_NOT_CFB = "cfb_not_cfb";
 static const char *const STATUS_CFB_MALFORMED = "cfb_malformed";
+static const char *const STATUS_CFB_NOT_ENCRYPTED = "cfb_not_encrypted";
+static const char *const STATUS_ENC_STANDARD = "encryption_standard";
+static const char *const STATUS_ENC_EXTENSIBLE = "encryption_extensible";
+static const char *const STATUS_ENC_UNKNOWN = "encryption_unknown";
+static const char *const STATUS_ENC_CERTIFICATE = "encryption_certificate";
 
 static SEXP result(const char *status, SEXP value) {
   const char *fields[] = {"status", "value", ""};
@@ -1512,6 +1518,208 @@ SEXP C_cfb_streams(SEXP bytes, SEXP names) {
   }
   Rf_setAttrib(out, R_NamesSymbol, names);
   stream_bufs_finalizer(bag);
+  res = PROTECT(result(STATUS_OK, out));
+  UNPROTECT(3);
+  return res;
+}
+
+/* EncryptionInfo, parsed in C (design section 21c, step 2), and the whole
+   chain from a container in memory to the plaintext package: steps 1, 2 and
+   3 together.
+
+   Both hold C memory -- the two streams, the parsed parameters -- across R
+   allocations, so it belongs to an external pointer whose finalizer frees
+   it, the same way C_cfb_streams() holds its buffers. */
+typedef struct {
+  uint8_t *info;
+  size_t info_len;
+  uint8_t *package;
+  size_t package_len;
+  encinfo parsed;
+  int have_parsed;
+} decrypt_bag;
+
+static void decrypt_bag_finalizer(SEXP ptr) {
+  decrypt_bag *b = (decrypt_bag *) R_ExternalPtrAddr(ptr);
+  if (b == NULL) return;
+  free(b->info);
+  free(b->package);
+  if (b->have_parsed) encinfo_free(&b->parsed);
+  free(b);
+  R_ClearExternalPtr(ptr);
+}
+
+static const char *encinfo_status_string(encinfo_status st) {
+  switch (st) {
+  case ENCINFO_OK: return STATUS_OK;
+  case ENCINFO_STANDARD: return STATUS_ENC_STANDARD;
+  case ENCINFO_EXTENSIBLE: return STATUS_ENC_EXTENSIBLE;
+  case ENCINFO_UNKNOWN: return STATUS_ENC_UNKNOWN;
+  case ENCINFO_NO_PASSWORD: return STATUS_ENC_CERTIFICATE;
+  case ENCINFO_MALFORMED: return STATUS_AGILE_MALFORMED;
+  case ENCINFO_MEMORY: return STATUS_MEMORY;
+  }
+  return STATUS_AGILE_MALFORMED;
+}
+
+static SEXP make_decrypt_bag(decrypt_bag **out) {
+  decrypt_bag *b = (decrypt_bag *) calloc(1, sizeof *b);
+  SEXP bag = PROTECT(R_MakeExternalPtr(b, R_NilValue, R_NilValue));
+  R_RegisterCFinalizerEx(bag, decrypt_bag_finalizer, TRUE);
+  UNPROTECT(1);
+  *out = b;
+  return bag;
+}
+
+/* The parameters as the R list agile_decrypt() takes, which is also what
+   helper-ole2.R's parser builds -- so the tests can compare the two. */
+static SEXP raw_or_null(const uint8_t *p, size_t len) {
+  SEXP out;
+  if (p == NULL) return R_NilValue;
+  out = Rf_allocVector(RAWSXP, (R_xlen_t) len);
+  if (len > 0) memcpy(RAW(out), p, len);
+  return out;
+}
+
+static SEXP str_or_null(const char *s) {
+  return s == NULL ? R_NilValue : Rf_mkString(s);
+}
+
+static SEXP num_or_na(long v) {
+  return Rf_ScalarReal(v < 0 ? NA_REAL : (double) v);
+}
+
+static SEXP cipher_list(const agile_cipher *c, const agile_params *pw) {
+  const char *fields[] = {"cipher_algorithm", "cipher_chaining", "hash_algorithm",
+                          "salt_size", "block_size", "key_bits", "hash_size",
+                          "salt", "spin_count", "encrypted_verifier_hash_input",
+                          "encrypted_verifier_hash_value", "encrypted_key_value", ""};
+  SEXP out;
+  if (pw == NULL) fields[8] = "";
+  out = PROTECT(Rf_mkNamed(VECSXP, fields));
+  SET_VECTOR_ELT(out, 0, str_or_null(c->cipher_algorithm));
+  SET_VECTOR_ELT(out, 1, str_or_null(c->cipher_chaining));
+  SET_VECTOR_ELT(out, 2, str_or_null(c->hash_algorithm));
+  SET_VECTOR_ELT(out, 3, num_or_na(c->salt_size));
+  SET_VECTOR_ELT(out, 4, num_or_na(c->block_size));
+  SET_VECTOR_ELT(out, 5, num_or_na(c->key_bits));
+  SET_VECTOR_ELT(out, 6, num_or_na(c->hash_size));
+  SET_VECTOR_ELT(out, 7, raw_or_null(c->salt, c->salt_len));
+  if (pw != NULL) {
+    SET_VECTOR_ELT(out, 8, num_or_na(pw->spin_count));
+    SET_VECTOR_ELT(out, 9, raw_or_null(pw->encrypted_verifier_hash_input,
+                                       pw->encrypted_verifier_hash_input_len));
+    SET_VECTOR_ELT(out, 10, raw_or_null(pw->encrypted_verifier_hash_value,
+                                        pw->encrypted_verifier_hash_value_len));
+    SET_VECTOR_ELT(out, 11, raw_or_null(pw->encrypted_key_value,
+                                        pw->encrypted_key_value_len));
+  }
+  UNPROTECT(1);
+  return out;
+}
+
+SEXP C_encryption_info(SEXP stream) {
+  const char *fields[] = {"key_data", "encrypted_hmac_key", "encrypted_hmac_value",
+                          "password", ""};
+  decrypt_bag *b;
+  SEXP bag, out, res;
+  encinfo_status st;
+  const agile_params *p;
+
+  if (TYPEOF(stream) != RAWSXP) return result(STATUS_AGILE_MALFORMED, NULL);
+  bag = PROTECT(make_decrypt_bag(&b));
+  if (b == NULL) {
+    UNPROTECT(1);
+    return result(STATUS_MEMORY, NULL);
+  }
+  st = encinfo_parse(RAW(stream), (size_t) XLENGTH(stream), &b->parsed);
+  if (st != ENCINFO_OK) {
+    UNPROTECT(1);
+    return result(encinfo_status_string(st), NULL);
+  }
+  b->have_parsed = 1;
+  p = &b->parsed.params;
+
+  out = PROTECT(Rf_mkNamed(VECSXP, fields));
+  SET_VECTOR_ELT(out, 0, cipher_list(&p->key_data, NULL));
+  SET_VECTOR_ELT(out, 1, raw_or_null(p->encrypted_hmac_key, p->encrypted_hmac_key_len));
+  SET_VECTOR_ELT(out, 2, raw_or_null(p->encrypted_hmac_value, p->encrypted_hmac_value_len));
+  SET_VECTOR_ELT(out, 3, cipher_list(&p->password, p));
+  decrypt_bag_finalizer(bag);
+  res = PROTECT(result(STATUS_OK, out));
+  UNPROTECT(3);
+  return res;
+}
+
+SEXP C_decrypt_ole2(SEXP bytes, SEXP password) {
+  decrypt_bag *b;
+  SEXP bag, out, res;
+  cfb c;
+  cfb_status cs;
+  encinfo_status es;
+  agile_status as;
+  zuc_status crypto = ZUC_OK;
+  size_t size = 0;
+  const char *pw;
+  const char *status = NULL;
+
+  if (TYPEOF(bytes) != RAWSXP) return result(STATUS_CFB_MALFORMED, NULL);
+  if (TYPEOF(password) != STRSXP || XLENGTH(password) != 1 ||
+      STRING_ELT(password, 0) == NA_STRING) {
+    return result(STATUS_AGILE_PASSWORD_UTF8, NULL);
+  }
+  pw = CHAR(STRING_ELT(password, 0));
+
+  bag = PROTECT(make_decrypt_bag(&b));
+  if (b == NULL) {
+    UNPROTECT(1);
+    return result(STATUS_MEMORY, NULL);
+  }
+
+  /* Step 1: the two streams. No R allocation while the container is open. */
+  cs = cfb_open(&c, RAW(bytes), (size_t) XLENGTH(bytes));
+  if (cs == CFB_OK) {
+    cs = cfb_stream(&c, "EncryptionInfo", &b->info, &b->info_len);
+    if (cs == CFB_OK) cs = cfb_stream(&c, "EncryptedPackage", &b->package, &b->package_len);
+    cfb_close(&c);
+  }
+  switch (cs) {
+  case CFB_OK: break;
+  case CFB_NOT_CFB: status = STATUS_CFB_NOT_CFB; break;
+  case CFB_NOT_FOUND: status = STATUS_CFB_NOT_ENCRYPTED; break;
+  case CFB_MEMORY: status = STATUS_MEMORY; break;
+  default: status = STATUS_CFB_MALFORMED; break;
+  }
+
+  /* Step 2: what the descriptor says, and whether it is agile at all. */
+  if (status == NULL) {
+    es = encinfo_parse(b->info, b->info_len, &b->parsed);
+    if (es == ENCINFO_OK) b->have_parsed = 1;
+    else status = encinfo_status_string(es);
+  }
+  if (status == NULL) {
+    as = agile_package_size(b->package, b->package_len, &size);
+    if (as != AGILE_OK) status = agile_status_string(as);
+  }
+  if (status != NULL) {
+    decrypt_bag_finalizer(bag);
+    UNPROTECT(1);
+    return result(status, NULL);
+  }
+
+  /* Step 3. The output is allocated first, at a size the ciphertext backs;
+     agile_decrypt() then makes no R call. */
+  out = PROTECT(Rf_allocVector(RAWSXP, (R_xlen_t) size));
+  as = agile_decrypt(&b->parsed.params, pw, strlen(pw), b->package, b->package_len,
+                     RAW(out), size, &crypto);
+  decrypt_bag_finalizer(bag);
+  if (as != AGILE_OK) {
+    SEXP why = PROTECT(as == AGILE_CRYPTO
+                       ? Rf_mkString(zuc_status_name(crypto)) : R_NilValue);
+    res = PROTECT(result(agile_status_string(as), why));
+    UNPROTECT(4);
+    return res;
+  }
   res = PROTECT(result(STATUS_OK, out));
   UNPROTECT(3);
   return res;
