@@ -55,13 +55,14 @@ under `zuxlsx_error` — see
 and design §15. An encrypted workbook (OLE2, not ZIP) and an `.xlsb` are
 reported as `zuxlsx_unsupported_format_error` rather than as damage.
 
-**Decryption is in progress (#22, design §21c/§21d).** Step 3, the agile
-decryption core in C over `libzucrypt.a`, is done:
+**Decryption is in progress (#22, design §21c–§21e).** Step 1, reading
+CFB streams in C, is done (§21e). Step 3, the agile decryption core in C
+over `libzucrypt.a`, is done:
 [src/agile.c](https://pedrobtz.github.io/zuxlsx/src/agile.c) decrypts
 the real fixture byte for byte, with the `EncryptionInfo` parameters
-read in R by `tests/testthat/helper-ole2.R`. `agile_decrypt()` is
-internal; no exported function reaches it until steps 1, 2 and 4 (CFB
-stream reading, `EncryptionInfo` parsing, handing the plaintext to
+read in R by `tests/testthat/helper-ole2.R`. `agile_decrypt()` and
+`cfb_streams()` are internal; no exported function reaches them until
+steps 2 and 4 (`EncryptionInfo` parsing, handing the plaintext to
 xlsxio) land. zucrypt freezes its ABI 1 on this code; findings go on
 pedrobtz/zucrypt#43.
 
@@ -109,10 +110,12 @@ The native layer is
 translation unit — plus
 [src/init.c](https://pedrobtz.github.io/zuxlsx/src/init.c) for
 registration and the zucrypt backend’s lifetime (`zuc_init()` on load,
-`zuc_shutdown()` on unload), and
+`zuc_shutdown()` on unload),
 [src/agile.c](https://pedrobtz.github.io/zuxlsx/src/agile.c), the
-decryption core. `agile.c` includes no R header, so it can be fuzzed
-outside R (#45).
+decryption core, and
+[src/cfb.c](https://pedrobtz.github.io/zuxlsx/src/cfb.c), which reads
+stream contents out of a CFB container in memory. Neither includes an R
+header, so both can be fuzzed outside R (#45).
 
 Vendored, and the corpora:
 
