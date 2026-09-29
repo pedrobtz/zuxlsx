@@ -13,6 +13,11 @@ agile_decrypt <- function(package, password, params, path = NULL) {
   zuxlsx_unwrap(.Call(C_agile_decrypt, params, password, package), path = path)
 }
 
+# `password =` on the readers: NULL, or a password as check_password() takes it.
+check_optional_password <- function(password, call = sys.call(-1L)) {
+  if (is.null(password)) NULL else check_password(password, call = call)
+}
+
 # A password as the C layer takes it: one string, UTF-8, valid.
 check_password <- function(password, call = sys.call(-1L)) {
   if (!is.character(password) || length(password) != 1L || is.na(password)) {

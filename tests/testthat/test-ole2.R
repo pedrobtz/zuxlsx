@@ -70,7 +70,8 @@ test_that("an encrypted workbook and a legacy .xls get different answers", {
   expect_false(inherits(legacy, "zuxlsx_encrypted_error"))
 
   expect_match(conditionMessage(encrypted), "password-protected")
-  expect_match(conditionMessage(encrypted), "cannot decrypt")
+  # And it says what to do about it.
+  expect_match(conditionMessage(encrypted), "password = ", fixed = TRUE)
   expect_match(conditionMessage(legacy), "legacy .xls", fixed = TRUE)
   expect_no_match(conditionMessage(legacy), "password")
 })

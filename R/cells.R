@@ -25,6 +25,7 @@ CELL_TYPES <- c("blank", "number", "string", "boolean", "error", "date")
 #'       number; it is not converted here, because the epoch is a property of
 #'       the workbook rather than of the cell.}
 #'   }
+#' @inheritParams xlsx_sheets
 #' @export
 #' @seealso [xlsx_sheets()] to list the worksheets, and [zuxlsx-conditions]
 #'   for the errors this can raise.
@@ -41,11 +42,12 @@ CELL_TYPES <- c("blank", "number", "string", "boolean", "error", "date")
 #'
 #' # The second worksheet, by name rather than by position.
 #' xlsx_cells(path, "notes")
-xlsx_cells <- function(path, sheet = 1) {
+xlsx_cells <- function(path, sheet = 1, password = NULL) {
   path <- check_path(path)
-  sheet <- resolve_sheet(path, sheet)
+  password <- check_optional_password(password)
+  sheet <- resolve_sheet(path, sheet, password)
 
-  cells <- zuxlsx_unwrap(.Call(C_xlsx_cells, path, sheet), path = path)
+  cells <- zuxlsx_unwrap(.Call(C_xlsx_cells, path, sheet, password), path = path)
   out <- data.frame(
     row = cells[[1L]],
     col = cells[[2L]],
@@ -66,7 +68,7 @@ xlsx_cells <- function(path, sheet = 1) {
 # resolved here rather than in C so that the workbook is walked by the same
 # code path that xlsx_sheets() exposes, and an out-of-range position is a
 # clear R-level error rather than a missing worksheet.
-resolve_sheet <- function(path, sheet, call = sys.call(-1L)) {
+resolve_sheet <- function(path, sheet, password = NULL, call = sys.call(-1L)) {
   is_name <- is.character(sheet) && length(sheet) == 1L && !is.na(sheet)
   if (!is_name && (!is.numeric(sheet) || length(sheet) != 1L || is.na(sheet))) {
     zuxlsx_stop(
@@ -76,7 +78,7 @@ resolve_sheet <- function(path, sheet, call = sys.call(-1L)) {
       call = call
     )
   }
-  sheets <- zuxlsx_unwrap(.Call(C_xlsx_sheets, path), path = path)
+  sheets <- zuxlsx_unwrap(.Call(C_xlsx_sheets, path, password), path = path)
 
   # A name is checked here rather than left to the native layer. Opening a
   # worksheet that does not exist yields a handle that reports no rows, so an

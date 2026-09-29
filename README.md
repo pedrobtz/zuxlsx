@@ -4,14 +4,17 @@
 [![R-CMD-check](https://github.com/pedrobtz/zuxlsx/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/pedrobtz/zuxlsx/actions/workflows/R-CMD-check.yaml)
 <!-- badges: end -->
 
-Read `.xlsx` workbooks from R with no system XML or ZIP library required.
+Read `.xlsx` workbooks from R, password-protected ones included, with no
+system XML, ZIP or cryptography library required.
 
 zuxlsx bundles the [xlsxio](https://github.com/brechtsanders/xlsxio) reader and
-links the Expat parser and the miniz ZIP reader statically at install time,
-out of the sibling packages [zuxml](https://github.com/pedrobtz/zuxml) and
-[zukomp](https://github.com/pedrobtz/zukomp). Those are `LinkingTo`
-dependencies only: the archives end up inside `zuxlsx.so`, so neither package
-has to be installed or loadable once zuxlsx is built.
+links the Expat parser, the miniz ZIP reader and TF-PSA-Crypto statically at
+install time, out of the sibling packages
+[zuxml](https://github.com/pedrobtz/zuxml),
+[zukomp](https://github.com/pedrobtz/zukomp) and
+[zucrypt](https://github.com/pedrobtz/zucrypt). Those are `LinkingTo`
+dependencies only: the archives end up inside `zuxlsx.so`, so none of the
+three has to be installed or loadable once zuxlsx is built.
 
 Writing workbooks is out of scope.
 
@@ -37,6 +40,18 @@ Both Excel date systems are handled. The workbook's own `date1904` setting
 decides which is used, and the 1900 system's phantom 29 February 1900 is
 accounted for, so dates before March 1900 are not a day early.
 
+A password-protected workbook is read by passing its password, to any of the
+readers:
+
+```r
+read_xlsx("protected.xlsx", password = "s3cret")
+```
+
+It is decrypted in memory and never written to disk. zuxlsx decrypts agile
+encryption, which Excel has written since 2013, and checks the integrity code
+stored with the file before decrypting anything. Office 2007's older standard
+encryption is recognised and refused by name.
+
 Underneath, for worksheets that are not rectangular enough for a data frame:
 
 ```r
@@ -50,8 +65,9 @@ xlsx_read_cells(path, callback = function(cells) { str(cells); FALSE })
 
 ## Installation
 
-zuxlsx needs `zuxml` and `zukomp` at build time, and its `configure` script
-will stop with an explanatory message if their static archives are missing.
+zuxlsx needs `zuxml`, `zukomp` and `zucrypt` at build time, and its
+`configure` script will stop with an explanatory message if their static
+archives are missing.
 `pak` picks them up from the `Remotes:` field:
 
 ``` r

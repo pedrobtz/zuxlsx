@@ -1,6 +1,12 @@
 #' List the worksheets in an xlsx workbook
 #'
 #' @param path Path to an `.xlsx` file.
+#' @param password The password of a password-protected workbook, or `NULL`
+#'   (the default) for one without. The workbook is decrypted in memory and
+#'   never written to disk. Agile encryption -- what Excel has written since
+#'   2013 -- is supported; the older standard encryption is not, and is
+#'   reported as such. Ignored for a workbook that is not encrypted. R cannot
+#'   erase a string, so the password may stay in memory after the call.
 #'
 #' @return A character vector of worksheet names, in workbook order. A workbook
 #'   always has at least one.
@@ -9,9 +15,10 @@
 #' @examples
 #' path <- system.file("extdata", "two-sheets.xlsx", package = "zuxlsx")
 #' xlsx_sheets(path)
-xlsx_sheets <- function(path) {
+xlsx_sheets <- function(path, password = NULL) {
   path <- check_path(path)
-  zuxlsx_unwrap(.Call(C_xlsx_sheets, path), path = path)
+  password <- check_optional_password(password)
+  zuxlsx_unwrap(.Call(C_xlsx_sheets, path, password), path = path)
 }
 
 #' Report the native libraries zuxlsx was built against

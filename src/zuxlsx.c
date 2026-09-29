@@ -357,28 +357,213 @@ done:
   return kind;
 }
 
-static int file_is_ole2(const char *file) {
-  return ole2_kind(file) != OLE2_NO;
+/* ------------------------------------------------------------------------ */
+/* Password-protected workbooks (design section 21c, step 4).
+ *
+ * A reader is handed either the file or, when the file is an encrypted
+ * package and a password was given, the package decrypted into C memory and
+ * opened with xlsxioread_open_memory(). The plaintext never becomes an R
+ * object and never touches the disk. It belongs to an external pointer whose
+ * finalizer wipes it before freeing it, so an error while cells are being
+ * built still disposes of it; miniz reads it in place, so it must outlive the
+ * reader, which every entry point below closes first. */
+typedef struct {
+  uint8_t *data;
+  size_t len;
+} plain_buf;
+
+static void plain_wipe(uint8_t *data, size_t len) {
+  if (data != NULL) {
+    zuc_secure_zero(data, len);
+    free(data);
+  }
 }
 
-/* The status a CFB container should be reported as. */
-static const char *ole2_status(const char *file) {
-  switch (ole2_kind(file)) {
-    case OLE2_ENCRYPTED: return STATUS_ENCRYPTED;
-    case OLE2_XLS:       return STATUS_XLS;
-    default:             return STATUS_OLE2;
+static void plain_buf_finalizer(SEXP ptr) {
+  plain_buf *b = (plain_buf *) R_ExternalPtrAddr(ptr);
+  if (b == NULL) return;
+  plain_wipe(b->data, b->len);
+  free(b);
+  R_ClearExternalPtr(ptr);
+}
+
+static const char *agile_status_string(agile_status st);
+static const char *encinfo_status_string(encinfo_status st);
+
+/* The whole file, into C memory. Read in growing chunks rather than sized
+   with ftell(), whose long is 32 bits on Windows. */
+static int read_file(const char *file, uint8_t **out, size_t *out_len) {
+  FILE *fp = fopen(file, "rb");
+  uint8_t *buf = NULL;
+  size_t len = 0, cap = 0;
+
+  if (fp == NULL) return 0;
+  for (;;) {
+    size_t got;
+    if (len == cap) {
+      size_t grown = cap ? cap * 2 : 65536;
+      uint8_t *p = (uint8_t *) realloc(buf, grown);
+      if (p == NULL || grown < cap) {
+        free(buf);
+        fclose(fp);
+        return -1;
+      }
+      buf = p;
+      cap = grown;
+    }
+    got = fread(buf + len, 1, cap - len, fp);
+    len += got;
+    if (got == 0) break;
   }
+  fclose(fp);
+  *out = buf;
+  *out_len = len;
+  return 1;
+}
+
+/* Steps 1 to 3: a CFB container in memory to the plaintext package, in
+   malloc'd memory the caller wipes and frees. No R: the status strings are
+   constants. NULL on success. */
+static const char *decrypt_package(const uint8_t *bytes, size_t len, const char *pw,
+                                   uint8_t **out, size_t *out_len,
+                                   zuc_status *crypto) {
+  cfb c;
+  cfb_status cs;
+  encinfo_status es;
+  agile_status as;
+  encinfo parsed;
+  uint8_t *info = NULL, *package = NULL, *plain = NULL;
+  size_t info_len = 0, package_len = 0, size = 0;
+  const char *status = NULL;
+
+  *out = NULL;
+  *out_len = 0;
+  *crypto = ZUC_OK;
+
+  cs = cfb_open(&c, bytes, len);
+  if (cs == CFB_OK) {
+    cs = cfb_stream(&c, "EncryptionInfo", &info, &info_len);
+    if (cs == CFB_OK) cs = cfb_stream(&c, "EncryptedPackage", &package, &package_len);
+    cfb_close(&c);
+  }
+  switch (cs) {
+  case CFB_OK: break;
+  case CFB_NOT_CFB: status = STATUS_CFB_NOT_CFB; break;
+  case CFB_NOT_FOUND: status = STATUS_CFB_NOT_ENCRYPTED; break;
+  case CFB_MEMORY: status = STATUS_MEMORY; break;
+  default: status = STATUS_CFB_MALFORMED; break;
+  }
+  if (status != NULL) goto done;
+
+  es = encinfo_parse(info, info_len, &parsed);
+  if (es != ENCINFO_OK) {
+    status = encinfo_status_string(es);
+    goto done;
+  }
+  as = agile_package_size(package, package_len, &size);
+  if (as == AGILE_OK) {
+    plain = (uint8_t *) malloc(size > 0 ? size : 1);
+    if (plain == NULL) as = AGILE_MEMORY;
+  }
+  if (as == AGILE_OK) {
+    as = agile_decrypt(&parsed.params, pw, strlen(pw), package, package_len,
+                       plain, size, crypto);
+  }
+  encinfo_free(&parsed);
+  if (as != AGILE_OK) {
+    plain_wipe(plain, size);
+    plain = NULL;
+    status = agile_status_string(as);
+  }
+
+done:
+  free(info);
+  free(package);
+  if (status == NULL) {
+    *out = plain;
+    *out_len = size;
+  }
+  return status;
+}
+
+/* What a reader should open. For anything but an OLE2 container, the file,
+   and *plain stays NULL. For an encrypted package with a password, its
+   plaintext, owned by `holder`. Otherwise the status to report -- with a
+   detail in *detail for a cryptographic backend failure, which the caller
+   must protect.
+
+   Called before any reader is open: it allocates R memory when it fails. */
+static const char *resolve_source(const char *file, SEXP password, SEXP holder,
+                                  SEXP *detail) {
+  plain_buf *b = (plain_buf *) R_ExternalPtrAddr(holder);
+  ole2_kind_t kind = ole2_kind(file);
+  uint8_t *bytes = NULL;
+  size_t len = 0;
+  zuc_status crypto = ZUC_OK;
+  const char *status;
+  int rc;
+
+  *detail = R_NilValue;
+  if (kind == OLE2_NO) return NULL;
+  /* A password changes nothing for a legacy .xls or an unknown container,
+     and without one an encrypted package is still only reported. */
+  if (kind != OLE2_ENCRYPTED || password == R_NilValue) {
+    return kind == OLE2_ENCRYPTED ? STATUS_ENCRYPTED
+         : kind == OLE2_XLS ? STATUS_XLS : STATUS_OLE2;
+  }
+
+  rc = read_file(file, &bytes, &len);
+  if (rc <= 0) return rc < 0 ? STATUS_MEMORY : STATUS_ZIP_OPEN;
+  status = decrypt_package(bytes, len, CHAR(STRING_ELT(password, 0)),
+                           &b->data, &b->len, &crypto);
+  free(bytes);
+  if (status == STATUS_AGILE_CRYPTO) {
+    *detail = Rf_mkString(zuc_status_name(crypto));
+  }
+  return status;
+}
+
+static SEXP make_plain_holder(void) {
+  plain_buf *b = (plain_buf *) calloc(1, sizeof *b);
+  SEXP holder;
+  if (b == NULL) return R_NilValue;
+  holder = PROTECT(R_MakeExternalPtr(b, R_NilValue, R_NilValue));
+  R_RegisterCFinalizerEx(holder, plain_buf_finalizer, TRUE);
+  UNPROTECT(1);
+  return holder;
+}
+
+static xlsxioreader open_reader(const char *file, const plain_buf *b) {
+  return b->data != NULL
+    ? xlsxioread_open_memory(b->data, (uint64_t) b->len, 0)
+    : xlsxioread_open(file);
+}
+
+/* The password argument as the entry points take it: NULL, or one string R
+   has already made UTF-8 and checked. */
+static int password_ok(SEXP password) {
+  return password == R_NilValue ||
+         (TYPEOF(password) == STRSXP && XLENGTH(password) == 1 &&
+          STRING_ELT(password, 0) != NA_STRING);
 }
 
 /* Only asked once a workbook has already failed to declare a worksheet, so
    the second open costs nothing in the normal case. */
-static int file_is_xlsb(const char *file) {
+/* Opens the archive a reader would: the file, or the decrypted package in
+   memory when there is one. */
+static int zip_open(mz_zip_archive *zip, const char *file,
+                    const uint8_t *buf, size_t len) {
+  memset(zip, 0, sizeof(*zip));
+  return buf != NULL ? mz_zip_reader_init_mem(zip, buf, len, 0)
+                     : mz_zip_reader_init_file(zip, file, 0);
+}
+
+static int file_is_xlsb(const char *file, const uint8_t *buf, size_t len) {
   mz_zip_archive zip;
   mz_uint32 index;
   int found = 0;
 
-  memset(&zip, 0, sizeof(zip));
-  if (!mz_zip_reader_init_file(&zip, file, 0)) {
+  if (!zip_open(&zip, file, buf, len)) {
     return 0;
   }
   if (mz_zip_reader_locate_file_v2(&zip, "xl/workbook.bin", NULL, 0, &index)) {
@@ -399,15 +584,15 @@ static int file_is_xlsb(const char *file) {
  * Only the two parts that must be well-formed for a workbook to be found are
  * checked. A malformed worksheet is a different failure, reached later, and
  * is not what this path is explaining. */
-static int first_malformed_part(const char *file, char *out, size_t outlen,
+static int first_malformed_part(const char *file, const uint8_t *zbuf,
+                                size_t zlen, char *out, size_t outlen,
                                 int *line) {
   static const char *const PARTS[] = {"[Content_Types].xml", "xl/workbook.xml"};
   mz_zip_archive zip;
   size_t i;
   int found = 0;
 
-  memset(&zip, 0, sizeof(zip));
-  if (!mz_zip_reader_init_file(&zip, file, 0)) {
+  if (!zip_open(&zip, file, zbuf, zlen)) {
     return 0;
   }
   for (i = 0; i < sizeof(PARTS) / sizeof(PARTS[0]); i++) {
@@ -448,17 +633,19 @@ static int first_malformed_part(const char *file, char *out, size_t outlen,
   return found;
 }
 
-SEXP C_xlsx_sheets(SEXP path) {
+SEXP C_xlsx_sheets(SEXP path, SEXP password) {
   const char *file;
+  const char *status;
   sheet_list *sheets;
+  plain_buf *plain;
   xlsxioreader reader;
-  SEXP bag, out, res;
+  SEXP bag, holder, detail, out, res;
   size_t i;
 
   /* R validates the argument before calling, but the registered symbol is
      reachable from the namespace, so a wrong type must not be a crash. */
   if (TYPEOF(path) != STRSXP || XLENGTH(path) < 1 ||
-      STRING_ELT(path, 0) == NA_STRING) {
+      STRING_ELT(path, 0) == NA_STRING || !password_ok(password)) {
     return result(STATUS_BAD_PATH, R_NilValue);
   }
 
@@ -471,22 +658,35 @@ SEXP C_xlsx_sheets(SEXP path) {
   }
   bag = PROTECT(R_MakeExternalPtr(sheets, R_NilValue, R_NilValue));
   R_RegisterCFinalizerEx(bag, sheet_list_finalizer, TRUE);
+  holder = PROTECT(make_plain_holder());
+  if (holder == R_NilValue) {
+    sheet_list_finalizer(bag);
+    UNPROTECT(2);
+    return result(STATUS_MEMORY, R_NilValue);
+  }
 
   /* An OLE2 container will not open as a ZIP, so this has to be asked before
-     the reader is handed the path or the answer is "corrupt archive". */
-  if (file_is_ole2(file)) {
+     the reader is handed the path or the answer is "corrupt archive". With a
+     password, an encrypted one is decrypted here instead. */
+  status = resolve_source(file, password, holder, &detail);
+  if (status != NULL) {
+    PROTECT(detail);
     sheet_list_finalizer(bag);
-    UNPROTECT(1);
-    return result(ole2_status(file), R_NilValue);
+    plain_buf_finalizer(holder);
+    res = result(status, detail);
+    UNPROTECT(3);
+    return res;
   }
+  plain = (plain_buf *) R_ExternalPtrAddr(holder);
 
   /* No R allocation between here and xlsxioread_close(): while the reader is
      open it owns a miniz archive handle and an Expat parser, and neither is
      reachable from R to be cleaned up if something unwound past them. */
-  reader = xlsxioread_open(file);
+  reader = open_reader(file, plain);
   if (reader == NULL) {
     sheet_list_finalizer(bag);
-    UNPROTECT(1);
+    plain_buf_finalizer(holder);
+    UNPROTECT(2);
     return result(STATUS_ZIP_OPEN, R_NilValue);
   }
   xlsxioread_list_sheets(reader, collect_sheet, sheets);
@@ -494,7 +694,8 @@ SEXP C_xlsx_sheets(SEXP path) {
 
   if (sheets->oom) {
     sheet_list_finalizer(bag);
-    UNPROTECT(1);
+    plain_buf_finalizer(holder);
+    UNPROTECT(2);
     return result(STATUS_MEMORY, R_NilValue);
   }
   /* A workbook has at least one worksheet: CT_Sheets requires 1..n. Zero here
@@ -504,28 +705,30 @@ SEXP C_xlsx_sheets(SEXP path) {
   if (sheets->n == 0) {
     char part[64];
     int line = 0;
-    int xlsb = file_is_xlsb(file);
-    const char *status = STATUS_NO_SHEETS;
-    SEXP detail = R_NilValue;
+    int xlsb = file_is_xlsb(file, plain->data, plain->len);
+    const char *why = STATUS_NO_SHEETS;
 
     if (xlsb) {
-      status = STATUS_XLSB;
-    } else if (first_malformed_part(file, part, sizeof(part), &line)) {
-      status = STATUS_XML;
+      why = STATUS_XLSB;
+    } else if (first_malformed_part(file, plain->data, plain->len,
+                                    part, sizeof(part), &line)) {
+      why = STATUS_XML;
     }
     sheet_list_finalizer(bag);
-    if (status == STATUS_XML) {
+    plain_buf_finalizer(holder);
+    if (why == STATUS_XML) {
       const char *fields[] = {"part", "line", ""};
       detail = PROTECT(Rf_mkNamed(VECSXP, fields));
       SET_VECTOR_ELT(detail, 0, Rf_mkString(part));
       SET_VECTOR_ELT(detail, 1, Rf_ScalarInteger(line));
-      res = PROTECT(result(status, detail));
-      UNPROTECT(3);
+      res = PROTECT(result(why, detail));
+      UNPROTECT(4);
       return res;
     }
-    UNPROTECT(1);
-    return result(status, R_NilValue);
+    UNPROTECT(2);
+    return result(why, R_NilValue);
   }
+  plain_buf_finalizer(holder);
 
   out = PROTECT(Rf_allocVector(STRSXP, (R_xlen_t)sheets->n));
   for (i = 0; i < sheets->n; i++) {
@@ -535,7 +738,7 @@ SEXP C_xlsx_sheets(SEXP path) {
 
   /* result() allocates, so out stays protected across it. */
   res = PROTECT(result(STATUS_OK, out));
-  UNPROTECT(3);
+  UNPROTECT(4);
   return res;
 }
 
@@ -748,6 +951,10 @@ static SEXP cells_to_list(const cell_list *cells, int date1904) {
 typedef struct {
   xlsxioreader reader;
   xlsxioreadersheet sheet;
+  /* A decrypted package the reader reads in place, or NULL. Held here rather
+     than in its own external pointer so that one finalizer closes the reader
+     before the buffer is wiped: two finalizers run in no guaranteed order. */
+  plain_buf plain;
 } reader_handle;
 
 static void reader_handle_finalizer(SEXP ptr) {
@@ -761,18 +968,21 @@ static void reader_handle_finalizer(SEXP ptr) {
       xlsxioread_close(h->reader);
       h->reader = NULL;
     }
+    plain_wipe(h->plain.data, h->plain.len);
     free(h);
     R_ClearExternalPtr(ptr);
   }
 }
 
-SEXP C_xlsx_cells(SEXP path, SEXP sheet) {
+SEXP C_xlsx_cells(SEXP path, SEXP sheet, SEXP password) {
   const char *file;
   const char *sheetname;
   cell_list *cells;
   xlsxioreader reader;
   xlsxioreadersheet worksheet;
-  SEXP bag, out, res;
+  plain_buf *plain;
+  const char *status;
+  SEXP bag, holder, detail, out, res;
   size_t i;
   size_t rownr = 0;
   int date1904 = 0;
@@ -780,7 +990,7 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet) {
   if (TYPEOF(path) != STRSXP || XLENGTH(path) < 1 ||
       STRING_ELT(path, 0) == NA_STRING ||
       TYPEOF(sheet) != STRSXP || XLENGTH(sheet) < 1 ||
-      STRING_ELT(sheet, 0) == NA_STRING) {
+      STRING_ELT(sheet, 0) == NA_STRING || !password_ok(password)) {
     return result(STATUS_BAD_PATH, R_NilValue);
   }
   file = Rf_translateCharUTF8(STRING_ELT(path, 0));
@@ -792,25 +1002,38 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet) {
   }
   bag = PROTECT(R_MakeExternalPtr(cells, R_NilValue, R_NilValue));
   R_RegisterCFinalizerEx(bag, cell_list_finalizer, TRUE);
-
-  if (file_is_ole2(file)) {
+  holder = PROTECT(make_plain_holder());
+  if (holder == R_NilValue) {
     cell_list_finalizer(bag);
-    UNPROTECT(1);
-    return result(ole2_status(file), R_NilValue);
+    UNPROTECT(2);
+    return result(STATUS_MEMORY, R_NilValue);
   }
 
+  status = resolve_source(file, password, holder, &detail);
+  if (status != NULL) {
+    PROTECT(detail);
+    cell_list_finalizer(bag);
+    plain_buf_finalizer(holder);
+    res = result(status, detail);
+    UNPROTECT(3);
+    return res;
+  }
+  plain = (plain_buf *) R_ExternalPtrAddr(holder);
+
   /* No R allocation until xlsxioread_close(). */
-  reader = xlsxioread_open(file);
+  reader = open_reader(file, plain);
   if (reader == NULL) {
     cell_list_finalizer(bag);
-    UNPROTECT(1);
+    plain_buf_finalizer(holder);
+    UNPROTECT(2);
     return result(STATUS_ZIP_OPEN, R_NilValue);
   }
   worksheet = xlsxioread_sheet_open(reader, sheetname, XLSXIOREAD_SKIP_NONE);
   if (worksheet == NULL) {
     xlsxioread_close(reader);
     cell_list_finalizer(bag);
-    UNPROTECT(1);
+    plain_buf_finalizer(holder);
+    UNPROTECT(2);
     return result(STATUS_NO_SHEET, R_NilValue);
   }
 
@@ -843,10 +1066,11 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet) {
   date1904 = xlsxioread_sheet_date1904(worksheet);
   xlsxioread_sheet_close(worksheet);
   xlsxioread_close(reader);
+  plain_buf_finalizer(holder);
 
   if (cells->oom) {
     cell_list_finalizer(bag);
-    UNPROTECT(1);
+    UNPROTECT(2);
     return result(STATUS_MEMORY, R_NilValue);
   }
 
@@ -854,7 +1078,7 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet) {
   cell_list_finalizer(bag);
 
   res = PROTECT(result(STATUS_OK, out));
-  UNPROTECT(3);
+  UNPROTECT(4);
   return res;
 }
 
@@ -871,12 +1095,14 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet) {
  * than a memory optimisation -- it is how a caller finds something in a large
  * sheet without paying for the rest of it. */
 SEXP C_xlsx_read_cells(SEXP path, SEXP sheet, SEXP callback, SEXP env,
-                       SEXP chunk) {
+                       SEXP chunk, SEXP password) {
   const char *file;
   const char *sheetname;
+  const char *status;
   cell_list *cells;
   reader_handle *handle;
-  SEXP bag, holder, res;
+  plain_buf *plain;
+  SEXP bag, holder, source, detail, res;
   size_t limit;
   size_t rownr = 0;
   int date1904 = 0;
@@ -888,19 +1114,33 @@ SEXP C_xlsx_read_cells(SEXP path, SEXP sheet, SEXP callback, SEXP env,
       STRING_ELT(sheet, 0) == NA_STRING ||
       TYPEOF(callback) != CLOSXP || TYPEOF(env) != ENVSXP ||
       TYPEOF(chunk) != INTSXP || XLENGTH(chunk) < 1 ||
-      INTEGER(chunk)[0] == NA_INTEGER || INTEGER(chunk)[0] < 1) {
+      INTEGER(chunk)[0] == NA_INTEGER || INTEGER(chunk)[0] < 1 ||
+      !password_ok(password)) {
     return result(STATUS_BAD_PATH, R_NilValue);
   }
   file = Rf_translateCharUTF8(STRING_ELT(path, 0));
   sheetname = Rf_translateCharUTF8(STRING_ELT(sheet, 0));
   limit = (size_t)INTEGER(chunk)[0];
 
-  if (file_is_ole2(file)) {
-    return result(ole2_status(file), R_NilValue);
+  source = PROTECT(make_plain_holder());
+  if (source == R_NilValue) {
+    UNPROTECT(1);
+    return result(STATUS_MEMORY, R_NilValue);
   }
+  status = resolve_source(file, password, source, &detail);
+  if (status != NULL) {
+    PROTECT(detail);
+    plain_buf_finalizer(source);
+    res = result(status, detail);
+    UNPROTECT(2);
+    return res;
+  }
+  plain = (plain_buf *) R_ExternalPtrAddr(source);
 
   cells = (cell_list *)calloc(1, sizeof(cell_list));
   if (cells == NULL) {
+    plain_buf_finalizer(source);
+    UNPROTECT(1);
     return result(STATUS_MEMORY, R_NilValue);
   }
   bag = PROTECT(R_MakeExternalPtr(cells, R_NilValue, R_NilValue));
@@ -909,17 +1149,24 @@ SEXP C_xlsx_read_cells(SEXP path, SEXP sheet, SEXP callback, SEXP env,
   handle = (reader_handle *)calloc(1, sizeof(reader_handle));
   if (handle == NULL) {
     cell_list_finalizer(bag);
-    UNPROTECT(1);
+    plain_buf_finalizer(source);
+    UNPROTECT(2);
     return result(STATUS_MEMORY, R_NilValue);
   }
   holder = PROTECT(R_MakeExternalPtr(handle, R_NilValue, R_NilValue));
   R_RegisterCFinalizerEx(holder, reader_handle_finalizer, TRUE);
 
-  handle->reader = xlsxioread_open(file);
+  /* The plaintext moves into the handle, which from here on owns it. Nothing
+     between the finalizer registration above and this can longjmp. */
+  handle->plain = *plain;
+  plain->data = NULL;
+  plain->len = 0;
+
+  handle->reader = open_reader(file, &handle->plain);
   if (handle->reader == NULL) {
     reader_handle_finalizer(holder);
     cell_list_finalizer(bag);
-    UNPROTECT(2);
+    UNPROTECT(3);
     return result(STATUS_ZIP_OPEN, R_NilValue);
   }
   handle->sheet = xlsxioread_sheet_open(handle->reader, sheetname,
@@ -927,7 +1174,7 @@ SEXP C_xlsx_read_cells(SEXP path, SEXP sheet, SEXP callback, SEXP env,
   if (handle->sheet == NULL) {
     reader_handle_finalizer(holder);
     cell_list_finalizer(bag);
-    UNPROTECT(2);
+    UNPROTECT(3);
     return result(STATUS_NO_SHEET, R_NilValue);
   }
   date1904 = xlsxioread_sheet_date1904(handle->sheet);
@@ -967,7 +1214,7 @@ SEXP C_xlsx_read_cells(SEXP path, SEXP sheet, SEXP callback, SEXP env,
   if (cells->oom) {
     reader_handle_finalizer(holder);
     cell_list_finalizer(bag);
-    UNPROTECT(2);
+    UNPROTECT(3);
     return result(STATUS_MEMORY, R_NilValue);
   }
   if (!stopped && cells->n > 0) {
@@ -982,7 +1229,7 @@ SEXP C_xlsx_read_cells(SEXP path, SEXP sheet, SEXP callback, SEXP env,
   reader_handle_finalizer(holder);
   cell_list_finalizer(bag);
   res = PROTECT(result(STATUS_OK, Rf_ScalarLogical(stopped)));
-  UNPROTECT(3);
+  UNPROTECT(4);
   return res;
 }
 
@@ -1025,13 +1272,16 @@ static int column_kind(unsigned int mask) {
   return ZU_CELL_STRING;
 }
 
-SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds) {
+SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
+                 SEXP password) {
   const char *file;
   const char *sheetname;
   cell_list *cells;
   xlsxioreader reader;
   xlsxioreadersheet worksheet;
-  SEXP bag, out, res, r_cols, r_header, r_isdate;
+  plain_buf *plain;
+  const char *status;
+  SEXP bag, holder, detail, out, res, r_cols, r_header, r_isdate;
   size_t i;
   size_t rownr = 0;
   int date1904 = 0;
@@ -1047,7 +1297,8 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds) {
       STRING_ELT(path, 0) == NA_STRING ||
       TYPEOF(sheet) != STRSXP || XLENGTH(sheet) < 1 ||
       STRING_ELT(sheet, 0) == NA_STRING ||
-      TYPEOF(col_names) != LGLSXP || XLENGTH(col_names) < 1) {
+      TYPEOF(col_names) != LGLSXP || XLENGTH(col_names) < 1 ||
+      !password_ok(password)) {
     return result(STATUS_BAD_PATH, R_NilValue);
   }
   header = (LOGICAL(col_names)[0] == TRUE);
@@ -1063,29 +1314,44 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds) {
   file = Rf_translateCharUTF8(STRING_ELT(path, 0));
   sheetname = Rf_translateCharUTF8(STRING_ELT(sheet, 0));
 
-  if (file_is_ole2(file)) {
-    return result(ole2_status(file), R_NilValue);
+  holder = PROTECT(make_plain_holder());
+  if (holder == R_NilValue) {
+    UNPROTECT(1);
+    return result(STATUS_MEMORY, R_NilValue);
   }
+  status = resolve_source(file, password, holder, &detail);
+  if (status != NULL) {
+    PROTECT(detail);
+    plain_buf_finalizer(holder);
+    res = result(status, detail);
+    UNPROTECT(2);
+    return res;
+  }
+  plain = (plain_buf *) R_ExternalPtrAddr(holder);
 
   cells = (cell_list *)calloc(1, sizeof(cell_list));
   if (cells == NULL) {
+    plain_buf_finalizer(holder);
+    UNPROTECT(1);
     return result(STATUS_MEMORY, R_NilValue);
   }
   bag = PROTECT(R_MakeExternalPtr(cells, R_NilValue, R_NilValue));
   R_RegisterCFinalizerEx(bag, cell_list_finalizer, TRUE);
 
   /* No R allocation until xlsxioread_close(). */
-  reader = xlsxioread_open(file);
+  reader = open_reader(file, plain);
   if (reader == NULL) {
     cell_list_finalizer(bag);
-    UNPROTECT(1);
+    plain_buf_finalizer(holder);
+    UNPROTECT(2);
     return result(STATUS_ZIP_OPEN, R_NilValue);
   }
   worksheet = xlsxioread_sheet_open(reader, sheetname, XLSXIOREAD_SKIP_NONE);
   if (worksheet == NULL) {
     xlsxioread_close(reader);
     cell_list_finalizer(bag);
-    UNPROTECT(1);
+    plain_buf_finalizer(holder);
+    UNPROTECT(2);
     return result(STATUS_NO_SHEET, R_NilValue);
   }
 
@@ -1122,15 +1388,16 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds) {
   date1904 = xlsxioread_sheet_date1904(worksheet);
   xlsxioread_sheet_close(worksheet);
   xlsxioread_close(reader);
+  plain_buf_finalizer(holder);
 
   if (cells->oom) {
     cell_list_finalizer(bag);
-    UNPROTECT(1);
+    UNPROTECT(2);
     return result(STATUS_MEMORY, R_NilValue);
   }
   if (cells->n == 0) {
     cell_list_finalizer(bag);
-    UNPROTECT(1);
+    UNPROTECT(2);
     return result(STATUS_OK, R_NilValue);
   }
 
@@ -1169,7 +1436,7 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds) {
     free(mask);
     free(kind);
     cell_list_finalizer(bag);
-    UNPROTECT(1);
+    UNPROTECT(2);
     return result(STATUS_MEMORY, R_NilValue);
   }
   for (i = 0; i < cells->n; i++) {
@@ -1261,7 +1528,7 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds) {
     SET_VECTOR_ELT(out, 3, Rf_ScalarLogical(date1904));
     res = PROTECT(result(STATUS_OK, out));
   }
-  UNPROTECT(6);
+  UNPROTECT(7);
   return res;
 }
 
@@ -1652,74 +1919,37 @@ SEXP C_encryption_info(SEXP stream) {
 }
 
 SEXP C_decrypt_ole2(SEXP bytes, SEXP password) {
-  decrypt_bag *b;
-  SEXP bag, out, res;
-  cfb c;
-  cfb_status cs;
-  encinfo_status es;
-  agile_status as;
+  SEXP holder, out, res;
+  plain_buf *b;
   zuc_status crypto = ZUC_OK;
-  size_t size = 0;
-  const char *pw;
-  const char *status = NULL;
+  const char *status;
 
   if (TYPEOF(bytes) != RAWSXP) return result(STATUS_CFB_MALFORMED, NULL);
   if (TYPEOF(password) != STRSXP || XLENGTH(password) != 1 ||
       STRING_ELT(password, 0) == NA_STRING) {
     return result(STATUS_AGILE_PASSWORD_UTF8, NULL);
   }
-  pw = CHAR(STRING_ELT(password, 0));
-
-  bag = PROTECT(make_decrypt_bag(&b));
-  if (b == NULL) {
+  holder = PROTECT(make_plain_holder());
+  if (holder == R_NilValue) {
     UNPROTECT(1);
     return result(STATUS_MEMORY, NULL);
   }
+  b = (plain_buf *) R_ExternalPtrAddr(holder);
 
-  /* Step 1: the two streams. No R allocation while the container is open. */
-  cs = cfb_open(&c, RAW(bytes), (size_t) XLENGTH(bytes));
-  if (cs == CFB_OK) {
-    cs = cfb_stream(&c, "EncryptionInfo", &b->info, &b->info_len);
-    if (cs == CFB_OK) cs = cfb_stream(&c, "EncryptedPackage", &b->package, &b->package_len);
-    cfb_close(&c);
-  }
-  switch (cs) {
-  case CFB_OK: break;
-  case CFB_NOT_CFB: status = STATUS_CFB_NOT_CFB; break;
-  case CFB_NOT_FOUND: status = STATUS_CFB_NOT_ENCRYPTED; break;
-  case CFB_MEMORY: status = STATUS_MEMORY; break;
-  default: status = STATUS_CFB_MALFORMED; break;
-  }
-
-  /* Step 2: what the descriptor says, and whether it is agile at all. */
-  if (status == NULL) {
-    es = encinfo_parse(b->info, b->info_len, &b->parsed);
-    if (es == ENCINFO_OK) b->have_parsed = 1;
-    else status = encinfo_status_string(es);
-  }
-  if (status == NULL) {
-    as = agile_package_size(b->package, b->package_len, &size);
-    if (as != AGILE_OK) status = agile_status_string(as);
-  }
+  status = decrypt_package(RAW(bytes), (size_t) XLENGTH(bytes),
+                           CHAR(STRING_ELT(password, 0)), &b->data, &b->len, &crypto);
   if (status != NULL) {
-    decrypt_bag_finalizer(bag);
-    UNPROTECT(1);
-    return result(status, NULL);
-  }
-
-  /* Step 3. The output is allocated first, at a size the ciphertext backs;
-     agile_decrypt() then makes no R call. */
-  out = PROTECT(Rf_allocVector(RAWSXP, (R_xlen_t) size));
-  as = agile_decrypt(&b->parsed.params, pw, strlen(pw), b->package, b->package_len,
-                     RAW(out), size, &crypto);
-  decrypt_bag_finalizer(bag);
-  if (as != AGILE_OK) {
-    SEXP why = PROTECT(as == AGILE_CRYPTO
+    SEXP why = PROTECT(status == STATUS_AGILE_CRYPTO
                        ? Rf_mkString(zuc_status_name(crypto)) : R_NilValue);
-    res = PROTECT(result(agile_status_string(as), why));
-    UNPROTECT(4);
+    res = PROTECT(result(status, why));
+    UNPROTECT(3);
     return res;
   }
+
+  /* A copy into R, for the tests: the readers never make one. */
+  out = PROTECT(Rf_allocVector(RAWSXP, (R_xlen_t) b->len));
+  if (b->len > 0) memcpy(RAW(out), b->data, b->len);
+  plain_buf_finalizer(holder);
   res = PROTECT(result(STATUS_OK, out));
   UNPROTECT(3);
   return res;

@@ -4,7 +4,13 @@
 \alias{xlsx_read_cells}
 \title{Read a worksheet in chunks}
 \usage{
-xlsx_read_cells(path, sheet = 1, callback, chunk_size = 10000L)
+xlsx_read_cells(
+  path,
+  sheet = 1,
+  callback,
+  chunk_size = 10000L,
+  password = NULL
+)
 }
 \arguments{
 \item{path}{Path to an \code{.xlsx} file.}
@@ -17,6 +23,13 @@ Return \code{FALSE} to stop reading.}
 
 \item{chunk_size}{The least number of cells to gather before calling
 \code{callback}.}
+
+\item{password}{The password of a password-protected workbook, or \code{NULL}
+(the default) for one without. The workbook is decrypted in memory and
+never written to disk. Agile encryption -- what Excel has written since
+2013 -- is supported; the older standard encryption is not, and is
+reported as such. Ignored for a workbook that is not encrypted. R cannot
+erase a string, so the password may stay in memory after the call.}
 }
 \value{
 \code{TRUE} if \code{callback} stopped the read, \code{FALSE} if the worksheet was

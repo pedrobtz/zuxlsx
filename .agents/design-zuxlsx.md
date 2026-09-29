@@ -853,8 +853,7 @@ conditions carry the offending `path`. Implemented so far:
 `zuxlsx_input_error`, `zuxlsx_memory_error` and
 `zuxlsx_unsupported_format_error` are additions to the list above.
 Decryption adds two more, `zuxlsx_password_error` and
-`zuxlsx_integrity_error`, provisionally and not yet reachable from an
-exported function; see section 21d.
+`zuxlsx_integrity_error`; see sections 21d and 21g.
 `zuxlsx_sheet_error` arrived with `xlsx_cells()`, and `zuxlsx_xml_error` is
 raised as of 2026-09-19, naming the offending part and line.
 
@@ -1784,6 +1783,57 @@ The C parser is checked against `helper-ole2.R`'s on both fixtures with
 repacks it with `cfb_build()`. Under ASan and UBSan, linked to zuxml's Expat
 archive: every truncation of the stream and 100,000 randomly damaged or
 spliced copies, with no report.
+
+### 21g. Step 4, `password =` on the readers: done, 2026-09-29
+
+All five readers -- `read_xlsx()`, `xlsx_cells()`, `xlsx_rows()`,
+`xlsx_read_cells()` and `xlsx_sheets()` -- take `password = NULL`. With no
+password nothing changes: an encrypted package is still reported, now with a
+message that says to pass one. With a password, `resolve_source()` in
+`src/zuxlsx.c` reads the file into C memory, runs steps 1 to 3
+(`decrypt_package()`), and the reader opens the plaintext with
+`xlsxioread_open_memory()`, which patch 0001 already implements on
+`mz_zip_reader_init_mem()`. No patch was needed.
+
+**The plaintext never becomes an R object and never touches the disk.** It
+lives in `malloc`'d memory owned by an external pointer whose finalizer wipes
+it with `zuc_secure_zero()` before freeing it, and each reader disposes of
+it explicitly as soon as the reader is closed. miniz reads it in place, so it
+must outlive the reader. Three of the readers close the reader before any R
+allocation, so that holds by construction. `xlsx_read_cells()` keeps the
+reader open across R callbacks, so there the plaintext moves into
+`reader_handle` and one finalizer closes the reader and *then* wipes the
+buffer -- two finalizers would run in no guaranteed order. This answers 21b's
+"decryption cannot stream": the package is decrypted whole, into memory the
+package controls and clears, and the worksheet is then streamed from it as
+usual.
+
+**The failure diagnostics look inside the plaintext.** `file_is_xlsb()` and
+`first_malformed_part()` take a buffer as well as a path, so an encrypted
+`.xlsb`, or an encrypted package whose `xl/workbook.xml` is broken, is
+reported as exactly that. `ole2_kind()` still classifies the file on disk,
+before any decryption, which is right: it is asking about the container.
+
+**Policy.** A password is ignored for a workbook that is not encrypted, and
+changes nothing for a legacy `.xls` or an unrecognised OLE2 container. A
+wrong password is `zuxlsx_password_error` from every reader, a subclass of
+`zuxlsx_encrypted_error`; the two classes and `zuxlsx_integrity_error` are
+now reachable from exported functions and documented in
+`?"zuxlsx-conditions"`, so their provisional status in 21d ends here.
+
+**Known cost: two decryptions per read.** `resolve_sheet()` lists the
+worksheets through `C_xlsx_sheets` before every read, to check a name or map
+a position, and each call decrypts. On the fixture that is 140 ms instead of
+70, almost all of it the spin loop. Resolving the sheet in C, in the same
+call that reads it, removes it; that is a follow-up rather than part of this.
+
+**Testing.** The msoffcrypto-tool fixtures prove every reader returns
+exactly what it returns for the plaintext. `agile_encrypt()` in
+`tests/testthat/helper-agile.R` builds encrypted workbooks of any content
+from zucrypt's R functions -- not independent of the decryptor, so it proves
+plumbing, never the scheme -- which reaches an encrypted `.xlsb`, a broken
+part, a package that is not a ZIP, one spanning many segments, and the
+callback reader holding the plaintext while R code errors.
 ### Status, 2026-09-19: 10 of 11
 
 Done: 1 open the archive, 2 enumerate sheets, 3 parse relationships, 4 parse
