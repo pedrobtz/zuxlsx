@@ -120,3 +120,30 @@ Both are MIT.
 Only the reader side of each is linked in. Expat contributes its parser;
 miniz contributes DEFLATE and the ZIP reader. Neither library's own tests,
 utilities or build systems are involved.
+
+-------------------------------------------------------------------------------
+TF-PSA-Crypto (linked, not bundled)
+-------------------------------------------------------------------------------
+
+As with Expat and miniz, the source is not in this package but the object
+code is: zuxlsx links libzucrypt.a from zucrypt statically at install time,
+for the AES, SHA and HMAC that agile decryption of password-protected
+workbooks needs (design section 21c). An installed or binary zuxlsx therefore
+redistributes TF-PSA-Crypto, and Apache-2.0 section 4(a) requires its licence
+to travel with it.
+
+  TF-PSA-Crypto, from zucrypt
+      Copyright The Mbed TLS Contributors
+
+      Licence:   Apache-2.0 OR GPL-2.0-or-later, the recipient choosing;
+                 zucrypt takes it under Apache-2.0, and so does this package
+      Full text: inst/licenses/tf-psa-crypto-LICENSE, byte-identical to the
+                 copy zucrypt installs, which carries both licences as
+                 upstream ships them
+      Upstream:  https://github.com/Mbed-TLS/TF-PSA-Crypto
+      The source, its pinned release, the subset vendored and its patches
+      are recorded in zucrypt's COPYRIGHTS and tools/vendor/manifest.tsv.
+
+Apache-2.0 and MIT are compatible: the linked TF-PSA-Crypto code stays under
+Apache-2.0 and everything else here under MIT. Only its digests, HMAC and
+AES are called from here.

@@ -7,3 +7,10 @@
 #' @useDynLib zuxlsx, .registration = TRUE
 ## usethis namespace: end
 NULL
+
+# The DLL owns a reference to zucrypt's backend, taken in R_init_zuxlsx and
+# dropped in R_unload_zuxlsx. R runs the latter only when the DLL is unloaded,
+# and nothing unloads it unless the namespace asks.
+.onUnload <- function(libpath) {
+  library.dynam.unload("zuxlsx", libpath)
+}

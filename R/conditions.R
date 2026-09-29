@@ -124,6 +124,58 @@ zuxlsx_unwrap <- function(res, path = NULL, call = sys.call(-1L)) {
         "zuxlsx reads xlsx only."
       )
     ),
+    agile_password = list(
+      # Under zuxlsx_encrypted_error, so a handler that prompts for a password
+      # when none was given also prompts again when the one given was wrong.
+      # It is not an unsupported format: the file is readable, with the
+      # right password.
+      class = c("zuxlsx_password_error", "zuxlsx_encrypted_error"),
+      message = paste0(
+        "The password for '", path, "' is not correct.\n",
+        "The workbook's password verifier did not match. If the password is ",
+        "right, the file's encryption header is damaged; the two cannot be ",
+        "told apart."
+      )
+    ),
+    agile_integrity = list(
+      class = "zuxlsx_integrity_error",
+      message = paste0(
+        "'", path, "' failed its integrity check.\n",
+        "The password is correct, but the encrypted package does not match ",
+        "the HMAC stored with it: the file was damaged or altered after it ",
+        "was encrypted. Nothing was decrypted."
+      )
+    ),
+    agile_malformed = list(
+      class = "zuxlsx_integrity_error",
+      message = paste0(
+        "'", path, "' is a damaged encrypted workbook.\n",
+        "Its encryption parameters or its encrypted package are ",
+        "inconsistent, so it cannot be decrypted with any password."
+      )
+    ),
+    agile_unsupported = list(
+      # Not zuxlsx_encrypted_error: no password would help, so a handler that
+      # prompts for one must not catch it.
+      class = "zuxlsx_unsupported_format_error",
+      message = paste0(
+        "'", path, "' is encrypted with an algorithm zuxlsx does not ",
+        "implement.\n",
+        "zuxlsx decrypts agile encryption with AES in CBC mode and SHA-1 or ",
+        "SHA-2, which is what Excel has written since 2013."
+      )
+    ),
+    agile_password_utf8 = list(
+      class = "zuxlsx_input_error",
+      message = "`password` must be a single non-missing string of valid text."
+    ),
+    agile_crypto = list(
+      class = "zuxlsx_error",
+      message = paste0(
+        "The cryptographic backend failed while decrypting '", path, "' (",
+        res$value, ")."
+      )
+    ),
     sheet_not_found = list(
       class = "zuxlsx_sheet_error",
       message = paste0(

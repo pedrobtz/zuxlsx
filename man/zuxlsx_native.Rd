@@ -7,13 +7,15 @@
 zuxlsx_native()
 }
 \value{
-A list with elements \code{xlsxio}, \code{expat} and \code{miniz}.
+A list with elements \code{xlsxio}, \code{expat}, \code{miniz} and
+\code{tf_psa_crypto}. The last is \code{NA} if the cryptographic backend failed to
+start when the package loaded.
 }
 \description{
-zuxlsx vendors the 'xlsxio' reader and links 'Expat' and 'miniz' statically
-out of the \code{zuxml} and \code{zukomp} packages, through \code{LinkingTo}. This reports
-what it actually got, which is the quickest way to tell a stale build from
-a current one.
+zuxlsx vendors the 'xlsxio' reader and links 'Expat', 'miniz' and
+'TF-PSA-Crypto' statically out of the \code{zuxml}, \code{zukomp} and \code{zucrypt}
+packages, through \code{LinkingTo}. This reports what it actually got, which is
+the quickest way to tell a stale build from a current one.
 }
 \examples{
 zuxlsx_native()

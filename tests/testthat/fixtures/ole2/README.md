@@ -14,14 +14,19 @@ reproduces them byte for byte.
 
 ## Real, produced by `msoffcrypto-tool`
 
-`two-sheets-encrypted.xlsx` and the plaintext it was made from,
-`two-sheets-stored.xlsx`.
+`two-sheets-encrypted.xlsx`, `two-sheets-encrypted-utf16.xlsx`, and the
+plaintext both were made from, `two-sheets-stored.xlsx`.
 
-Genuinely Agile-encrypted, password `zuxlsx`. Committed as binaries rather
-than generated, because the encryption draws a random salt and a random
-content key: the file cannot be reproduced byte for byte, and pretending
-otherwise with a fixed seed would make it less like the files this package
-will actually meet, not more.
+Genuinely Agile-encrypted (AES-256, SHA-512, 100000 spins), password `zuxlsx`
+for the first and `zü✓🔑` (`"z\u00fc\u2713\U0001F511"`) for the second. That
+password is one-, two-, three- and four-byte UTF-8, and the last character is
+outside the BMP, so it only decrypts if the password is hashed as UTF-16LE
+with a surrogate pair -- which is what `test-agile.R` uses it to show.
+
+Committed as binaries rather than generated, because the encryption draws a
+random salt and a random content key: the file cannot be reproduced byte for
+byte, and pretending otherwise with a fixed seed would make it less like the
+files this package will actually meet, not more.
 
 `two-sheets-stored.xlsx` is `inst/extdata/two-sheets.xlsx` repacked with its
 parts *stored* rather than deflated. Same parts, same bytes, same reading —
@@ -38,6 +43,7 @@ zip -q -0 -X -r ../two-sheets-stored.xlsx . -x '.*'
 cd ..
 
 msoffcrypto-tool -e -p zuxlsx two-sheets-stored.xlsx two-sheets-encrypted.xlsx
+msoffcrypto-tool -e -p 'zü✓🔑' two-sheets-stored.xlsx two-sheets-encrypted-utf16.xlsx
 ```
 
 ### Do not shrink the plaintext below 4081 bytes
