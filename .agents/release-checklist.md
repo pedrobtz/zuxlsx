@@ -6,19 +6,21 @@ done before submission day.
 
 ## Blocked: the siblings must be on CRAN first
 
-`LinkingTo: zukomp, zuxml`, and **CRAN ignores `Remotes:`** -- it is a
-devtools and remotes field, not an R one. A submission made while those two
-are only on GitHub fails at incoming checks, before a human sees it, because
+`LinkingTo: zucrypt, zukomp, zuxml`, and **CRAN ignores `Remotes:`** -- it is a
+devtools and remotes field, not an R one. A submission made while any of the three
+is only on GitHub fails at incoming checks, before a human sees it, because
 the declared dependencies cannot be installed from CRAN.
 
-So the order is fixed: `zuxml` and `zukomp` are accepted, then zuxlsx is
-submitted. Nothing in this package can shorten that.
+So the order is fixed: `zuxml`, `zukomp` and `zucrypt` are accepted, then
+zuxlsx is submitted. zucrypt joined the list on 2026-09-29, when decryption
+moved into 0.1.0 (design §21c); zucrypt freezes its ABI 1 on this package's
+`src/agile.c` (pedrobtz/zucrypt#43). Nothing in this package can shorten that.
 
 Check with:
 
 ```r
 p <- rownames(available.packages(repos = "https://cloud.r-project.org"))
-c("zuxml", "zukomp") %in% p
+c("zuxml", "zukomp", "zucrypt") %in% p
 ```
 
 ## Do these on submission day, not before
@@ -48,12 +50,14 @@ The first two break the GitHub install path, so they are last.
    All three at 0 errors, 0 warnings, and no NOTE beyond "New submission".
 
 This whole file is Stage 10 of [roadmap.md](roadmap.md), which also requires
-Stages 8 (hardening) and 9 (API freeze) to be closed first.
+Stages 8 (hardening) and 9 (API freeze) to be closed first. Stage 11
+(password-protected workbooks) is complete apart from what it handed to
+Stage 8.
 
 ## Already done
 
-- `inst/COPYRIGHTS` covers every copyright holder, including Expat and miniz,
-  which are linked statically and so redistributed in the built package even
+- `inst/COPYRIGHTS` covers every copyright holder, including Expat, miniz and
+  TF-PSA-Crypto, which are linked statically and so redistributed in the built package even
   though their source is not here. Full texts are installed under
   `inst/licenses/`.
 - `cran-comments.md` explains the `LinkingTo`-without-`Imports:` arrangement,
@@ -71,7 +75,8 @@ Stages 8 (hardening) and 9 (API freeze) to be closed first.
 - `tools/vendor/verify` and `tools/fixtures/make-extdata.R --check`, so the
   vendored tree and the generated fixture still match what is recorded.
 - That the siblings' *CRAN* builds install the archives where `configure`
-  looks: `lib/libzuxml.a` for zuxml, `lib${R_ARCH}/libzukomp.a` for zukomp.
+  looks: `lib/libzuxml.a` for zuxml, `lib${R_ARCH}/libzukomp.a` for zukomp,
+  `lib/libzucrypt.a` for zucrypt.
   `configure` names no sibling version and must not -- zuxml 0.1.0 exists both
   with and without the archive, so it checks for the file -- and it asks for
   `lib/<r_arch>` before plain `lib/`, which is right for either convention.

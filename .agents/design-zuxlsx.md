@@ -201,9 +201,11 @@ ever showed up there. `configure` asks for `lib/<r_arch>` first and falls back
 to `lib/`, so it is right for either convention.
 
 `zuxlsx` therefore has a `configure` + `src/Makevars.in` pair. `Remotes:`
-tracks both repositories at `@main` (commit 300cffa), deliberately and not as
-a version pin, because they are not on CRAN; it must be dropped on submission
-day, not before (`release-checklist.md`).
+tracks the repositories at `@main` (commit 300cffa; zucrypt joined in #64),
+deliberately and not as a version pin, because none is on CRAN; it must be
+dropped on submission day, not before (`release-checklist.md`). zucrypt's
+archive is the third, `<pkg>/lib/libzucrypt.a` with `zucrypt.h`, resolved the
+same way (section 21d).
 
 Verified against the vendored reader in this repo: xlsxio compiles against
 those installed headers, links both archives, and reads the fixtures in
@@ -341,11 +343,12 @@ zuxlsx/
 The layout above is the proposal, not the package. There is no
 `xlsxio_miniz.c`: the miniz backend is patch 0001, inline in `xlsxio_read.c`
 (section 5's status says why), and it is one of seven patches rather than the
-only compatibility layer. The native layer is `src/init.c` plus a single
+only compatibility layer. The native layer is `src/init.c` and
 `src/zuxlsx.c` -- every `.Call` entry point, the cell reader, the column
-builders and the OLE2 and xlsb classifiers -- with xlsxio under
-`src/vendor/xlsxio/{include,lib}`. The R side is `R/{cells,conditions,range,
-read-cells,read,rows,sheets}.R`.
+builders and the OLE2 and xlsb classifiers -- plus, since 2026-09-29,
+`src/cfb.c`, `src/encinfo.c` and `src/agile.c` for decryption (sections 21d
+to 21g), with xlsxio under `src/vendor/xlsxio/{include,lib}`. The R side is
+`R/{cells,cfb,conditions,decrypt,range,read-cells,read,rows,sheets}.R`.
 
 ---
 
@@ -890,7 +893,7 @@ zuxlsx_sheet_error
 zuxlsx_type_error
 ```
 
-### Status, 2026-09-18, extended to 2026-09-22: eight classes are raised
+### Status, 2026-09-18, extended to 2026-09-29: ten classes are raised
 
 `R/conditions.R` implements the nesting -- every class above is followed by
 `zuxlsx_error`, so `tryCatch(zuxlsx_error = ...)` catches all of them -- and
@@ -904,15 +907,18 @@ conditions carry the offending `path`. Implemented:
 | `zuxlsx_ooxml_error` | the archive opened and its XML parses, but it declares no worksheets |
 | `zuxlsx_sheet_error` | the workbook opened, but has no such worksheet |
 | `zuxlsx_unsupported_format_error` | an `.xlsb`, a legacy `.xls`, or another OLE2 container (section 21a) |
-| `zuxlsx_encrypted_error` | an encrypted workbook; a subclass of `zuxlsx_unsupported_format_error` |
+| `zuxlsx_encrypted_error` | an encrypted workbook read without a password; a subclass of `zuxlsx_unsupported_format_error` |
+| `zuxlsx_password_error` | the password does not open it; a subclass of `zuxlsx_encrypted_error` (section 21d) |
+| `zuxlsx_integrity_error` | the HMAC does not match, or the encryption parameters or package are inconsistent (section 21d) |
 | `zuxlsx_memory_error` | an allocation failed while reading |
 
-`zuxlsx_input_error`, `zuxlsx_memory_error` and
-`zuxlsx_unsupported_format_error` are additions to the list above.
-Decryption adds two more, `zuxlsx_password_error` and
-`zuxlsx_integrity_error`; see sections 21d and 21g.
-`zuxlsx_sheet_error` arrived with `xlsx_cells()`, and `zuxlsx_xml_error` is
-raised as of 2026-09-19, naming the offending part and line.
+`zuxlsx_input_error`, `zuxlsx_memory_error`,
+`zuxlsx_unsupported_format_error` and `zuxlsx_encrypted_error` are additions
+to the list above, and decryption added `zuxlsx_password_error` and
+`zuxlsx_integrity_error` (sections 21d and 21g). `zuxlsx_sheet_error` arrived
+with `xlsx_cells()`, and `zuxlsx_xml_error` is raised as of 2026-09-19. A
+status the R layer does not recognise is itself raised, as a bare
+`zuxlsx_error`.
 
 `zuxlsx_xml_error` covers the two parts it names and nothing else. A worksheet
 that stops being well-formed half way through currently ends the read early
@@ -1528,9 +1534,11 @@ that they stay so.
 
 Two things remain. `inst/COPYRIGHTS`'s own account of the xlsxio patches is
 stale -- it still opens with "two local patches ... Neither is upstream" above
-a list of seven (#48). And when #22 links zucrypt's archive, TF-PSA-Crypto
-(Apache-2.0, taken by zucrypt under that option of its dual licence) is
-redistributed too, and needs the same treatment in the same commit.
+a list of seven (#48). TF-PSA-Crypto (Apache-2.0, taken by zucrypt under
+that option of its dual licence) has been redistributed since #64 linked
+zucrypt's archive, and got the same treatment in that commit:
+`inst/licenses/tf-psa-crypto-LICENSE`, recorded in `inst/COPYRIGHTS`
+(section 21d).
 
 ---
 
@@ -1765,7 +1773,19 @@ What remains, in order:
   `zuxlsx_unsupported_format_error`, not in "declares no worksheets".
 - **Licensing:** TF-PSA-Crypto becomes redistributed code (section 20).
 - **Release order:** `zucrypt` must be on CRAN before a zuxlsx release that
-  links it, which is why the roadmap puts this in 0.2.0 rather than 0.1.0.
+  links it. *(This is why decryption was first put in 0.2.0; the revision
+  below moves it into 0.1.0, with zucrypt's release as the blocker.)*
+
+*Settled, 2026-09-29, by sections 21d to 21g:* the API is `password =` on all
+five readers; the password is converted to UTF-16LE in C, strictly; the spin
+count is capped at the specification's 10,000,000, and the lower, configurable
+caps on it and on the decrypted size are #26's; an encrypted `.xlsb` and a
+broken part inside the plaintext are diagnosed as such, because the
+classifiers now take a buffer as well as a path; TF-PSA-Crypto's licence is
+installed (section 20). Of the five steps above, 1 to 3 and 5 are done and 4
+(the HMAC) runs before any plaintext exists; #25 is now only the public
+read-from-memory API. What decryption still hands to the roadmap's Stage 8:
+#26, #45, and #68 (each read decrypts twice, section 21g).
 
 **The conflict with `zucrypt`, resolved on its side.** `zucrypt`'s design
 section 13 planned a Standard (AES-ECB, SHA-1) integration to follow this
@@ -2028,7 +2048,7 @@ now reachable from exported functions and documented in
 worksheets through `C_xlsx_sheets` before every read, to check a name or map
 a position, and each call decrypts. On the fixture that is 140 ms instead of
 70, almost all of it the spin loop. Resolving the sheet in C, in the same
-call that reads it, removes it; that is a follow-up rather than part of this.
+call that reads it, removes it; that is #68, not part of this.
 
 **Testing.** The msoffcrypto-tool fixtures prove every reader returns
 exactly what it returns for the plaintext. `agile_encrypt()` in
@@ -2037,41 +2057,6 @@ from zucrypt's R functions -- not independent of the decryptor, so it proves
 plumbing, never the scheme -- which reaches an encrypted `.xlsb`, a broken
 part, a package that is not a ZIP, one spanning many segments, and the
 callback reader holding the plaintext while R code errors.
-### Status, 2026-09-19: 10 of 11
-
-Done: 1 open the archive, 2 enumerate sheets, 3 parse relationships, 4 parse
-shared strings, 5 stream worksheet XML, 6 emit rows and cells, 7 build an R
-`data.frame`, 8 basic scalar cell types, 9 dates and datetimes including both
-epochs, 10 structured errors.
-
-Partial: 11 the corpus -- `valid/`, `unusual-valid/`, `invalid/` and
-`hostile/` are all covered, and the committed workbooks are asserted on
-content rather than only on opening. Outstanding are `strict_ooxml.xlsx` and
-`zip64.xlsx`, which need a real producer, and the external corpora of 17.1 to
-17.3, which remain an open decision.
-
-Known limitations rather than missing items: column building is a post-pass
-rather than streaming (section 14), `xlsx_read_cells()` is unimplemented
-(section 12), and `zuxlsx_xml_error` and `zuxlsx_type_error` remain unraised
-(section 15).
-
-### Status, 2026-09-21: 11 of 11
-
-Item 11 is done too. The corpus question resolved both ways: the shaped cases
-of 17.4 are built inside the tests that need them rather than committed
-(`test-valid.R`, `test-unusual.R`, `test-malformed.R`, `test-hostile.R`), and
-the external corpora of 17.1 to 17.3 are answered by `tools/corpus/` -- 352
-Apache POI workbooks, fetched rather than committed, run in CI against a
-recorded outcome per file. `strict_ooxml.xlsx` and `zip64.xlsx` no longer need
-a real producer: strict OOXML is written by `strict_workbook_parts()` and read
-via `0006-strict-ooxml-relationship-types`, and ZIP64 archives have their own
-tests.
-
-Of the limitations listed above, only one still holds: column building is
-still a post-pass. `xlsx_read_cells()` shipped, and `zuxlsx_xml_error` is
-raised with the part and line. `zuxlsx_type_error` is still unraised and
-probably always will be -- a column that cannot hold its cells becomes
-character rather than failing.
 
 ---
 

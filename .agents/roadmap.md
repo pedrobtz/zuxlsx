@@ -4,7 +4,9 @@ Status: retroactive. Written 2026-09-22 from the git history and
 [design-zuxlsx.md](design-zuxlsx.md), after the fact for Stages 0 to 7: those
 stages were done before this file existed, so their exit criteria are the ones
 the merged pull requests actually met, not ones that were set in advance.
-Stages 8 to 10 are the plan from here.
+Stages 8 to 10 are the plan from here. Stage 11, password-protected
+workbooks, was built between Stage 7 and Stage 8 and is recorded after
+Stage 10, out of order; the closing review says what that cost.
 
 The siblings (`zukomp`, `zuxml`, `zucrypt`, `zuhttp`) each have a roadmap of
 this shape. zuxlsx had none, and section **Review 2026-09-22** at the end
@@ -25,11 +27,13 @@ records what that cost.
 ## Scope of v0.1.0
 
 Read `.xlsx` worksheets from a path into data frames and cells, with classed
-errors, both date epochs, and no run-time dependency on any sibling.
+errors, both date epochs, agile-encrypted workbooks opened with a password
+(#22, in 0.1.0 since 2026-09-29 -- §21c), and no run-time dependency on any
+sibling.
 
-Out of v0.1.0: writing workbooks; `.xlsb` (#23); decrypting an encrypted
-workbook (#22, targeted at 0.2.0); reading from memory (#25); formula text
-(§21).
+Out of v0.1.0: writing workbooks; `.xlsb` (#23); standard and extensible
+encryption (§21f); formula text (§21). Reading from memory as a public API
+(#25) is decided in Stage 9.
 
 | Stage | Status |
 |---|---|
@@ -43,7 +47,8 @@ workbook (#22, targeted at 0.2.0); reading from memory (#25); formula text
 | Stage 7 — Streaming reader and C column builders | complete |
 | Stage 8 — Hardening | open |
 | Stage 9 — API freeze and docs | open |
-| Stage 10 — CRAN release | open, blocked on zuxml and zukomp reaching CRAN |
+| Stage 10 — CRAN release | open, blocked on zuxml, zukomp and zucrypt reaching CRAN |
+| Stage 11 — Password-protected workbooks | complete, built out of order; three criteria carried to Stage 8 (#26, #45, #68) |
 
 ---
 
@@ -177,6 +182,20 @@ a classed condition, promptly, and never in plausible partial data.
       floor (#44).
 - [ ] `inst/COPYRIGHTS` describes the seven patches it lists (#48).
 
+Carried here from Stage 11, since decryption shipped before the hardening it
+depends on (§21c, revised 2026-09-29):
+
+- [ ] Configurable caps on the spin count and on the decrypted package size,
+      with the other limits (#26). The specification's ceiling of 10,000,000
+      iterations bounds a hostile file at about seven seconds today (§21d).
+- [ ] An encrypted workbook is decrypted once per read, not once to resolve
+      the sheet and again to read it (#68).
+- [ ] `src/cfb.c`, `src/encinfo.c` and `src/agile.c` run under #45's fuzzer.
+      The ad-hoc campaigns in §21e and §21f (truncations plus 160,000 and
+      100,000 damaged copies) are not in `tools/fuzz/` and are not repeatable.
+- [ ] The suite runs with no R warning: `test-agile.R` emits two from a
+      double modulus above 2^53 in `with_length()` (#70).
+
 ## Stage 9 — API freeze and docs
 
 **Status:** open. The documentation refreshes in #35, #36 and #37 describe
@@ -190,48 +209,79 @@ the package as it is; what remains is the public surface itself.
       fate of `zuxlsx_type_error` decided either way.
 - [ ] A decision on `na`, `skip` and `n_max` for `read_xlsx()`, recorded in
       §12.
+- [ ] Reading a workbook from memory (#25) is either exported or explicitly
+      deferred. The C side already works over a buffer -- decryption needs
+      it (§21e, §21g) -- so what is left is the R surface.
+- [ ] The family table at the end of the design says zucrypt has a consumer
+      and that 0.1.0 links all three archives (#69). It changes in all five
+      repositories together, or not at all.
 - [ ] A getting-started article (#29).
 - [ ] The user-facing docs that describe an older package are corrected (#48).
 
 ## Stage 10 — CRAN release
 
-**Status:** open, blocked on zuxml and zukomp reaching CRAN. The paperwork
-that could be done early was: #14 (9f113a2).
+**Status:** open, blocked on zuxml, zukomp and zucrypt reaching CRAN. The
+paperwork that could be done early was: #14 (9f113a2).
 
 The steps, and why their order is fixed, are in
 [release-checklist.md](release-checklist.md). In short:
 
-- [ ] zuxml and zukomp are on CRAN, and their CRAN builds install the static
-      archives.
+- [ ] zuxml, zukomp and zucrypt are on CRAN, and their CRAN builds install
+      the static archives. zucrypt's ABI 1 is frozen on this package's
+      `src/agile.c` (pedrobtz/zucrypt#43), so its release is the last of the
+      three.
 - [ ] Stages 8 and 9 are closed.
 - [ ] On submission day: `Remotes:` dropped, README install switched,
       `R CMD check --as-cran` re-run after the edit, plus win-builder and a
       CRAN-like container, all 0/0/0.
 - [ ] Tag v0.1.0 and submit.
 
+## Stage 11 — Password-protected workbooks
+
+**Status:** complete, built out of order. It was done between Stage 7 and
+Stage 8, on 2026-09-29, and is numbered after Stage 10 so the earlier stages'
+anchors stay stable. §21c (revised 2026-09-29) records why the order was
+chosen: zucrypt freezes its ABI 1 on the code that calls it
+(pedrobtz/zucrypt#43), so the decryption core came first.
+
+Evidence: #64 (2848e44: `src/agile.c` over `libzucrypt.a`, §21d), #65
+(8d9ddca: `src/cfb.c`, §21e), #66 (069c860: `src/encinfo.c`, §21f), #67
+(1925d8c: `password =` on every reader, §21g). Design §21c planned steps 1
+to 5; step 4, the HMAC, is inside step 3.
+
+- [x] The HMAC over `EncryptedPackage` is verified before any plaintext
+      exists, and a wrong password, a damaged package and an unsupported
+      scheme are three different conditions (§21d, §21f).
+- [x] The password is converted to UTF-16LE in C, strictly, and a fixture
+      with a non-BMP character proves it (§21d).
+- [x] Standard, extensible and certificate-only encryption are refused by
+      name, as `zuxlsx_unsupported_format_error` (§21f).
+- [x] The plaintext is never an R object and never on disk, and is wiped
+      when the read ends, including across `xlsx_read_cells()` callbacks
+      (§21g).
+- [x] TF-PSA-Crypto's licence is installed and recorded (§20).
+- [x] Every reader returns for the encrypted fixtures exactly what it
+      returns for the plaintext (`test-password.R`).
+
+Carried to Stage 8: #26, #45, #68. Carried to Stage 9: #25, #69.
+
 ---
 
 ## After v0.1.0
 
-**0.2.0 — agile decryption (#22).** Needs, in this repository: reading from
-memory (#25), documented resource limits including the spin count and the
-decrypted size (#26), and the fuzzed native C of #45, since the CFB stream
-reader extends the classifier it covers. Needs from zucrypt: its static
-archive linked as a third archive, and zucrypt on CRAN before zuxlsx 0.2.0 is
-submitted. And, from design §21c: payload integrity (HMAC) verified before any
-plaintext reaches the ZIP reader, and a password API. Standard (ECB)
-encryption stays out of scope; pedrobtz/zucrypt#29 removes the ECB it no
-longer needs.
+Nothing is scheduled for a 0.2.0. Agile decryption, which this section used
+to hold, is Stage 11 of 0.1.0. Standard (ECB) encryption stays out of scope;
+pedrobtz/zucrypt#29 removes the ECB it no longer needs.
 
 **Unscheduled:**
 
-- #15 — detect a stale static link, including `libzucrypt.a` once it is
-  linked.
+- #15 — detect a stale static link, now for three archives including
+  `libzucrypt.a`.
 - #24 — ZIP archives with no central directory. Likely won't-fix: §17.3a
   records the refusal as correct, and reading local headers conflicts with the
   rule that the first central-directory entry wins for a duplicated part.
 - #23 — `.xlsb`. Icebox: it needs its own design section and cannot be built
-  on xlsxio.
+  on xlsxio; #63 evaluates cxlsb as the vendored reader, after 0.1.0.
 - #28; #30 and #31 together; #32 (which depends on #46).
 
 **Watched in other repositories:** pedrobtz/zukomp#37 (hostile coverage of the
@@ -269,6 +319,13 @@ which will build zuxlsx at `@main` in their CI.
   (#38, #40, #41) are in xlsxio's worksheet code. §22 now records the trigger
   for replacing that parser with one of this package's own: ten patches, or
   the first upstream bump that does not apply cleanly.
+- **Decryption shipped before the hardening it depends on.** #64 to #67
+  landed on 2026-09-29 with Stage 8 still open, and three of §21c's own
+  prerequisites (#26, #45 and now #68) open with it. The reason was a good
+  one -- zucrypt freezes its ABI on this code -- but it is the same pattern
+  as the first bullet: scope moved into 0.1.0 without its exit criteria
+  moving with it. Stage 11 is numbered out of order so that the record shows
+  it, and Stage 8 now carries the criteria it handed over.
 - **Tracking the siblings at `@main` means CI never builds what CRAN will.**
   It cost one Windows break (fixed in c7dd57f the same day), and after the
   siblings reach CRAN it needs a leg against their CRAN releases, with `@main`
