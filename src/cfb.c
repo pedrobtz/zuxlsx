@@ -118,10 +118,16 @@ static cfb_status fat_chain(const cfb *c, uint32_t start, uint64_t want,
   return CFB_OK;
 }
 
+/* Directory entry i, or NULL if there is no such entry or its sector is
+   unreadable. */
 static const uint8_t *entry_at(const cfb *c, uint32_t i) {
   uint32_t per = c->sector_size / CFB_ENTRY;
+  const uint8_t *p;
+
   if ((uint64_t) i >= (uint64_t) c->n_dir_sectors * per) return NULL;
-  return sector_at(c, c->dir_sectors[i / per]) + (size_t) (i % per) * CFB_ENTRY;
+  p = sector_at(c, c->dir_sectors[i / per]);
+  if (p == NULL) return NULL;
+  return p + (size_t) (i % per) * CFB_ENTRY;
 }
 
 /* A version 3 file may leave garbage in the size's high 32 bits, and a
@@ -206,7 +212,7 @@ cfb_status cfb_open(cfb *c, const uint8_t *buf, size_t len) {
   if (st != CFB_OK) goto fail;
   if (c->n_dir_sectors == 0) goto malformed;
   root = entry_at(c, 0);
-  if (root[0x42] != 5) goto malformed;
+  if (root == NULL || root[0x42] != 5) goto malformed;
 
   /* The miniFAT, and the mini stream: the root entry's chain, as long as its
      size says -- which the buffer must be able to back. */
@@ -259,9 +265,14 @@ static cfb_status find_at_root(const cfb *c, const char *name, const uint8_t **f
   uint32_t *stack;
   size_t top = 0;
   cfb_status st = CFB_NOT_FOUND;
-  uint32_t child = rd32(entry_at(c, 0) + 0x4C);
+  const uint8_t *root = entry_at(c, 0);
+  uint32_t child;
 
   *found = NULL;
+  /* cfb_open() has already refused a file without one; this keeps the
+     dereference below from depending on that. */
+  if (root == NULL) return CFB_MALFORMED;
+  child = rd32(root + 0x4C);
   /* Ids are 32-bit, and NOSTREAM is one of them. */
   if (n_entries >= CFB_NOSTREAM) return CFB_MALFORMED;
   seen = calloc((size_t) n_entries, 1);

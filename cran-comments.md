@@ -12,13 +12,14 @@ Through GitHub Actions, using the reusable workflows in
 * macOS, Windows and Ubuntu, R release
 * Windows, R devel
 * Ubuntu, R oldrel-1 and R 4.1 (the minimum in `Depends:`)
-* the r-devel Linux containers (clang and gcc)
+* the r-devel Linux containers `clang23`, `ubuntu-clang` and `ubuntu-gcc16`
 * `nosuggests`: the suite with no suggested package installed
-* AddressSanitizer/UBSan, valgrind, rchk, gctorture and LTO builds
-* CRAN's additional checks, including a run in a non-UTF-8 locale
+* AddressSanitizer and UBSan (gcc and clang), valgrind, rchk, gctorture, LTO
+  and gcc's `-fanalyzer`
+* CRAN's additional checks: rcnst, rlibro and vnu
 
 And locally on macOS with R 4.5.2, `--as-cran`, against the CRAN releases of
-zuxml, zukomp and zucrypt.
+zuxml, zukomp and zucrypt, in the C, ISO-8859-1 and UTF-8 locales.
 
 ## Dependencies
 

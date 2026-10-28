@@ -3,8 +3,9 @@
 # and src/encinfo.c parse untrusted input and hold key material, so ASan,
 # valgrind and rchk matter here more than the R CMD check matrix does.
 #
-# cran-special includes the non-UTF-8 locale run that would have caught the
-# test password fixed in #72.
+# cran-special is rcnst, rlibro and vnu. None of these runs in a locale that is
+# not UTF-8, so that (#72) is still checked by hand; see
+# .agents/release-checklist.md.
 on:
   push:
     branches: [main, master]

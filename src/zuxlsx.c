@@ -488,22 +488,22 @@ done:
 
 /* What a reader should open. For anything but an OLE2 container, the file,
    and *plain stays NULL. For an encrypted package with a password, its
-   plaintext, owned by `holder`. Otherwise the status to report -- with a
-   detail in *detail for a cryptographic backend failure, which the caller
-   must protect.
+   plaintext, owned by `holder`. Otherwise the status to report, with the
+   backend's own status in *crypto for a cryptographic failure; see
+   source_detail().
 
-   Called before any reader is open: it allocates R memory when it fails. */
+   It hands back a C status rather than a SEXP so that the callers' detail
+   is never address-taken, which is what rchk needs to follow it. */
 static const char *resolve_source(const char *file, SEXP password, SEXP holder,
-                                  SEXP *detail) {
+                                  zuc_status *crypto) {
   plain_buf *b = (plain_buf *) R_ExternalPtrAddr(holder);
   ole2_kind_t kind = ole2_kind(file);
   uint8_t *bytes = NULL;
   size_t len = 0;
-  zuc_status crypto = ZUC_OK;
   const char *status;
   int rc;
 
-  *detail = R_NilValue;
+  *crypto = ZUC_OK;
   if (kind == OLE2_NO) return NULL;
   /* A password changes nothing for a legacy .xls or an unknown container,
      and without one an encrypted package is still only reported. */
@@ -515,12 +515,16 @@ static const char *resolve_source(const char *file, SEXP password, SEXP holder,
   rc = read_file(file, &bytes, &len);
   if (rc <= 0) return rc < 0 ? STATUS_MEMORY : STATUS_ZIP_OPEN;
   status = decrypt_package(bytes, len, CHAR(STRING_ELT(password, 0)),
-                           &b->data, &b->len, &crypto);
+                           &b->data, &b->len, crypto);
   free(bytes);
-  if (status == STATUS_AGILE_CRYPTO) {
-    *detail = Rf_mkString(zuc_status_name(crypto));
-  }
   return status;
+}
+
+/* The detail a resolve_source() failure is reported with: the backend's
+   status name for a cryptographic failure, nothing otherwise. Allocates. */
+static SEXP source_detail(const char *status, zuc_status crypto) {
+  return status == STATUS_AGILE_CRYPTO ? Rf_mkString(zuc_status_name(crypto))
+                                       : R_NilValue;
 }
 
 static SEXP make_plain_holder(void) {
@@ -640,6 +644,7 @@ SEXP C_xlsx_sheets(SEXP path, SEXP password) {
   plain_buf *plain;
   xlsxioreader reader;
   SEXP bag, holder, detail, out, res;
+  zuc_status crypto;
   size_t i;
 
   /* R validates the argument before calling, but the registered symbol is
@@ -668,9 +673,9 @@ SEXP C_xlsx_sheets(SEXP path, SEXP password) {
   /* An OLE2 container will not open as a ZIP, so this has to be asked before
      the reader is handed the path or the answer is "corrupt archive". With a
      password, an encrypted one is decrypted here instead. */
-  status = resolve_source(file, password, holder, &detail);
+  status = resolve_source(file, password, holder, &crypto);
   if (status != NULL) {
-    PROTECT(detail);
+    detail = PROTECT(source_detail(status, crypto));
     sheet_list_finalizer(bag);
     plain_buf_finalizer(holder);
     res = result(status, detail);
@@ -983,6 +988,7 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet, SEXP password) {
   plain_buf *plain;
   const char *status;
   SEXP bag, holder, detail, out, res;
+  zuc_status crypto;
   size_t i;
   size_t rownr = 0;
   int date1904 = 0;
@@ -1009,9 +1015,9 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet, SEXP password) {
     return result(STATUS_MEMORY, R_NilValue);
   }
 
-  status = resolve_source(file, password, holder, &detail);
+  status = resolve_source(file, password, holder, &crypto);
   if (status != NULL) {
-    PROTECT(detail);
+    detail = PROTECT(source_detail(status, crypto));
     cell_list_finalizer(bag);
     plain_buf_finalizer(holder);
     res = result(status, detail);
@@ -1103,6 +1109,7 @@ SEXP C_xlsx_read_cells(SEXP path, SEXP sheet, SEXP callback, SEXP env,
   reader_handle *handle;
   plain_buf *plain;
   SEXP bag, holder, source, detail, res;
+  zuc_status crypto;
   size_t limit;
   size_t rownr = 0;
   int date1904 = 0;
@@ -1127,9 +1134,9 @@ SEXP C_xlsx_read_cells(SEXP path, SEXP sheet, SEXP callback, SEXP env,
     UNPROTECT(1);
     return result(STATUS_MEMORY, R_NilValue);
   }
-  status = resolve_source(file, password, source, &detail);
+  status = resolve_source(file, password, source, &crypto);
   if (status != NULL) {
-    PROTECT(detail);
+    detail = PROTECT(source_detail(status, crypto));
     plain_buf_finalizer(source);
     res = result(status, detail);
     UNPROTECT(2);
@@ -1282,6 +1289,7 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
   plain_buf *plain;
   const char *status;
   SEXP bag, holder, detail, out, res, r_cols, r_header, r_isdate;
+  zuc_status crypto;
   size_t i;
   size_t rownr = 0;
   int date1904 = 0;
@@ -1319,9 +1327,9 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
     UNPROTECT(1);
     return result(STATUS_MEMORY, R_NilValue);
   }
-  status = resolve_source(file, password, holder, &detail);
+  status = resolve_source(file, password, holder, &crypto);
   if (status != NULL) {
-    PROTECT(detail);
+    detail = PROTECT(source_detail(status, crypto));
     plain_buf_finalizer(holder);
     res = result(status, detail);
     UNPROTECT(2);
