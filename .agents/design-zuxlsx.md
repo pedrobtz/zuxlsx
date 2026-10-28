@@ -192,9 +192,10 @@ this section.** Both changes are merged:
   symbol and its ABI test is untouched.
 
 `zuxlsx` therefore has a `configure` + `src/Makevars.in` pair, and
-`DESCRIPTION` pins neither package to a branch. `Remotes:` still names both
-repositories, because they are not on CRAN; it must be dropped before any CRAN
-submission.
+`DESCRIPTION` pins neither package to a branch. `Remotes:` named all three
+sibling repositories until they reached CRAN (zukomp, zucrypt and zuxml 0.1.0,
+October 2026); it was dropped for the CRAN submission, and the siblings now
+resolve from CRAN.
 
 Verified against the vendored reader in this repo: xlsxio compiles against
 those installed headers, links both archives, and reads the fixtures in
@@ -1794,6 +1795,13 @@ message that says to pass one. With a password, `resolve_source()` in
 (`decrypt_package()`), and the reader opens the plaintext with
 `xlsxioread_open_memory()`, which patch 0001 already implements on
 `mz_zip_reader_init_mem()`. No patch was needed.
+
+`resolve_source()` reports a cryptographic backend failure as a C
+`zuc_status`, and each entry point turns it into the condition's detail with
+`source_detail()`. It handed back a `SEXP *` at first, and rchk cannot follow
+a `SEXP` whose address is taken: it skipped the variable in all four entry
+points and called its own result incomplete (found 2026-10-28, when CI moved
+onto r-actions).
 
 **The plaintext never becomes an R object and never touches the disk.** It
 lives in `malloc`'d memory owned by an external pointer whose finalizer wipes
