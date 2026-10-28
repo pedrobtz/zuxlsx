@@ -42,8 +42,8 @@ data frame with no columns and no rows.
 }
 \description{
 Reads a worksheet and assembles its cells into columns, giving each column
-the type its cells support. This is the high-level reader; \code{\link[=xlsx_cells]{xlsx_cells()}} is
-the cell-by-cell view underneath it.
+the type its cells support. This is the high-level reader; \code{\link[=xlsx_cells]{xlsx_cells()}}
+gives the same worksheet cell by cell.
 }
 \details{
 A worksheet may leave a row out of its XML rather than write an empty one.

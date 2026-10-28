@@ -17,7 +17,7 @@ What is exported:
 - `xlsx_rows(path, sheet = 1, password = NULL)` — a worksheet row by row as text, padded so the nth element of each row is the nth column.
 - `xlsx_read_cells(path, sheet = 1, callback, chunk_size = 10000L, password = NULL)` — chunked streaming read; returning `FALSE` stops it. **The only entry point that calls R while the archive and the parser are open**, which is why both are owned by external pointers with registered finalizers rather than by the C stack.
 - `xlsx_sheets(path, password = NULL)` — worksheet names, in workbook order.
-- `zuxlsx_native()` — reports `xlsxio` 0.2.36, `expat_2.8.4`, miniz `11.3.2`, TF-PSA-Crypto `1.1.1`. It calls `XML_ExpatVersion()` and `zuc_get_info()` rather than reading macros, so a header on the include path without the archive behind it fails at link time.
+- `zuxlsx_native()` — reports `xlsxio` 0.2.36, `expat_2.8.4`, miniz `11.3.2`, TF-PSA-Crypto `1.1.1`. It calls `XML_ExpatVersion()`, `mz_version()` and `zuc_get_info()` rather than reading macros, so a header on the include path without the archive behind it fails at link time.
 
 Both Excel epochs are handled, chosen per workbook by `date1904`, and the 1900 system's phantom 29 February is accounted for: serial 60 is `NA`, serial 61 is 1 March 1900. Errors are ten classed conditions under `zuxlsx_error` — see `?"zuxlsx-conditions"` and design §15. A legacy `.xls` (OLE2, not ZIP), an `.xlsb` and a non-agile encrypted workbook are reported as `zuxlsx_unsupported_format_error` rather than as damage; an encrypted workbook read without a password is `zuxlsx_encrypted_error`.
 

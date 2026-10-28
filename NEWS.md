@@ -26,6 +26,16 @@ so an installed zuxlsx has no run-time dependency on any of them.
 * `xlsx_sheets()` lists worksheets, and `zuxlsx_native()` reports the
   'xlsxio', 'Expat', 'miniz' and 'TF-PSA-Crypto' versions actually linked in.
 
+## Workbooks as they are written
+
+* Strict OOXML ("Strict Open XML Spreadsheet") reads as transitional OOXML
+  does, part names are matched as OOXML consumers match them -- ignoring
+  case and backslashes -- and ZIP64 archives open.
+
+* A shared-string table written with a namespace prefix (`<x:sst>`) is read,
+  an empty string in it no longer shifts every later string by one, and an
+  index written with whitespace around it resolves.
+
 ## Password-protected workbooks
 
 * Every reader takes `password =`, and reads a workbook protected with agile

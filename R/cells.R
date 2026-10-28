@@ -1,6 +1,5 @@
-# The cell type codes C_xlsx_cells returns, in the order design section 13
-# lists them. Kept in one place; must match the ZU_CELL_* enum in
-# src/zuxlsx.c, which test-cells.R checks.
+# The cell type codes C_xlsx_cells returns, indexed by the ZU_CELL_* enum in
+# src/zuxlsx.c. Kept in one place; test-cells.R checks the two agree.
 CELL_TYPES <- c("blank", "number", "string", "boolean", "error", "date")
 
 #' Read the cells of a worksheet

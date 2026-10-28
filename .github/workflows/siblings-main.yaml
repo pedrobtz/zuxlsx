@@ -1,0 +1,36 @@
+# A canary, not a gate: R CMD check against the siblings' development
+# versions on GitHub, weekly. Every other job builds against the CRAN
+# releases. A failure here is a sibling change zuxlsx will meet at the
+# siblings' next release -- worth knowing early, not worth blocking a pull
+# request for (#44).
+on:
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+name: siblings-main.yaml
+
+permissions: read-all
+
+jobs:
+  siblings-main:
+    runs-on: ubuntu-latest
+    name: against zuxml, zukomp and zucrypt main
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: >-
+            github::pedrobtz/zuxml,
+            github::pedrobtz/zukomp,
+            github::pedrobtz/zucrypt,
+            any::rcmdcheck
+          needs: check
+      - uses: r-lib/actions/check-r-package@v2
+        with:
+          build_args: 'c("--no-manual")'

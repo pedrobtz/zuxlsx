@@ -4,9 +4,9 @@
  *   C_xlsx_cells      a whole worksheet as parallel cell vectors
  *   C_xlsx_read_cells a worksheet a chunk at a time, calling back into R
  *   C_read_xlsx       a worksheet as typed columns (design section 14)
- *   C_zuxlsx_native   the versions linked in; it calls Expat and zucrypt
- *                     directly, so a header on the path without its archive
- *                     fails at link time
+ *   C_zuxlsx_native   the versions linked in; it calls Expat, miniz and
+ *                     zucrypt directly, so a header on the path without its
+ *                     archive fails at link time
  *
  * plus the internal entry points the decryption tests use. A password-
  * protected workbook is classified and decrypted by resolve_source() before
@@ -1438,8 +1438,8 @@ SEXP C_xlsx_read_cells(SEXP path, SEXP sheet, SEXP callback, SEXP env,
  * each cell as it was written, because the text is still here in C when the
  * decision is made.
  *
- * The type rules mirror R's build_column() exactly, and the two are held
- * together by the same tests rather than by inspection. */
+ * The rules are the ones ?read_xlsx documents, and the tests in
+ * test-read.R hold them. */
 
 #define TYPEMASK(t) (1u << (t))
 
@@ -1623,7 +1623,8 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
   /* A range asks for its own rectangle whether or not cells fill it; without
      one the extent is whatever the worksheet used. Rows are spanned rather
      than taken from the rows that carry a cell, so an omitted row stays a
-     row -- see R's build_column() for why that matters. */
+     row, so that row n of the result is row n of the sheet (after the
+     header) wherever blank rows fall. */
   first_row = (double)cells->row[0];
   last_row = first_row;
   for (i = 0; i < cells->n; i++) {
@@ -1748,7 +1749,9 @@ SEXP C_zuxlsx_native(void) {
      while the archive is not would still compile, and this is what makes
      that fail at link time instead. */
   SET_VECTOR_ELT(out, 1, Rf_mkString(XML_ExpatVersion()));
-  SET_VECTOR_ELT(out, 2, Rf_mkString(MZ_VERSION));
+  /* And into libzukomp.a, for the same reason; MZ_VERSION is only what the
+     header says. */
+  SET_VECTOR_ELT(out, 2, Rf_mkString(mz_version()));
   /* The same for libzucrypt.a: zucrypt.h carries no backend version at all,
      so this can only come from the archive. NA if zuc_init() failed when the
      DLL loaded, which is then also what every decryption reports. */
