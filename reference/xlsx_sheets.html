@@ -39,7 +39,7 @@
 
     <div class="section level2">
     <h2 id="ref-usage">Usage<a class="anchor" aria-label="anchor" href="#ref-usage"></a></h2>
-    <div class="sourceCode"><pre class="sourceCode r"><code><span><span class="fu">xlsx_sheets</span><span class="op">(</span><span class="va">path</span><span class="op">)</span></span></code></pre></div>
+    <div class="sourceCode"><pre class="sourceCode r"><code><span><span class="fu">xlsx_sheets</span><span class="op">(</span><span class="va">path</span>, password <span class="op">=</span> <span class="cn">NULL</span><span class="op">)</span></span></code></pre></div>
     </div>
 
     <div class="section level2">
@@ -48,6 +48,15 @@
 
 <dl><dt id="arg-path">path<a class="anchor" aria-label="anchor" href="#arg-path"></a></dt>
 <dd><p>Path to an <code>.xlsx</code> file.</p></dd>
+
+
+<dt id="arg-password">password<a class="anchor" aria-label="anchor" href="#arg-password"></a></dt>
+<dd><p>The password of a password-protected workbook, or <code>NULL</code>
+(the default) for one without. The workbook is decrypted in memory and
+never written to disk. Agile encryption – what Excel has written since
+2013 – is supported; the older standard encryption is not, and is
+reported as such. Ignored for a workbook that is not encrypted. R cannot
+erase a string, so the password may stay in memory after the call.</p></dd>
 
 </dl></div>
     <div class="section level2">

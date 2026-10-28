@@ -33,19 +33,31 @@ stable. Every class below is a subclass of `zuxlsx_error`.
 
 - `zuxlsx_encrypted_error`:
 
-  The workbook is password-protected. Its contents are encrypted and
-  this package cannot decrypt them. Raised in preference to
-  `zuxlsx_unsupported_format_error` so that "needs a password" can be
-  handled on its own – it is the one unsupported format the caller can
-  do something about.
+  The workbook is password-protected and no `password` was given. Raised
+  in preference to `zuxlsx_unsupported_format_error` so that "needs a
+  password" can be handled on its own.
+
+- `zuxlsx_password_error`:
+
+  The `password` given is not the workbook's. A subclass of
+  `zuxlsx_encrypted_error`, so one handler covers a password that is
+  missing and one that is wrong. A damaged encryption header is
+  indistinguishable from a wrong password, by design of the format.
+
+- `zuxlsx_integrity_error`:
+
+  A password-protected workbook is damaged: its encrypted package does
+  not match the integrity code stored with it, or its container or
+  encryption parameters are inconsistent. Nothing is decrypted from a
+  file that fails this check.
 
 - `zuxlsx_unsupported_format_error`:
 
   The file is a spreadsheet, but not one zuxlsx can read: an `.xlsb`,
-  whose worksheets are binary rather than XML, or an OLE2 file, which is
-  either a legacy `.xls` or an encrypted workbook. Raised in preference
-  to reporting such a file as corrupt, which is what it otherwise looks
-  like.
+  whose worksheets are binary rather than XML; a legacy `.xls`; or a
+  workbook encrypted with a scheme other than agile encryption, such as
+  Office 2007's standard encryption. Raised in preference to reporting
+  such a file as corrupt, which is what it otherwise looks like.
 
 - `zuxlsx_memory_error`:
 

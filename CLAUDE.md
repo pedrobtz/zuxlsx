@@ -22,25 +22,26 @@ warnings / 0 notes.
 
 What is exported:
 
-- `read_xlsx(path, sheet = 1, col_names = TRUE, range = NULL)` — a
-  worksheet as a data frame. Column types are inferred by promotion:
+- `read_xlsx(path, sheet = 1, col_names = TRUE, range = NULL, password = NULL)`
+  — a worksheet as a data frame. Column types are inferred by promotion:
   blanks are logical, booleans stay logical, numbers give a double,
   anything mixed or holding a string or a cell error becomes character,
   and a column of dates becomes `Date` or `POSIXct`. `range` is A1
   notation and either corner may name a cell, a column or a row, so
   `"B2:D10"`, `"A:C"` and `"2:10"` all work.
-- `xlsx_cells(path, sheet = 1)` — one row per cell: position, type,
-  text, numeric value. The view underneath
+- `xlsx_cells(path, sheet = 1, password = NULL)` — one row per cell:
+  position, type, text, numeric value. The view underneath
   [`read_xlsx()`](https://pedrobtz.github.io/zuxlsx/reference/read_xlsx.md),
   for sheets that are not rectangular.
-- `xlsx_rows(path, sheet = 1)` — a worksheet row by row as text, padded
-  so the nth element of each row is the nth column.
-- `xlsx_read_cells(path, sheet = 1, callback, chunk_size = 10000L)` —
-  chunked streaming read; returning `FALSE` stops it. **The only entry
+- `xlsx_rows(path, sheet = 1, password = NULL)` — a worksheet row by row
+  as text, padded so the nth element of each row is the nth column.
+- `xlsx_read_cells(path, sheet = 1, callback, chunk_size = 10000L, password = NULL)`
+  — chunked streaming read; returning `FALSE` stops it. **The only entry
   point that calls R while the archive and the parser are open**, which
   is why both are owned by external pointers with registered finalizers
   rather than by the C stack.
-- `xlsx_sheets(path)` — worksheet names, in workbook order.
+- `xlsx_sheets(path, password = NULL)` — worksheet names, in workbook
+  order.
 - [`zuxlsx_native()`](https://pedrobtz.github.io/zuxlsx/reference/zuxlsx_native.md)
   — reports `xlsxio` 0.2.36, `expat_2.8.4`, miniz `11.3.2`,
   TF-PSA-Crypto `1.1.1`. It calls `XML_ExpatVersion()` and
@@ -49,33 +50,34 @@ What is exported:
 
 Both Excel epochs are handled, chosen per workbook by `date1904`, and
 the 1900 system’s phantom 29 February is accounted for: serial 60 is
-`NA`, serial 61 is 1 March 1900. Errors are seven classed conditions
-under `zuxlsx_error` — see
+`NA`, serial 61 is 1 March 1900. Errors are ten classed conditions under
+`zuxlsx_error` — see
 [`?"zuxlsx-conditions"`](https://pedrobtz.github.io/zuxlsx/reference/zuxlsx-conditions.md)
-and design §15. An encrypted workbook (OLE2, not ZIP) and an `.xlsb` are
-reported as `zuxlsx_unsupported_format_error` rather than as damage.
+and design §15. A legacy `.xls` (OLE2, not ZIP), an `.xlsb` and a
+non-agile encrypted workbook are reported as
+`zuxlsx_unsupported_format_error` rather than as damage; an encrypted
+workbook read without a password is `zuxlsx_encrypted_error`.
 
-**Decryption is in progress (#22, design §21c–§21f).** Steps 1–3 are
-done: reading CFB streams in C
+**Password-protected workbooks are read (#22, design §21c–§21g).** Every
+reader takes `password =`. The file’s CFB container is read in C
 ([src/cfb.c](https://pedrobtz.github.io/zuxlsx/src/cfb.c), §21e),
-parsing `EncryptionInfo` with Expat and refusing standard/extensible
-encryption by name
+`EncryptionInfo` is parsed with Expat and anything but agile encryption
+is refused by name
 ([src/encinfo.c](https://pedrobtz.github.io/zuxlsx/src/encinfo.c),
-§21f), and the agile decryption core over `libzucrypt.a`
-([src/agile.c](https://pedrobtz.github.io/zuxlsx/src/agile.c), §21d).
-`decrypt_ole2()` goes from container bytes and a password to the
-plaintext package. It and `agile_decrypt()`, `cfb_streams()` and
-`encryption_info()` are internal; no exported function reaches them
-until step 4 (handing the plaintext to xlsxio, and a `password =`
-argument) lands. zucrypt freezes its ABI 1 on this code; findings go on
-pedrobtz/zucrypt#43.
+§21f), the package is decrypted over `libzucrypt.a` after its HMAC is
+checked ([src/agile.c](https://pedrobtz.github.io/zuxlsx/src/agile.c),
+§21d), and xlsxio reads the plaintext from memory (§21g). The plaintext
+is never an R object and never on disk, and is wiped when the read ends.
+Known cost: `resolve_sheet()` makes every read decrypt twice.
+`decrypt_ole2()`, `agile_decrypt()`, `cfb_streams()` and
+`encryption_info()` are internal, for the tests. zucrypt freezes its ABI
+1 on this code; findings go on pedrobtz/zucrypt#43.
 
-Out of scope or not done: writing workbooks, `.xlsb`, decrypting an
-encrypted workbook from an exported function (above), evaluating
-formulas (the cached value is returned), and configurable limits on part
-size or sheet count — today’s defenses are Expat’s and miniz’s own.
-Column building is a post-pass rather than streaming; design §14’s
-status note says why.
+Out of scope or not done: writing workbooks, `.xlsb`, standard (Office
+2007) and extensible encryption, evaluating formulas (the cached value
+is returned), and configurable limits on part size or sheet count —
+today’s defenses are Expat’s and miniz’s own. Column building is a
+post-pass rather than streaming; design §14’s status note says why.
 
 The build:
 
@@ -94,17 +96,19 @@ The build:
 - `DESCRIPTION` has `LinkingTo: zucrypt, zukomp, zuxml` and **no
   `Imports:`**, which is what design §3 asks for.
 - **`Remotes:` tracks `pedrobtz/zuxml@main`, `pedrobtz/zukomp@main` and
-  `pedrobtz/zucrypt@main`**, since none is on CRAN. `@main` is
-  deliberate and is not a version pin: the three packages are developed
-  together, so zuxlsx builds against what the siblings actually are, and
-  a sibling release that breaks this package is a bug to fix in the
-  sibling rather than a version to freeze away from. That has real cost
-  — a zukomp release broke Windows here on 2026-09-19 — and it is the
-  cost being chosen. Do not pin a *feature* branch: those are deleted on
-  merge and the ref then 404s. Drop `Remotes:` entirely before any CRAN
-  submission – on submission day, not before, since it is what makes a
-  GitHub install work. The full sequence, including why the siblings
-  must reach CRAN first, is in
+  `pedrobtz/zucrypt@main`**. All three reached CRAN in October 2026
+  (0.1.0 each), so `Remotes:` is no longer needed to install them, but
+  it is kept until submission day so that development builds against the
+  siblings’ `main`. `@main` is deliberate and is not a version pin: the
+  three packages are developed together, so zuxlsx builds against what
+  the siblings actually are, and a sibling release that breaks this
+  package is a bug to fix in the sibling rather than a version to freeze
+  away from. That has real cost — a zukomp release broke Windows here on
+  2026-09-19 — and it is the cost being chosen. Do not pin a *feature*
+  branch: those are deleted on merge and the ref then 404s. Drop
+  `Remotes:` entirely before any CRAN submission – on submission day,
+  not before, since it is what makes a GitHub install work. The full
+  sequence, including why the siblings must reach CRAN first, is in
   [.agents/release-checklist.md](https://pedrobtz.github.io/zuxlsx/.agents/release-checklist.md).
 - `src/Makevars` is generated and `.gitignore`d. `cleanup` removes it.
 

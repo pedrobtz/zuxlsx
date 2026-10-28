@@ -2,10 +2,11 @@
 
 ## zuxlsx 0.1.0
 
-First release. zuxlsx reads `.xlsx` workbooks without a system XML or
-ZIP library: it bundles the ‘xlsxio’ reader and links ‘Expat’ and
-‘miniz’ statically from `zuxml` and `zukomp`, so an installed zuxlsx has
-no run-time dependency on either.
+First release. zuxlsx reads `.xlsx` workbooks without a system XML, ZIP
+or cryptography library: it bundles the ‘xlsxio’ reader and links
+‘Expat’, ‘miniz’ and ‘TF-PSA-Crypto’ statically from `zuxml`, `zukomp`
+and `zucrypt`, so an installed zuxlsx has no run-time dependency on any
+of them.
 
 ### Reading
 
@@ -34,7 +35,24 @@ no run-time dependency on either.
 - [`xlsx_sheets()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_sheets.md)
   lists worksheets, and
   [`zuxlsx_native()`](https://pedrobtz.github.io/zuxlsx/reference/zuxlsx_native.md)
-  reports the ‘xlsxio’, ‘Expat’ and ‘miniz’ versions actually linked in.
+  reports the ‘xlsxio’, ‘Expat’, ‘miniz’ and ‘TF-PSA-Crypto’ versions
+  actually linked in.
+
+### Password-protected workbooks
+
+- Every reader takes `password =`, and reads a workbook protected with
+  agile encryption – what Excel has written since 2013. The workbook is
+  decrypted in memory; neither it nor its plaintext is written to disk,
+  and the plaintext is wiped when the read ends.
+
+- The integrity code the file carries is checked before anything is
+  decrypted, so a workbook altered after it was encrypted is refused
+  with `zuxlsx_integrity_error` rather than read as garbage.
+
+- A missing password raises `zuxlsx_encrypted_error`, and a wrong one
+  `zuxlsx_password_error`, its subclass. Office 2007’s standard
+  encryption, and the other schemes, are refused by name with
+  `zuxlsx_unsupported_format_error`, never reported as a wrong password.
 
 ### Dates
 
@@ -52,12 +70,14 @@ no run-time dependency on either.
 - Every error is a classed condition under `zuxlsx_error`:
   `zuxlsx_input_error`, `zuxlsx_zip_error`, `zuxlsx_xml_error`,
   `zuxlsx_ooxml_error`, `zuxlsx_sheet_error`,
-  `zuxlsx_unsupported_format_error` and `zuxlsx_memory_error`. See
+  `zuxlsx_unsupported_format_error`, `zuxlsx_encrypted_error`,
+  `zuxlsx_password_error`, `zuxlsx_integrity_error` and
+  `zuxlsx_memory_error`. See
   [`?"zuxlsx-conditions"`](https://pedrobtz.github.io/zuxlsx/reference/zuxlsx-conditions.md).
 
 - A file that is a spreadsheet zuxlsx cannot read is reported as such
-  rather than as damage. An encrypted workbook is an OLE2 container, not
-  a ZIP, and an `.xlsb` stores its worksheets as binary records; both
+  rather than as damage. A legacy `.xls` is an OLE2 container, not a
+  ZIP, and an `.xlsb` stores its worksheets as binary records; both
   raise `zuxlsx_unsupported_format_error` instead of looking corrupt.
 
 - XML that will not parse is distinguished from XML that parses but

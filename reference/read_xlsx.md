@@ -8,7 +8,7 @@ is the cell-by-cell view underneath it.
 ## Usage
 
 ``` r
-read_xlsx(path, sheet = 1, col_names = TRUE, range = NULL)
+read_xlsx(path, sheet = 1, col_names = TRUE, range = NULL, password = NULL)
 ```
 
 ## Arguments
@@ -37,6 +37,15 @@ read_xlsx(path, sheet = 1, col_names = TRUE, range = NULL)
   ignored, the top-left becomes the first row and column, and columns
   the range covers appear even where the worksheet left them empty. When
   `col_names` is `TRUE` the first row of the range supplies the names.
+
+- password:
+
+  The password of a password-protected workbook, or `NULL` (the default)
+  for one without. The workbook is decrypted in memory and never written
+  to disk. Agile encryption – what Excel has written since 2013 – is
+  supported; the older standard encryption is not, and is reported as
+  such. Ignored for a workbook that is not encrypted. R cannot erase a
+  string, so the password may stay in memory after the call.
 
 ## Value
 
