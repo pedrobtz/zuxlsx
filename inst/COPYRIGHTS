@@ -18,8 +18,9 @@ Only the XLSX *reader* is bundled: xlsxio_read.c, xlsxio_read_sharedstrings.c
 and their headers. The writer (xlsxio_write.c) is deliberately not bundled --
 writing workbooks is out of scope (design section 21).
 
-The bundled copy carries two local patches, in tools/patches/xlsxio/, applied
-in order. Neither is upstream.
+The bundled copy carries seven local patches, in tools/patches/xlsxio/,
+applied in order. None is in upstream; the crash 0007 fixes has been
+reported there.
 
   0001-miniz-zip-backend.patch
       Adds a USE_MINIZ backend beside the existing USE_MINIZIP /

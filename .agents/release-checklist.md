@@ -21,21 +21,24 @@ p <- rownames(available.packages(repos = "https://cloud.r-project.org"))
 c("zuxml", "zukomp", "zucrypt") %in% p
 ```
 
-## Do these on submission day, not before
+## Done for submission (2026-10-28)
 
-Both break the GitHub install path, so they are last.
+- `Remotes:` is dropped from `DESCRIPTION`. With all three siblings on CRAN,
+  `setup-r-dependencies` and `pak::pak("pedrobtz/zuxlsx")` resolve them from
+  there; development no longer builds against their `main`.
+- The README's install instructions say `install.packages("zuxlsx")`, with
+  the GitHub install kept as the development version.
+- CI is the shared `pedrobtz/r-actions` workflows: `R-CMD-check.yaml` (with
+  Windows R-devel and `nosuggests`), `native-checks.yaml` (sanitizers,
+  valgrind, rchk, gctorture, LTO, analyzers, CRAN's special checks) and
+  `vendor.yaml`.
+- `cran-comments.md` names all three `LinkingTo` packages, TF-PSA-Crypto's
+  licence, the one NOTE and the CI test environments.
+- `Language: en-GB` and `inst/WORDLIST`; `spelling::spell_check_package()`
+  is clean.
 
-1. **Drop `Remotes:` from `DESCRIPTION`.** Until the siblings are on CRAN it
-   is the only thing that lets `pak::pak("pedrobtz/zuxlsx")` find them, and
-   removing it early breaks continuous integration here as well, since
-   `setup-r-dependencies` resolves through it.
-
-2. **Change the README install instructions** from
-   `pak::pak("pedrobtz/zuxlsx")` to `install.packages("zuxlsx")`. Doing this
-   before acceptance documents something that does not work.
-
-Then re-run `R CMD check --as-cran` -- dropping `Remotes:` changes how the
-dependencies resolve, so the check that matters is the one after the edit.
+What is left is the submission itself: a green full-profile run on the
+commit being submitted, then `devtools::submit_cran()`.
 
 ## Already done
 

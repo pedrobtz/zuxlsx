@@ -1,0 +1,24 @@
+# The vendored xlsxio tree matches its manifest, from pedrobtz/r-actions.
+# tools/vendor/verify checks the tree is internally consistent; the
+# pull-request half checks that a change under src/vendor/ came with a
+# manifest change, the only way the tree stays reproducible from upstream.
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'src/vendor/**'
+      - 'src/Makevars.in'
+      - 'tools/vendor/**'
+      - 'tools/patches/**'
+      - 'inst/COPYRIGHTS'
+      - '.github/workflows/vendor.yaml'
+  pull_request:
+  workflow_dispatch:
+
+name: vendor.yaml
+
+permissions: read-all
+
+jobs:
+  vendor:
+    uses: pedrobtz/r-actions/.github/workflows/vendor.yml@v1

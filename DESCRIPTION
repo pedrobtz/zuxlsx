@@ -24,6 +24,7 @@ BugReports: https://github.com/pedrobtz/zuxlsx/issues
 Depends: 
     R (>= 4.1)
 Encoding: UTF-8
+Language: en-GB
 Roxygen: list(markdown = TRUE)
 LinkingTo: 
     zucrypt,
@@ -34,8 +35,4 @@ Suggests:
     withr,
     zucrypt
 Config/testthat/edition: 3
-Remotes: 
-    pedrobtz/zucrypt@main,
-    pedrobtz/zukomp@main,
-    pedrobtz/zuxml@main
 Config/roxygen2/version: 8.1.0

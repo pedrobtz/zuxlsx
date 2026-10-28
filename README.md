@@ -67,8 +67,14 @@ xlsx_read_cells(path, callback = function(cells) { str(cells); FALSE })
 
 zuxlsx needs `zuxml`, `zukomp` and `zucrypt` at build time, and its
 `configure` script will stop with an explanatory message if their static
-archives are missing.
-`pak` picks them up from the `Remotes:` field:
+archives are missing. All three are on CRAN, so installing zuxlsx installs
+them first:
+
+``` r
+install.packages("zuxlsx")
+```
+
+The development version is on GitHub:
 
 ``` r
 # install.packages("pak")

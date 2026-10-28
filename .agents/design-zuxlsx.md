@@ -192,9 +192,10 @@ this section.** Both changes are merged:
   symbol and its ABI test is untouched.
 
 `zuxlsx` therefore has a `configure` + `src/Makevars.in` pair, and
-`DESCRIPTION` pins neither package to a branch. `Remotes:` still names both
-repositories, because they are not on CRAN; it must be dropped before any CRAN
-submission.
+`DESCRIPTION` pins neither package to a branch. `Remotes:` named all three
+sibling repositories until they reached CRAN (zukomp, zucrypt and zuxml 0.1.0,
+October 2026); it was dropped for the CRAN submission, and the siblings now
+resolve from CRAN.
 
 Verified against the vendored reader in this repo: xlsxio compiles against
 those installed headers, links both archives, and reads the fixtures in
