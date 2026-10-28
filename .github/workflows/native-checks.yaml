@@ -4,8 +4,7 @@
 # valgrind and rchk matter here more than the R CMD check matrix does.
 #
 # cran-special is rcnst, rlibro and vnu. None of these runs in a locale that is
-# not UTF-8, so that (#72) is still checked by hand; see
-# .agents/release-checklist.md.
+# not UTF-8; locale.yaml does (#72).
 on:
   push:
     branches: [main, master]
@@ -30,8 +29,18 @@ jobs:
     with:
       fail-on-findings: true
 
+  # A collection every 20 allocations ran past the 2-hour limit on the full
+  # suite. Limit tests that build tens of megabytes in R skip under
+  # ZUXLSX_LIGHT_TESTS (helper-zip.R); they check sizes, not protection. A
+  # pull request runs at the quick step, a merge at 100.
   gctorture:
     uses: pedrobtz/r-actions/.github/workflows/gctorture.yml@v1
+    with:
+      profile: ${{ github.event_name == 'pull_request' && 'quick' || 'full' }}
+      step: 100
+      timeout-minutes: 180
+      env: |
+        ZUXLSX_LIGHT_TESTS=true
 
   sanitizers:
     uses: pedrobtz/r-actions/.github/workflows/sanitizers.yml@v1

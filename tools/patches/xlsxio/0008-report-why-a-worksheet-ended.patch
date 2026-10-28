@@ -1,0 +1,405 @@
+Report why a worksheet ended, and bound what a cell reference can cost.
+
+xlsxioread_sheet_next_row() returns 0 at the end of a worksheet and on any
+error alike, and under patch 0001 an inflate failure ends the stream as if it
+were complete. A damaged or truncated worksheet therefore read as the rows
+before the damage, with nothing to say so. This patch keeps the first reason
+a worksheet stopped early and adds xlsxioread_sheet_finish(), which the
+reader calls once next_row() has returned 0:
+
+  XLSXIOREAD_SHEET_ERROR_XML           Expat reported a parse error. It is
+                                       recorded when it happens, because the
+                                       next XML_ResumeParser() overwrites it.
+  XLSXIOREAD_SHEET_ERROR_RANGE         a cell reference past XFD1048576.
+                                       get_col_nr() and get_row_nr() now
+                                       saturate one past the grid, so a long
+                                       reference cannot wrap size_t, and the
+                                       cell is refused before the padding
+                                       loops walk towards it -- one cell at
+                                       A99999999999 used to keep the reader
+                                       busy for minutes.
+  XLSXIOREAD_SHEET_ERROR_SHAREDSTRING  a t="s" index that is not a number, is
+                                       negative, or is past the table. It
+                                       used to read as a blank cell.
+                                       Whitespace around the index is
+                                       allowed, and an empty <si/> (a NULL
+                                       entry) is a blank cell, not a miss.
+  XLSXIOREAD_SHEET_ERROR_ZIP           under USE_MINIZ, finish closes the
+                                       archive member, which is where miniz
+                                       checks its size and CRC-32.
+
+It also fixes the shared-string table parser. Starting an <si> installed the
+table's end handler rather than the item's, so a self-closing <si/> was never
+added, and every index after it resolved one entry off -- silently wrong text
+in every later string cell.
+
+And the table parser compares element names without their namespace
+prefix, as the worksheet parser already does: a table written as
+<x:sst><x:si><x:t> was skipped, and every string in the workbook read as
+blank.
+
+A sheet whose part was never opened -- a chartsheet, or a relationship that
+leads nowhere -- still reads as no rows. And a parse that stops inside a cell
+now frees the text gathered for it, which xlsxioread_sheet_next_cell() used
+to drop.
+
+It also corrects two predicates patch 0003 added to classify number formats:
+
+  numfmt_code_is_date() treated any bracket containing h, m or s as elapsed
+  time. Locale tags such as [$$-en-US], which Excel writes for US dollars,
+  and colours such as [Magenta] and [White] contain those letters, so
+  currency amounts read as dates. A bracket is now elapsed time only when it
+  holds one of h, m or s, repeated, and nothing else.
+
+  numfmt_builtin_is_date() missed the East Asian built-in date formats
+  (27-36, 50-58) and the Thai ones (71-81), which Excel writes without a
+  format code.
+
+Written for zuxlsx. None of it is upstream.
+
+--- a/lib/xlsxio_read.c
++++ b/lib/xlsxio_read.c
+@@ -420,6 +420,12 @@
+   return result;
+ }
+ 
++//zuxlsx: Excel's grid ends at XFD1048576. The two parsers below saturate one
++//past it, so a reference beyond the grid is recognisable and a long one
++//cannot wrap size_t.
++#define XLSXIO_MAX_ROWS 1048576
++#define XLSXIO_MAX_COLS 16384
++
+ //determine column number based on cell coordinate (e.g. "A1"), returns 1-based column number or 0 on error
+ size_t get_col_nr (const XML_Char* A1col)
+ {
+@@ -427,6 +433,8 @@
+   size_t result = 0;
+   if (p) {
+     while (*p) {
++      if (result > XLSXIO_MAX_COLS)
++        result = XLSXIO_MAX_COLS + 1;
+       if (*p >= 'A' && *p <= 'Z')
+         result = result * 26 + (*p - 'A') + 1;
+       else if (*p >= 'a' && *p <= 'z')
+@@ -450,8 +458,11 @@
+     while (*p) {
+       if ((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z'))
+         ;
+-      else if (*p >= '0' && *p <= '9' && p != A1col)
++      else if (*p >= '0' && *p <= '9' && p != A1col) {
++        if (result > XLSXIO_MAX_ROWS)
++          result = XLSXIO_MAX_ROWS + 1;
+         result = result * 10 + (*p - '0');
++      }
+       else
+         return 0;
+       p++;
+@@ -1152,9 +1163,18 @@
+     } else if (*p == '[') {
+       const XML_Char* q = p + 1;
+       int elapsed = 0;
+-      for (; *q && *q != ']'; q++)
+-        if (*q == 'h' || *q == 'H' || *q == 'm' || *q == 'M' || *q == 's' || *q == 'S')
+-          elapsed = 1;
++      //zuxlsx: elapsed time is [h], [mm], [ss] and so on: one letter,
++      //repeated, and nothing else. Locale tags such as [$$-en-US] and
++      //colours such as [Magenta] contain those letters too.
++      XML_Char first = (XML_Char)((*q >= 'A' && *q <= 'Z') ? *q - 'A' + 'a' : *q);
++      if (first == 'h' || first == 'm' || first == 's') {
++        elapsed = 1;
++        for (; *q && *q != ']'; q++)
++          if (((*q >= 'A' && *q <= 'Z') ? *q - 'A' + 'a' : *q) != first)
++            elapsed = 0;
++      } else {
++        for (; *q && *q != ']'; q++) ;
++      }
+       if (elapsed)
+         return 1;
+       p = (*q ? q + 1 : q);
+@@ -1175,10 +1195,14 @@
+   return 0;
+ }
+ 
+-/* Built-in ids with date or time semantics, per ECMA-376 part 1, 18.8.30. */
++/* Built-in ids with date or time semantics, per ECMA-376 part 1, 18.8.30.
++   zuxlsx: 27-36 and 50-58 are the East Asian date formats and 71-81 the Thai
++   ones; Excel writes them without declaring them in <numFmts>. */
+ static int numfmt_builtin_is_date (int id)
+ {
+-  return (id >= 14 && id <= 22) || (id >= 45 && id <= 47);
++  return (id >= 14 && id <= 22) || (id >= 27 && id <= 36) ||
++         (id >= 45 && id <= 47) || (id >= 50 && id <= 58) ||
++         (id >= 71 && id <= 81);
+ }
+ 
+ static struct numfmt_table* numfmt_table_create (void)
+@@ -1279,6 +1303,8 @@
+   long cell_style;                      //s= attribute, index into cellXfs
+   cell_string_type_enum last_cell_type; //zuxlsx: type of the cell being delivered
+   long last_cell_style;                 //zuxlsx: its style index
++  int zuxlsx_error;                     //zuxlsx: first XLSXIOREAD_SHEET_ERROR_* seen
++  unsigned long zuxlsx_error_line;      //zuxlsx: the XML line it was seen on
+   unsigned int flags;
+   XML_Char* skiptag;                    //tag to skip
+   size_t skiptagcount;                  //nesting level for current tag to skip
+@@ -1305,6 +1331,8 @@
+   data->cell_style = 0;
+   data->last_cell_type = none;
+   data->last_cell_style = 0;
++  data->zuxlsx_error = 0;
++  data->zuxlsx_error_line = 0;
+   data->flags = flags;
+   data->skiptag = NULL;
+   data->skiptagcount = 0;
+@@ -1322,6 +1350,15 @@
+   numfmt_table_destroy(data->numfmts);
+   free(data->celldata);
+   free(data->skiptag);
++}
++
++//zuxlsx: keeps the first reason the worksheet could not be read in full
++static void sheet_error (struct data_sheet_callback_data* data, int code)
++{
++  if (data->zuxlsx_error == 0) {
++    data->zuxlsx_error = code;
++    data->zuxlsx_error_line = (unsigned long)XML_GetCurrentLineNumber(data->xmlparser);
++  }
+ }
+ 
+ void data_sheet_expat_callback_skip_tag_start (void* callbackdata, const XML_Char* name, const XML_Char** atts)
+@@ -1461,6 +1498,12 @@
+   if (XML_Char_icmp_ins(name, X("c")) == 0) {
+     const XML_Char* t = get_expat_attr_by_name(atts, X("r"));
+     size_t cellcolnr = get_col_nr(t);
++    //zuxlsx: refuse a reference past XFD1048576 before padding up to it
++    if (cellcolnr > XLSXIO_MAX_COLS || get_row_nr(t) > XLSXIO_MAX_ROWS) {
++      sheet_error(data, XLSXIOREAD_SHEET_ERROR_RANGE);
++      XML_StopParser(data->xmlparser, XML_FALSE);
++      return;
++    }
+     //insert empty rows if needed
+     if (data->colnr == 0) {
+       size_t cellrownr = get_row_nr(t);
+@@ -1560,11 +1603,25 @@
+         //get shared string
+         XML_Char* p = NULL;
+         long num = XML_Char_strtol(data->celldata, &p, 10);
+-        if (!p || (p != data->celldata && *p == 0)) {
+-          const XML_Char* s = sharedstringlist_get(data->sharedstrings, num);
+-          free(data->celldata);
+-          data->celldata = (s ? XML_Char_dup(s) : NULL);
++        const XML_Char* s = NULL;
++        //zuxlsx: an index that is not a number, is negative or is past the
++        //table is a malformed worksheet, not a blank cell. Whitespace around
++        //it is allowed, as XML Schema allows it around an integer: some
++        //writers emit <v>2 </v>, which used to read as the text "2 ".
++        if (p)
++          while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')
++            p++;
++        //An entry may itself be NULL: that is an empty <si/>, a blank cell,
++        //so it is the table's size that says whether the index resolves.
++        if (!((!p || (p != data->celldata && *p == 0)) && num >= 0 &&
++              (size_t)num < sharedstringlist_size(data->sharedstrings))) {
++          sheet_error(data, XLSXIOREAD_SHEET_ERROR_SHAREDSTRING);
++          XML_StopParser(data->xmlparser, XML_FALSE);
++          return;
+         }
++        s = sharedstringlist_get(data->sharedstrings, (size_t)num);
++        free(data->celldata);
++        data->celldata = (s ? XML_Char_dup(s) : NULL);
+       } else if (data->cell_string_type == none) {
+         //unknown value type
+         free(data->celldata);
+@@ -1680,6 +1737,48 @@
+   int date1904;                         //zuxlsx: copied from the workbook
+ };
+ 
++//zuxlsx: resumes the worksheet parser and keeps its first genuine error,
++//which Expat would lose: the next XML_ResumeParser() overwrites the code
++static enum XML_Status sheet_resume (xlsxioreadersheet sheethandle)
++{
++  enum XML_Status status = expat_process_zip_file_resume(sheethandle->zipfile, sheethandle->processcallbackdata.xmlparser);
++  if (status == XML_STATUS_ERROR) {
++    enum XML_Error code = XML_GetErrorCode(sheethandle->processcallbackdata.xmlparser);
++    if (code != XML_ERROR_ABORTED && code != XML_ERROR_FINISHED && code != XML_ERROR_NOT_SUSPENDED)
++      sheet_error(&sheethandle->processcallbackdata, XLSXIOREAD_SHEET_ERROR_XML);
++  }
++  return status;
++}
++
++/* zuxlsx: once xlsxioread_sheet_next_row() has returned 0, says whether the
++   worksheet ended because it was read in full or because something was wrong
++   with it. Under USE_MINIZ it also closes the archive member, which is where
++   miniz checks the uncompressed size and the CRC-32. */
++DLL_EXPORT_XLSXIO int xlsxioread_sheet_finish (xlsxioreadersheet sheethandle, unsigned long* line)
++{
++  int result;
++  if (line)
++    *line = 0;
++  if (!sheethandle)
++    return XLSXIOREAD_SHEET_ERROR_XML;
++  //No part was opened: a chartsheet or dialogsheet, which the workbook lists
++  //among its sheets but which has no worksheet part, or a relationship that
++  //leads nowhere. Both read as no rows, as they always have.
++  if (!sheethandle->zipfile)
++    return XLSXIOREAD_SHEET_ERROR_NONE;
++  result = sheethandle->processcallbackdata.zuxlsx_error;
++  if (line)
++    *line = sheethandle->processcallbackdata.zuxlsx_error_line;
++#ifdef USE_MINIZ
++  if (sheethandle->zipfile) {
++    if (!mz_zip_reader_extract_iter_free(sheethandle->zipfile) && result == XLSXIOREAD_SHEET_ERROR_NONE)
++      result = XLSXIOREAD_SHEET_ERROR_ZIP;
++    sheethandle->zipfile = NULL;
++  }
++#endif
++  return result;
++}
++
+ DLL_EXPORT_XLSXIO size_t xlsxioread_sheet_last_row_index (xlsxioreadersheet sheethandle)
+ {
+   return sheethandle->lastrownr;
+@@ -1958,7 +2057,7 @@
+   }
+   sheethandle->paddingcol = 0;
+   //go to beginning of next row
+-  while ((status = expat_process_zip_file_resume(sheethandle->zipfile, sheethandle->processcallbackdata.xmlparser)) == XML_STATUS_SUSPENDED && sheethandle->processcallbackdata.colnr != 0) {
++  while ((status = sheet_resume(sheethandle)) == XML_STATUS_SUSPENDED && sheethandle->processcallbackdata.colnr != 0) {
+   }
+   return (status == XML_STATUS_SUSPENDED ? 1 : 0);
+ }
+@@ -1997,8 +2096,12 @@
+   }
+   //get value
+   if (!sheethandle->processcallbackdata.celldata)
+-    if (expat_process_zip_file_resume(sheethandle->zipfile, sheethandle->processcallbackdata.xmlparser) != XML_STATUS_SUSPENDED)
++    if (sheet_resume(sheethandle) != XML_STATUS_SUSPENDED) {
++      //zuxlsx: a parse that stops inside a cell leaves its text gathered so
++      //far here; it was set to NULL without being freed
++      free(sheethandle->processcallbackdata.celldata);
+       sheethandle->processcallbackdata.celldata = NULL;
++    }
+   //insert empty rows if needed
+   if (!(sheethandle->processcallbackdata.flags & XLSXIOREAD_SKIP_EMPTY_ROWS) && sheethandle->lastrownr + 1 < sheethandle->processcallbackdata.rownr) {
+     sheethandle->paddingrow = sheethandle->lastrownr + 1;
+--- a/lib/xlsxio_read_sharedstrings.c
++++ b/lib/xlsxio_read_sharedstrings.c
+@@ -10,6 +10,22 @@
+ #ifdef _WIN32
+ #define wcscasecmp _wcsicmp
+ #endif
++
++//zuxlsx: element names compared without their namespace prefix, as the
++//worksheet parser compares them, so a table written as <x:sst><x:si>
++//is read rather than skipped. Without this every string in such a
++//workbook read as blank.
++static int zu_icmp_local (const XML_Char* value, const XML_Char* name)
++{
++  const XML_Char* p = value;
++  const XML_Char* colon = NULL;
++  if (!value)
++    return 1;
++  for (; *p; p++)
++    if (*p == ':')
++      colon = p;
++  return XML_Char_icmp(colon ? colon + 1 : value, name);
++}
+ 
+ struct sharedstringlist* sharedstringlist_create ()
+ {
+@@ -124,7 +140,7 @@
+ void shared_strings_callback_find_sharedstringtable_start (void* callbackdata, const XML_Char* name, const XML_Char** atts)
+ {
+   struct shared_strings_callback_data* data = (struct shared_strings_callback_data*)callbackdata;
+-  if (XML_Char_icmp(name, X("sst")) == 0) {
++  if (zu_icmp_local(name, X("sst")) == 0) {
+     XML_SetElementHandler(data->xmlparser, shared_strings_callback_find_shared_stringitem_start, NULL);
+   }
+ }
+@@ -132,7 +148,7 @@
+ void shared_strings_callback_find_sharedstringtable_end (void* callbackdata, const XML_Char* name)
+ {
+   struct shared_strings_callback_data* data = (struct shared_strings_callback_data*)callbackdata;
+-  if (XML_Char_icmp(name, X("sst")) == 0) {
++  if (zu_icmp_local(name, X("sst")) == 0) {
+     XML_SetElementHandler(data->xmlparser, shared_strings_callback_find_sharedstringtable_start, NULL);
+   }
+ }
+@@ -140,19 +156,21 @@
+ void shared_strings_callback_find_shared_stringitem_start (void* callbackdata, const XML_Char* name, const XML_Char** atts)
+ {
+   struct shared_strings_callback_data* data = (struct shared_strings_callback_data*)callbackdata;
+-  if (XML_Char_icmp(name, X("si")) == 0) {
++  if (zu_icmp_local(name, X("si")) == 0) {
+     if (data->text)
+       free(data->text);
+     data->text = NULL;
+     data->textlen = 0;
+-    XML_SetElementHandler(data->xmlparser, shared_strings_callback_find_shared_string_start, shared_strings_callback_find_sharedstringtable_end);
++    //zuxlsx: the end handler has to be the item's own, or an empty <si/>
++    //is never added and every later index resolves one entry off
++    XML_SetElementHandler(data->xmlparser, shared_strings_callback_find_shared_string_start, shared_strings_callback_find_shared_stringitem_end);
+   }
+ }
+ 
+ void shared_strings_callback_find_shared_stringitem_end (void* callbackdata, const XML_Char* name)
+ {
+   struct shared_strings_callback_data* data = (struct shared_strings_callback_data*)callbackdata;
+-  if (XML_Char_icmp(name, X("si")) == 0) {
++  if (zu_icmp_local(name, X("si")) == 0) {
+     sharedstringlist_add_buffer(data->sharedstrings, data->text, data->textlen);
+     if (data->text)
+       free(data->text);
+@@ -167,10 +185,10 @@
+ void shared_strings_callback_find_shared_string_start (void* callbackdata, const XML_Char* name, const XML_Char** atts)
+ {
+   struct shared_strings_callback_data* data = (struct shared_strings_callback_data*)callbackdata;
+-  if (XML_Char_icmp(name, X("t")) == 0) {
++  if (zu_icmp_local(name, X("t")) == 0) {
+     XML_SetElementHandler(data->xmlparser, NULL, shared_strings_callback_find_shared_string_end);
+     XML_SetCharacterDataHandler(data->xmlparser, shared_strings_callback_string_data);
+-  } else if (XML_Char_icmp(name, X("rPh")) == 0) {
++  } else if (zu_icmp_local(name, X("rPh")) == 0) {
+     data->skiptag = XML_Char_dup(name);
+     data->skiptagcount = 1;
+     data->skip_start = shared_strings_callback_find_shared_string_start;
+@@ -184,7 +202,7 @@
+ void shared_strings_callback_find_shared_string_end (void* callbackdata, const XML_Char* name)
+ {
+   struct shared_strings_callback_data* data = (struct shared_strings_callback_data*)callbackdata;
+-  if (XML_Char_icmp(name, X("t")) == 0) {
++  if (zu_icmp_local(name, X("t")) == 0) {
+     XML_SetElementHandler(data->xmlparser, shared_strings_callback_find_shared_string_start, shared_strings_callback_find_shared_stringitem_end);
+     XML_SetCharacterDataHandler(data->xmlparser, NULL);
+   } else {
+--- a/include/xlsxio_read.h
++++ b/include/xlsxio_read.h
+@@ -304,10 +304,28 @@
+  * \return nonzero for the 1904 epoch, zero for 1900
+  */
+ DLL_EXPORT_XLSXIO int xlsxioread_sheet_date1904 (xlsxioreadersheet sheethandle);
++
++/*! \brief zuxlsx: why a worksheet stopped, reported by xlsxioread_sheet_finish()
++ * \name   XLSXIOREAD_SHEET_ERROR_*
++ * \{
++ */
++#define XLSXIOREAD_SHEET_ERROR_NONE         0
++#define XLSXIOREAD_SHEET_ERROR_XML          1
++#define XLSXIOREAD_SHEET_ERROR_RANGE        2
++#define XLSXIOREAD_SHEET_ERROR_SHAREDSTRING 3
++#define XLSXIOREAD_SHEET_ERROR_ZIP          4
++/*! @} */
+ 
++/*! \brief zuxlsx: whether a worksheet read until xlsxioread_sheet_next_row() returned 0 was read in full
++ * \param  sheethandle   read handle for worksheet object
++ * \param  line          if not NULL, receives the XML line of the error, or 0
++ * \return one of XLSXIOREAD_SHEET_ERROR_*
++ */
++DLL_EXPORT_XLSXIO int xlsxioread_sheet_finish (xlsxioreadersheet sheethandle, unsigned long* line);
+ 
+ 
+ 
++
+ /*! \brief get next cell from worksheet as a string
+  * \param  sheethandle   read handle for worksheet object
+  * \param  pvalue        pointer where string will be stored if data is available (caller must free the result using xlsxioread_free())

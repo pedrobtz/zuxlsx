@@ -20,7 +20,7 @@ test_that("the real fixture's streams match the R reader byte for byte", {
 })
 
 test_that("streams of every size class come back exactly, in v3 and v4", {
-  set.seed(20260929)
+  withr::local_seed(20260929)
   streams <- list(
     empty = raw(0),
     tiny = as.raw(1:5),
@@ -44,8 +44,9 @@ test_that("streams of every size class come back exactly, in v3 and v4", {
 })
 
 test_that("a FAT past the header's 109 entries is followed into DIFAT sectors", {
+  skip_if_light()
   # 110 FAT sectors at 128 entries each: a stream of just over 7 MB.
-  set.seed(1)
+  withr::local_seed(1)
   streams <- list(large = as.raw(sample(0:255, 7.3e6, TRUE)),
                   small = as.raw(1:10))
   bytes <- cfb_build(streams, 3L)
@@ -53,6 +54,35 @@ test_that("a FAT past the header's 109 entries is followed into DIFAT sectors", 
   got <- cfb_streams(bytes, names(streams))
   expect_identical(got$large, streams$large)
   expect_identical(got$small, streams$small)
+
+  # And the DIFAT's own failures, on the one container that has a DIFAT:
+  # a DIFAT sector past the end, and a FAT count the DIFAT cannot supply.
+  expect_error(cfb_streams(put_u32(bytes, 0x44, 1e6), "small"),
+               class = "zuxlsx_integrity_error")
+  expect_error(
+    cfb_streams(put_u32(bytes, 0x2C, le_u32(bytes, 0x2C) + 1), "small"),
+    class = "zuxlsx_integrity_error"
+  )
+})
+
+test_that("a directory with no sectors, or a mini stream the file cannot hold, is malformed", {
+  bytes <- cfb_build(list(s = as.raw(1:10)), 3L)
+  expect_error(cfb_streams(put_u32(bytes, 0x30, 0xFFFFFFFE), "s"),
+               class = "zuxlsx_integrity_error")
+  # The root entry's size is the mini stream's length.
+  root_size <- (le_u32(bytes, 0x30) + 1) * 512 + 0x78
+  expect_error(cfb_streams(put_u32(bytes, root_size, 1e9), "s"),
+               class = "zuxlsx_integrity_error")
+})
+
+test_that("a version 4 header without a whole first sector is malformed", {
+  bytes <- cfb_build(list(s = as.raw(1:10)), 4L)
+  for (n in c(512L, 2048L, 4095L)) {
+    expect_error(cfb_streams(bytes[seq_len(n)], "s"),
+                 class = "zuxlsx_integrity_error", info = n)
+  }
+  expect_error(cfb_streams(bytes[seq_len(511L)], "s"),
+               class = "zuxlsx_input_error")
 })
 
 test_that("names are compared case-insensitively, and only at the root", {
@@ -116,7 +146,7 @@ test_that("random damage to the tables produces a result or a condition", {
   dir_at <- (le_u32(src, 0x30) + 1) * 512
   fat_at <- (le_u32(src, 0x4C) + 1) * 512
   targets <- c(0:511, fat_at + 0:511, dir_at + 0:1023)
-  set.seed(42)
+  withr::local_seed(42)
   outcome <- vapply(seq_len(1500), function(i) {
     bytes <- src
     at <- sample(targets, sample(1:4, 1))

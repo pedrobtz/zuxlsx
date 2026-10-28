@@ -1,0 +1,55 @@
+# The test suite in locales that are not UTF-8.
+#
+# CRAN's Debian clang machine runs the tests that way, and every other job
+# here runs them in UTF-8. #72 is why this exists: a string literal mixing a
+# BMP character with a \U escape beyond it is double-encoded by R's parser in
+# a non-UTF-8 locale, so the test handed the reader the wrong password. A
+# test that sets the locale itself with withr::local_locale() cannot catch
+# that -- the literal is parsed before the test runs -- so the whole R
+# process has to start in the locale.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+name: locale.yaml
+
+permissions: read-all
+
+jobs:
+  locale:
+    runs-on: ubuntu-latest
+    name: tests in ${{ matrix.locale }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # en_US is Latin-1 on Ubuntu; locale-gen refuses the long name.
+        locale: [C, en_US]
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: any::pkgload, any::pkgbuild
+          needs: check
+
+      - name: Generate the locale
+        if: matrix.locale != 'C'
+        run: |
+          sudo locale-gen ${{ matrix.locale }}
+          locale -a
+
+      - name: Run the tests
+        env:
+          LANG: ${{ matrix.locale }}
+          LC_ALL: ${{ matrix.locale }}
+        run: |
+          Rscript -e 'stopifnot(!l10n_info()[["UTF-8"]]); print(Sys.getlocale())'
+          Rscript -e 'testthat::test_local(stop_on_failure = TRUE, reporter = "summary")'

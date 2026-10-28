@@ -87,9 +87,13 @@ cfb_stream_names <- function(path) {
   vapply(cfb_read(path), function(e) e$name, character(1))
 }
 
+# Committed fixtures, so a missing one is a bug to fail on, not a reason to
+# skip: a skip here would turn most of the decryption suite into skips.
 ole2_fixture <- function(name) {
   path <- test_path("fixtures", "ole2", name)
-  skip_if(!file.exists(path), paste0(name, " fixture is missing"))
+  if (!file.exists(path)) {
+    stop("committed fixture missing: ", path, call. = FALSE)
+  }
   path
 }
 
@@ -305,4 +309,11 @@ base64_encode <- function(bytes) {
   pad <- (-n) %% 3
   if (pad > 0) substr(out, nchar(out) - pad + 1, nchar(out)) <- strrep("=", pad)
   out
+}
+
+# The status the native layer reports for a file: what tells two failures of
+# the same class apart (a legacy .xls from another OLE2 file, say) without
+# reading the message, whose wording the snapshots in test-conditions.R own.
+native_status <- function(path, password = NULL) {
+  .Call(C_xlsx_sheets, normalizePath(path), password)$status
 }

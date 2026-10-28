@@ -15,20 +15,28 @@
 #'
 #' \describe{
 #'   \item{`zuxlsx_input_error`}{An argument was not usable: a `path` that is
-#'     not a single string, or a file that does not exist.}
-#'   \item{`zuxlsx_zip_error`}{The file could not be opened as a ZIP archive.
-#'     It is missing, unreadable, truncated, or not a ZIP at all.}
+#'     not a single string, does not exist or is a directory; a `sheet`,
+#'     `range`, `col_names`, `callback`, `chunk_size` or `password` of the
+#'     wrong kind; or a `range` reaching past `XFD1048576`.}
+#'   \item{`zuxlsx_zip_error`}{The file could not be opened as a ZIP archive
+#'     -- it is unreadable, truncated, or not a ZIP at all -- or a
+#'     worksheet's compressed data failed its integrity check.}
 #'   \item{`zuxlsx_xml_error`}{A part of the workbook is not well-formed XML.
 #'     Raised in preference to `zuxlsx_ooxml_error` when the failure is the
-#'     XML itself rather than what it says, and names the part and line.}
-#'   \item{`zuxlsx_ooxml_error`}{The ZIP archive opened but is not a workbook.
-#'     A valid workbook declares at least one worksheet.}
+#'     XML itself rather than what it says, and names the part or worksheet
+#'     and the line. A worksheet that breaks off part-way is reported this
+#'     way rather than read as a shorter one.}
+#'   \item{`zuxlsx_ooxml_error`}{The XML is well formed but is not a valid
+#'     workbook: the archive declares no worksheet, or a worksheet refers to
+#'     a cell beyond `XFD1048576` or to a shared string that does not
+#'     exist.}
 #'   \item{`zuxlsx_sheet_error`}{The workbook opened, but the requested
 #'     worksheet is not in it.}
 #'   \item{`zuxlsx_encrypted_error`}{The workbook is password-protected and
-#'     no `password` was given. Raised in preference to
-#'     `zuxlsx_unsupported_format_error` so that "needs a password" can be
-#'     handled on its own.}
+#'     no `password` was given. It is also a subclass of
+#'     `zuxlsx_unsupported_format_error`, so a handler for that class catches
+#'     it too, while one for `zuxlsx_encrypted_error` alone can prompt for a
+#'     password.}
 #'   \item{`zuxlsx_password_error`}{The `password` given is not the
 #'     workbook's. A subclass of `zuxlsx_encrypted_error`, so one handler
 #'     covers a password that is missing and one that is wrong. A damaged
@@ -47,6 +55,9 @@
 #'   \item{`zuxlsx_memory_error`}{An allocation failed while reading.}
 #' }
 #'
+#' A failure of the cryptographic backend while decrypting, and an internal
+#' error that should not happen, carry `zuxlsx_error` alone.
+#'
 #' Conditions carry the offending `path` in a `path` element, where one
 #' applies.
 #'
@@ -60,8 +71,8 @@ NULL
 
 zuxlsx_condition <- function(class, message, path = NULL, call = NULL) {
   structure(
-    class = c(class, "zuxlsx_error", "error", "condition"),
-    list(message = message, call = call, path = path)
+    list(message = message, call = call, path = path),
+    class = c(class, "zuxlsx_error", "error", "condition")
   )
 }
 
@@ -77,11 +88,14 @@ zuxlsx_unwrap <- function(res, path = NULL, call = sys.call(-1L)) {
     return(res$value)
   }
 
-  info <- switch(res$status,
+  info <- switch(
+    res$status,
     zip_open = list(
       class = "zuxlsx_zip_error",
       message = paste0(
-        "Cannot open '", path, "' as an xlsx workbook.\n",
+        "Cannot open '",
+        path,
+        "' as an xlsx workbook.\n",
         "The file is not a readable ZIP archive. It may be truncated, ",
         "corrupt, or not an xlsx file at all."
       )
@@ -89,11 +103,73 @@ zuxlsx_unwrap <- function(res, path = NULL, call = sys.call(-1L)) {
     xml_malformed = list(
       class = "zuxlsx_xml_error",
       message = paste0(
-        "'", path, "' contains XML that is not well formed.\n",
-        "The part ", encodeString(res$value$part, quote = "'"),
+        "'",
+        path,
+        "' contains XML that is not well formed.\n",
+        "The part ",
+        encodeString(res$value$part, quote = "'"),
         " could not be parsed",
-        if (isTRUE(res$value$line > 0)) paste0(" (line ", res$value$line, ")") else "",
+        if (isTRUE(res$value$line > 0)) {
+          paste0(" (line ", res$value$line, ")")
+        },
         "."
+      )
+    ),
+    sheet_xml = list(
+      class = "zuxlsx_xml_error",
+      message = paste0(
+        "'",
+        path,
+        "' contains XML that is not well formed.\n",
+        "The worksheet ",
+        encodeString(res$value$sheet, quote = "'"),
+        " breaks off",
+        if (isTRUE(res$value$line > 0)) {
+          paste0(" at line ", res$value$line)
+        },
+        ", so it could not be read in full."
+      )
+    ),
+    sheet_range = list(
+      class = "zuxlsx_ooxml_error",
+      message = paste0(
+        "'",
+        path,
+        "' is not a valid xlsx workbook.\n",
+        "The worksheet ",
+        encodeString(res$value$sheet, quote = "'"),
+        " refers to a cell beyond XFD1048576, the last cell a worksheet can ",
+        "have",
+        if (isTRUE(res$value$line > 0)) {
+          paste0(" (line ", res$value$line, ")")
+        },
+        "."
+      )
+    ),
+    sheet_shared_string = list(
+      class = "zuxlsx_ooxml_error",
+      message = paste0(
+        "'",
+        path,
+        "' is not a valid xlsx workbook.\n",
+        "The worksheet ",
+        encodeString(res$value$sheet, quote = "'"),
+        " refers to a shared string that does not exist",
+        if (isTRUE(res$value$line > 0)) {
+          paste0(" (line ", res$value$line, ")")
+        },
+        "."
+      )
+    ),
+    sheet_zip = list(
+      class = "zuxlsx_zip_error",
+      message = paste0(
+        "'",
+        path,
+        "' is damaged.\n",
+        "The compressed data of worksheet ",
+        encodeString(res$value$sheet, quote = "'"),
+        " does not match its recorded size or checksum."
       )
     ),
     format_encrypted = list(
@@ -103,14 +179,18 @@ zuxlsx_unwrap <- function(res, path = NULL, call = sys.call(-1L)) {
       # that wants to prompt for a password can catch the specific one.
       class = c("zuxlsx_encrypted_error", "zuxlsx_unsupported_format_error"),
       message = paste0(
-        "'", path, "' is a password-protected workbook.\n",
+        "'",
+        path,
+        "' is a password-protected workbook.\n",
         "Pass its password as `password = ` to read it."
       )
     ),
     format_xls = list(
       class = "zuxlsx_unsupported_format_error",
       message = paste0(
-        "'", path, "' is a legacy .xls workbook, not an xlsx workbook.\n",
+        "'",
+        path,
+        "' is a legacy .xls workbook, not an xlsx workbook.\n",
         "An .xls stores its worksheets as BIFF binary records rather than ",
         "XML. zuxlsx reads xlsx only. Open it in Excel and save as .xlsx."
       )
@@ -118,7 +198,9 @@ zuxlsx_unwrap <- function(res, path = NULL, call = sys.call(-1L)) {
     format_ole2 = list(
       class = "zuxlsx_unsupported_format_error",
       message = paste0(
-        "'", path, "' is an OLE2 file, not an xlsx workbook.\n",
+        "'",
+        path,
+        "' is an OLE2 file, not an xlsx workbook.\n",
         "Its directory names neither an encrypted package nor a BIFF ",
         "workbook, so it is some other OLE2 document. zuxlsx reads xlsx only."
       )
@@ -126,7 +208,9 @@ zuxlsx_unwrap <- function(res, path = NULL, call = sys.call(-1L)) {
     format_xlsb = list(
       class = "zuxlsx_unsupported_format_error",
       message = paste0(
-        "'", path, "' is an xlsb workbook, not an xlsx workbook.\n",
+        "'",
+        path,
+        "' is an xlsb workbook, not an xlsx workbook.\n",
         "An xlsb stores its worksheets as binary records rather than XML. ",
         "zuxlsx reads xlsx only."
       )
@@ -138,7 +222,9 @@ zuxlsx_unwrap <- function(res, path = NULL, call = sys.call(-1L)) {
       # right password.
       class = c("zuxlsx_password_error", "zuxlsx_encrypted_error"),
       message = paste0(
-        "The password for '", path, "' is not correct.\n",
+        "The password for '",
+        path,
+        "' is not correct.\n",
         "The workbook's password verifier did not match. If the password is ",
         "right, the file's encryption header is damaged; the two cannot be ",
         "told apart."
@@ -147,7 +233,9 @@ zuxlsx_unwrap <- function(res, path = NULL, call = sys.call(-1L)) {
     agile_integrity = list(
       class = "zuxlsx_integrity_error",
       message = paste0(
-        "'", path, "' failed its integrity check.\n",
+        "'",
+        path,
+        "' failed its integrity check.\n",
         "The password is correct, but the encrypted package does not match ",
         "the HMAC stored with it: the file was damaged or altered after it ",
         "was encrypted. Nothing was decrypted."
@@ -156,7 +244,9 @@ zuxlsx_unwrap <- function(res, path = NULL, call = sys.call(-1L)) {
     agile_malformed = list(
       class = "zuxlsx_integrity_error",
       message = paste0(
-        "'", path, "' is a damaged encrypted workbook.\n",
+        "'",
+        path,
+        "' is a damaged encrypted workbook.\n",
         "Its encryption parameters or its encrypted package are ",
         "inconsistent, so it cannot be decrypted with any password."
       )
@@ -166,7 +256,9 @@ zuxlsx_unwrap <- function(res, path = NULL, call = sys.call(-1L)) {
       # prompts for one must not catch it.
       class = "zuxlsx_unsupported_format_error",
       message = paste0(
-        "'", path, "' is encrypted with an algorithm zuxlsx does not ",
+        "'",
+        path,
+        "' is encrypted with an algorithm zuxlsx does not ",
         "implement.\n",
         "zuxlsx decrypts agile encryption with AES in CBC mode and SHA-1 or ",
         "SHA-2, which is what Excel has written since 2013."
@@ -181,7 +273,9 @@ zuxlsx_unwrap <- function(res, path = NULL, call = sys.call(-1L)) {
       # answer as a damaged encryption header inside it.
       class = "zuxlsx_integrity_error",
       message = paste0(
-        "'", path, "' is a damaged OLE2 container.\n",
+        "'",
+        path,
+        "' is a damaged OLE2 container.\n",
         "Its sector tables or directory are inconsistent, so the streams in ",
         "it cannot be read."
       )
@@ -189,7 +283,9 @@ zuxlsx_unwrap <- function(res, path = NULL, call = sys.call(-1L)) {
     cfb_not_encrypted = list(
       class = "zuxlsx_unsupported_format_error",
       message = paste0(
-        "'", path, "' is an OLE2 container, but not an encrypted workbook.\n",
+        "'",
+        path,
+        "' is an OLE2 container, but not an encrypted workbook.\n",
         "It holds no EncryptionInfo and EncryptedPackage streams."
       )
     ),
@@ -199,7 +295,9 @@ zuxlsx_unwrap <- function(res, path = NULL, call = sys.call(-1L)) {
     encryption_standard = list(
       class = "zuxlsx_unsupported_format_error",
       message = paste0(
-        "'", path, "' uses standard encryption, which zuxlsx does not ",
+        "'",
+        path,
+        "' uses standard encryption, which zuxlsx does not ",
         "decrypt.\n",
         "That is Office 2007's scheme (AES-128, SHA-1). zuxlsx decrypts agile ",
         "encryption, which Excel has written since 2013: open the file in ",
@@ -209,46 +307,61 @@ zuxlsx_unwrap <- function(res, path = NULL, call = sys.call(-1L)) {
     encryption_extensible = list(
       class = "zuxlsx_unsupported_format_error",
       message = paste0(
-        "'", path, "' uses extensible encryption, from a third-party ",
+        "'",
+        path,
+        "' uses extensible encryption, from a third-party ",
         "provider, which zuxlsx does not decrypt."
       )
     ),
     encryption_unknown = list(
       class = "zuxlsx_unsupported_format_error",
       message = paste0(
-        "'", path, "' is encrypted with a scheme whose version zuxlsx does ",
+        "'",
+        path,
+        "' is encrypted with a scheme whose version zuxlsx does ",
         "not recognise."
       )
     ),
     encryption_certificate = list(
       class = "zuxlsx_unsupported_format_error",
       message = paste0(
-        "'", path, "' can only be opened with a certificate, not a ",
+        "'",
+        path,
+        "' can only be opened with a certificate, not a ",
         "password.\n",
         "zuxlsx decrypts password-protected workbooks only."
       )
     ),
     agile_password_utf8 = list(
+      # check_password() refuses such a password before it reaches C, so this
+      # is the same failure, worded the same way.
       class = "zuxlsx_input_error",
-      message = "`password` must be a single non-missing string of valid text."
+      message = "`password` is not valid text in its declared encoding."
     ),
     agile_crypto = list(
-      class = "zuxlsx_error",
+      class = character(),
       message = paste0(
-        "The cryptographic backend failed while decrypting '", path, "' (",
-        res$value, ")."
+        "The cryptographic backend failed while decrypting '",
+        path,
+        "' (",
+        res$value,
+        ")."
       )
     ),
     sheet_not_found = list(
       class = "zuxlsx_sheet_error",
       message = paste0(
-        "'", path, "' has no such worksheet."
+        "'",
+        path,
+        "' has no such worksheet."
       )
     ),
     ooxml_no_sheets = list(
       class = "zuxlsx_ooxml_error",
       message = paste0(
-        "'", path, "' is a ZIP archive but not an xlsx workbook.\n",
+        "'",
+        path,
+        "' is a ZIP archive but not an xlsx workbook.\n",
         "It declares no worksheets."
       )
     ),
@@ -263,9 +376,10 @@ zuxlsx_unwrap <- function(res, path = NULL, call = sys.call(-1L)) {
     # A status R does not know about means the C layer grew one and this
     # function was not updated. Report it rather than returning NULL.
     list(
-      class = "zuxlsx_error",
+      class = character(),
       message = paste0(
-        "Internal error: unrecognised status '", res$status,
+        "Internal error: unrecognised status '",
+        res$status,
         "' from the native layer."
       )
     )

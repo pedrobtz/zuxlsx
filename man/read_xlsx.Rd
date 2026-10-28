@@ -13,7 +13,10 @@ read_xlsx(path, sheet = 1, col_names = TRUE, range = NULL, password = NULL)
 workbook.}
 
 \item{col_names}{Whether the first row holds column names. When \code{FALSE},
-columns are named \code{X1}, \code{X2} and so on.}
+columns are named \code{X1}, \code{X2} and so on. When \code{TRUE}, a column whose
+header cell is blank is named \code{X} and its position, and repeated names
+are made unique with \code{\link[=make.unique]{make.unique()}} and an underscore, so a second \code{id}
+becomes \code{id_1}.}
 
 \item{range}{An A1-style cell range limiting what is read, or \code{NULL} for the
 whole worksheet. Either corner may name a cell, a column or a row, so
@@ -22,7 +25,8 @@ whole worksheet. Either corner may name a cell, a column or a row, so
 order. A range is read as its own rectangle: cells outside it are ignored,
 the top-left becomes the first row and column, and columns the range
 covers appear even where the worksheet left them empty. When \code{col_names}
-is \code{TRUE} the first row of the range supplies the names.}
+is \code{TRUE} the first row of the range supplies the names. A range may not
+reach past \code{XFD1048576}, the last cell a worksheet can have.}
 
 \item{password}{The password of a password-protected workbook, or \code{NULL}
 (the default) for one without. The workbook is decrypted in memory and
@@ -32,7 +36,9 @@ reported as such. Ignored for a workbook that is not encrypted. R cannot
 erase a string, so the password may stay in memory after the call.}
 }
 \value{
-A data frame.
+A data frame with one column per worksheet column, typed as
+described above. A worksheet, or a range, with no cells in it gives a
+data frame with no columns and no rows.
 }
 \description{
 Reads a worksheet and assembles its cells into columns, giving each column

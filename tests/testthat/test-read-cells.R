@@ -29,11 +29,19 @@ test_that("a chunk never splits a row", {
   path <- withr::local_tempfile(fileext = ".xlsx")
   write_workbook(path, grid_workbook(10L, 5L))
 
+  # Collected, then asserted outside the callback: an expectation inside it
+  # would vanish, silently, if the callback were never called.
+  chunks <- list()
   xlsx_read_cells(path, 1, function(cells) {
-    counts <- table(cells$row)
-    # Every row present in a chunk is present in full.
-    expect_true(all(counts == 5L))
+    chunks[[length(chunks) + 1L]] <<- as.vector(table(cells$row))
   }, chunk_size = 3L)
+
+  expect_gt(length(chunks), 1L)
+  # Every row present in a chunk is present in full.
+  expect_true(all(unlist(chunks) == 5L))
+  # And a chunk ends at the first row boundary at or after chunk_size, so
+  # with five cells to a row each is exactly one row.
+  expect_identical(length(chunks), 10L)
 })
 
 test_that("returning FALSE stops the read", {
@@ -41,14 +49,17 @@ test_that("returning FALSE stops the read", {
   write_workbook(path, grid_workbook(100L, 4L))
 
   seen <- 0L
+  calls <- 0L
   stopped <- xlsx_read_cells(path, 1, function(cells) {
+    calls <<- calls + 1L
     seen <<- seen + nrow(cells)
     FALSE
   }, chunk_size = 8L)
 
   expect_true(stopped)
-  # Far short of the 400 cells the worksheet holds.
-  expect_lt(seen, 100L)
+  # One chunk -- two rows of four -- and not a cell more.
+  expect_identical(calls, 1L)
+  expect_identical(seen, 8L)
 })
 
 test_that("reading to the end reports that it was not stopped", {
@@ -63,7 +74,9 @@ test_that("reading to the end reports that it was not stopped", {
 test_that("an error in the callback propagates and leaves nothing open", {
   # The archive and the parser are open when the callback runs, and an error
   # unwinds past every close() on the C stack. If the handles were not owned
-  # by R, this would leak them and the next read could fail.
+  # by R, this would leak them and the next read could fail. A clean re-read
+  # is what R can see; valgrind and ASan in native-checks.yaml are what show
+  # nothing leaked.
   path <- withr::local_tempfile(fileext = ".xlsx")
   write_workbook(path, grid_workbook(40L, 4L))
 
@@ -125,6 +138,12 @@ test_that("bad arguments are input errors", {
                class = "zuxlsx_input_error")
   expect_error(xlsx_read_cells(path, 1, function(x) NULL, chunk_size = NA),
                class = "zuxlsx_input_error")
+  # Past the integer range, not whole, or not finite: each used to become an
+  # NA with a coercion warning, and then a misleading `path` error.
+  for (bad in list(3e9, Inf, 2.5, -Inf)) {
+    expect_error(xlsx_read_cells(path, 1, function(x) NULL, chunk_size = bad),
+                 class = "zuxlsx_input_error", info = format(bad))
+  }
   expect_error(xlsx_read_cells(path, 99, function(x) NULL),
                class = "zuxlsx_sheet_error")
 })
@@ -139,4 +158,16 @@ test_that("an unreadable file fails before the callback is ever called", {
     class = "zuxlsx_error"
   )
   expect_false(called)
+})
+
+test_that("callback and chunk_size are checked before the workbook is opened", {
+  # With a password, opening means decrypting, which costs a full key
+  # derivation; a mistyped argument should cost nothing. A sheet that does
+  # not exist would be a sheet error if the workbook had been opened first.
+  path <- withr::local_tempfile(fileext = ".xlsx")
+  write_workbook(path)
+  expect_error(xlsx_read_cells(path, "Nope", "not a function"),
+               class = "zuxlsx_input_error")
+  expect_error(xlsx_read_cells(path, "Nope", function(x) NULL, chunk_size = 0),
+               class = "zuxlsx_input_error")
 })

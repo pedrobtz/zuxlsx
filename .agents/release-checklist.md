@@ -58,10 +58,9 @@ commit being submitted, then `devtools::submit_cran()`.
 
 ## Worth re-checking at the time
 
-- That the tests pass in a locale that is not UTF-8
-  (`LANG=C LC_ALL=C Rscript -e 'devtools::test()'`). CRAN's Debian clang
-  machine runs them that way, and CI here does not; a non-ASCII password
-  literal once failed only there.
+- That `locale.yaml` is green: it runs the tests in the C and Latin-1
+  locales, as CRAN's Debian clang machine does. A non-ASCII password literal
+  once failed only there (#72).
 - `tools/vendor/verify` and `tools/fixtures/make-extdata.R --check`, so the
   vendored tree and the generated fixture still match what is recorded.
 - That the minimum sibling version named in `configure` is still right. It

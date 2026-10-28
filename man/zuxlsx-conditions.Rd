@@ -11,20 +11,28 @@ stable. Every class below is a subclass of \code{zuxlsx_error}.
 \details{
 \describe{
 \item{\code{zuxlsx_input_error}}{An argument was not usable: a \code{path} that is
-not a single string, or a file that does not exist.}
-\item{\code{zuxlsx_zip_error}}{The file could not be opened as a ZIP archive.
-It is missing, unreadable, truncated, or not a ZIP at all.}
+not a single string, does not exist or is a directory; a \code{sheet},
+\code{range}, \code{col_names}, \code{callback}, \code{chunk_size} or \code{password} of the
+wrong kind; or a \code{range} reaching past \code{XFD1048576}.}
+\item{\code{zuxlsx_zip_error}}{The file could not be opened as a ZIP archive
+-- it is unreadable, truncated, or not a ZIP at all -- or a
+worksheet's compressed data failed its integrity check.}
 \item{\code{zuxlsx_xml_error}}{A part of the workbook is not well-formed XML.
 Raised in preference to \code{zuxlsx_ooxml_error} when the failure is the
-XML itself rather than what it says, and names the part and line.}
-\item{\code{zuxlsx_ooxml_error}}{The ZIP archive opened but is not a workbook.
-A valid workbook declares at least one worksheet.}
+XML itself rather than what it says, and names the part or worksheet
+and the line. A worksheet that breaks off part-way is reported this
+way rather than read as a shorter one.}
+\item{\code{zuxlsx_ooxml_error}}{The XML is well formed but is not a valid
+workbook: the archive declares no worksheet, or a worksheet refers to
+a cell beyond \code{XFD1048576} or to a shared string that does not
+exist.}
 \item{\code{zuxlsx_sheet_error}}{The workbook opened, but the requested
 worksheet is not in it.}
 \item{\code{zuxlsx_encrypted_error}}{The workbook is password-protected and
-no \code{password} was given. Raised in preference to
-\code{zuxlsx_unsupported_format_error} so that "needs a password" can be
-handled on its own.}
+no \code{password} was given. It is also a subclass of
+\code{zuxlsx_unsupported_format_error}, so a handler for that class catches
+it too, while one for \code{zuxlsx_encrypted_error} alone can prompt for a
+password.}
 \item{\code{zuxlsx_password_error}}{The \code{password} given is not the
 workbook's. A subclass of \code{zuxlsx_encrypted_error}, so one handler
 covers a password that is missing and one that is wrong. A damaged
@@ -42,6 +50,9 @@ Raised in preference to reporting such a file as corrupt, which is
 what it otherwise looks like.}
 \item{\code{zuxlsx_memory_error}}{An allocation failed while reading.}
 }
+
+A failure of the cryptographic backend while decrypting, and an internal
+error that should not happen, carry \code{zuxlsx_error} alone.
 
 Conditions carry the offending \code{path} in a \code{path} element, where one
 applies.

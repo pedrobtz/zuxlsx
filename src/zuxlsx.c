@@ -1,23 +1,22 @@
-/* The smallest surface that proves the LinkingTo wiring works end to end.
+/* Every .Call entry point, the cell reader and the column builders.
  *
- * This is not the start of the public API -- read_xlsx(), the cell reader and
- * the column builders in design sections 12-14 come later, and will not go
- * through xlsxio's string callbacks the way this does. It exists so that a
- * broken link is a failing test rather than something discovered in the first
- * real feature:
+ *   C_xlsx_sheets     the worksheet names, through xlsxio's sheet list
+ *   C_xlsx_cells      a whole worksheet as parallel cell vectors
+ *   C_xlsx_read_cells a worksheet a chunk at a time, calling back into R
+ *   C_read_xlsx       a worksheet as typed columns (design section 14)
+ *   C_zuxlsx_native   the versions linked in; it calls Expat and zucrypt
+ *                     directly, so a header on the path without its archive
+ *                     fails at link time
  *
- *   zuxlsx_native()  calls Expat directly, so it fails to link without
- *                    libzuxml.a, and reports what the headers on the
- *                    LinkingTo path say.
- *   xlsx_sheets()    goes through xlsxio, which means miniz opens the ZIP
- *                    (libzukomp.a) and Expat parses xl/workbook.xml
- *                    (libzuxml.a). Both archives, on a real file.
+ * plus the internal entry points the decryption tests use. A password-
+ * protected workbook is classified and decrypted by resolve_source() before
+ * any reader opens; see section 21g.
  *
- * Nothing here calls Rf_error(). Both entry points return a two-element list
+ * Nothing here calls Rf_error(). Every entry point returns a two-element list
  * (status, value), and R turns a non-"ok" status into a classed condition.
  * That is the convention the zu* packages share, and it matters more here than
  * in a pure-C package: Rf_error() longjmps past every free(), and an XLSX read
- * holds a ZIP handle, an Expat parser and -- later -- column builders at once.
+ * holds a ZIP handle, an Expat parser and the cells it has gathered at once.
  */
 #define R_NO_REMAP
 #include <R.h>
@@ -31,7 +30,9 @@
 #include "agile.h"
 #include "cfb.h"
 #include "encinfo.h"
+#include "utf8file.h"
 
+#include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -50,6 +51,10 @@ static const char *const STATUS_ENCRYPTED = "format_encrypted";
 static const char *const STATUS_XLS = "format_xls";
 static const char *const STATUS_XLSB = "format_xlsb";
 static const char *const STATUS_XML = "xml_malformed";
+static const char *const STATUS_SHEET_XML = "sheet_xml";
+static const char *const STATUS_SHEET_RANGE = "sheet_range";
+static const char *const STATUS_SHEET_SHARED = "sheet_shared_string";
+static const char *const STATUS_SHEET_ZIP = "sheet_zip";
 static const char *const STATUS_AGILE_PASSWORD = "agile_password";
 static const char *const STATUS_AGILE_INTEGRITY = "agile_integrity";
 static const char *const STATUS_AGILE_MALFORMED = "agile_malformed";
@@ -166,14 +171,12 @@ static int collect_sheet(const char *name, void *data) {
  * those names needs the header, the FAT and the directory chain and nothing
  * else -- no mini stream, no stream contents, no password.
  *
- * That is what ole2_kind() below does, and it is the difference between
- * telling someone their file needs a password and telling them it might.
- *
- * Everything in it is bounds-checked and every walk is bounded, because a
- * workbook that arrives encrypted is a workbook somebody else produced. A
- * container can declare a sector past the end of the file, a FAT chain that
- * points at itself, or a name length that runs off the end of its entry; none
- * of those may do anything but end the walk.
+ * That is what ole2_classify() below asks cfb.c, and it is the difference
+ * between telling someone their file needs a password and telling them it
+ * might. It uses the same reader the decryption does -- DIFAT sectors, 64-bit
+ * offsets, a bounded walk of the root's directory tree -- so a container that
+ * classifies as encrypted is one that can be decrypted, and a stream inside
+ * a storage counts for neither.
  *
  * An .xlsb is a ZIP, and an OPC package, with XML content types and
  * relationships. Only the workbook and worksheet parts differ: BIFF12 binary
@@ -182,178 +185,49 @@ static int collect_sheet(const char *name, void *data) {
  * say so, and costs nothing on the path where a workbook reads normally. */
 
 typedef enum {
-  OLE2_NO = 0,        /* not a CFB container at all */
   OLE2_ENCRYPTED,     /* an encrypted OOXML package */
   OLE2_XLS,           /* a legacy BIFF workbook */
-  OLE2_UNKNOWN        /* a CFB container holding neither */
+  OLE2_UNKNOWN,       /* a CFB container holding neither, or unreadable */
+  OLE2_MEMORY         /* ran out of memory finding out */
 } ole2_kind_t;
 
-static uint16_t le16(const unsigned char *p) {
-  return (uint16_t) (p[0] | ((uint16_t) p[1] << 8));
-}
-
-static uint32_t le32(const unsigned char *p) {
-  return (uint32_t) p[0] | ((uint32_t) p[1] << 8) |
-         ((uint32_t) p[2] << 16) | ((uint32_t) p[3] << 24);
-}
-
-#define CFB_ENDOFCHAIN 0xFFFFFFFEu
-#define CFB_MAX_DIR_SECTORS 4096   /* a directory this long is pathological */
-#define CFB_DIFAT_IN_HEADER 109
-
-/* Reads one sector into buf. Sector n starts at (n + 1) * sector_size,
-   because sector numbering begins after the 512-byte header. Returns 0 if
-   the sector is not wholly within the file. */
-static int cfb_read_sector(FILE *fp, long file_size, uint32_t sector,
-                           uint32_t sector_size, unsigned char *buf) {
-  /* The multiplication is done in 64-bit and checked, so a sector number
-     near 2^32 cannot wrap into a small, valid-looking offset. */
-  uint64_t offset = ((uint64_t) sector + 1u) * (uint64_t) sector_size;
-  if (offset + sector_size > (uint64_t) file_size) {
-    return 0;
-  }
-  if (fseek(fp, (long) offset, SEEK_SET) != 0) {
-    return 0;
-  }
-  return fread(buf, 1, sector_size, fp) == sector_size;
-}
-
-/* Does a directory entry name equal this ASCII string?
- *
- * Names are UTF-16LE and the recorded length counts the terminating null.
- * Comparing against ASCII means every high byte must be zero -- without that
- * check, a name whose characters happen to share low bytes would match. */
-static int dir_name_is(const unsigned char *entry, const char *ascii,
-                       uint32_t sector_size, size_t entry_offset) {
-  uint16_t len = le16(entry + 0x40);
-  size_t want = strlen(ascii);
-  size_t i;
-
-  /* The length lives inside the entry and is attacker-controlled. */
-  if (len < 2 || len > 64 || (len % 2) != 0) {
-    return 0;
-  }
-  if (entry_offset + 128 > sector_size) {
-    return 0;
-  }
-  if ((size_t) (len / 2 - 1) != want) {
-    return 0;
-  }
-  for (i = 0; i < want; i++) {
-    if (entry[i * 2] != (unsigned char) ascii[i] || entry[i * 2 + 1] != 0) {
-      return 0;
-    }
-  }
-  return 1;
-}
-
-static ole2_kind_t ole2_kind(const char *file) {
+/* Does the file start with the CFB signature? Only the eight bytes are read,
+   so a ZIP pays nothing for the question. */
+static int file_is_cfb(const char *file) {
   static const unsigned char CFB_MAGIC[8] = {
     0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1
   };
-  unsigned char header[512];
-  unsigned char *sector = NULL;
-  unsigned char *fat = NULL;
-  FILE *fp;
-  long file_size;
-  uint32_t sector_size, sector_shift, dir_sector, entries_per_fat;
-  uint32_t walked = 0;
-  int found_info = 0, found_package = 0, found_biff = 0;
-  ole2_kind_t kind = OLE2_NO;
+  unsigned char magic[8];
+  FILE *fp = zuxlsx_fopen_utf8(file);
+  int yes;
 
-  fp = fopen(file, "rb");
-  if (fp == NULL) {
-    return OLE2_NO;
-  }
-  if (fread(header, 1, sizeof(header), fp) != sizeof(header) ||
-      memcmp(header, CFB_MAGIC, sizeof(CFB_MAGIC)) != 0) {
-    fclose(fp);
-    return OLE2_NO;
-  }
+  if (fp == NULL) return 0;
+  yes = fread(magic, 1, sizeof(magic), fp) == sizeof(magic) &&
+        memcmp(magic, CFB_MAGIC, sizeof(magic)) == 0;
+  fclose(fp);
+  return yes;
+}
 
-  /* Past this point the file is a CFB container. Every later failure is a
-     container we could not read far enough into, which is still OLE2 --
-     reporting it as "not OLE2" would send the caller back to the ZIP error
-     it already saw. */
-  kind = OLE2_UNKNOWN;
+/* Which kind of CFB container `bytes` is. A container cfb.c cannot read far
+   enough into is still OLE2 -- reporting it as anything else would send the
+   caller back to the ZIP error it already saw. Both encryption streams, or
+   it is not an encrypted package: EncryptionInfo alone appears in containers
+   this reader has no business guessing about. */
+static ole2_kind_t ole2_classify(const uint8_t *bytes, size_t len) {
+  cfb c;
+  cfb_status st = cfb_open(&c, bytes, len);
+  ole2_kind_t kind = OLE2_UNKNOWN;
 
-  if (fseek(fp, 0, SEEK_END) != 0) {
-    goto done;
-  }
-  file_size = ftell(fp);
-  if (file_size < (long) sizeof(header)) {
-    goto done;
-  }
-
-  /* Version 3 uses 512-byte sectors and version 4 uses 4096. Reading the
-     shift rather than assuming the size is what makes this work on both. */
-  sector_shift = le16(header + 0x1E);
-  if (sector_shift != 9 && sector_shift != 12) {
-    goto done;
-  }
-  sector_size = 1u << sector_shift;
-  entries_per_fat = sector_size / 4u;
-  dir_sector = le32(header + 0x30);
-
-  sector = (unsigned char *) malloc(sector_size);
-  fat = (unsigned char *) malloc(sector_size);
-  if (sector == NULL || fat == NULL) {
-    goto done;
-  }
-
-  while (dir_sector != CFB_ENDOFCHAIN && walked < CFB_MAX_DIR_SECTORS) {
-    uint32_t fat_index, fat_sector, i;
-
-    if (!cfb_read_sector(fp, file_size, dir_sector, sector_size, sector)) {
-      break;
-    }
-    for (i = 0; i + 128 <= sector_size; i += 128) {
-      unsigned char *entry = sector + i;
-      unsigned char type = entry[0x42];
-
-      if (type != 2 && type != 1 && type != 5) {   /* stream, storage, root */
-        continue;
-      }
-      if (dir_name_is(entry, "EncryptionInfo", sector_size, i)) {
-        found_info = 1;
-      } else if (dir_name_is(entry, "EncryptedPackage", sector_size, i)) {
-        found_package = 1;
-      } else if (dir_name_is(entry, "Workbook", sector_size, i) ||
-                 dir_name_is(entry, "Book", sector_size, i)) {
-        found_biff = 1;
-      }
-    }
-
-    /* Follow the chain. The FAT entry for a sector lives in the FAT sector
-       the header's DIFAT names; only the 109 entries the header carries are
-       consulted, which covers every directory chain that is not itself
-       enormous, and a file needing more is left as OLE2_UNKNOWN rather than
-       chasing DIFAT sectors for a question this small. */
-    fat_index = dir_sector / entries_per_fat;
-    if (fat_index >= CFB_DIFAT_IN_HEADER) {
-      break;
-    }
-    fat_sector = le32(header + 0x4C + fat_index * 4u);
-    if (fat_sector == CFB_ENDOFCHAIN ||
-        !cfb_read_sector(fp, file_size, fat_sector, sector_size, fat)) {
-      break;
-    }
-    dir_sector = le32(fat + (dir_sector % entries_per_fat) * 4u);
-    walked++;
-  }
-
-  /* Both streams, or it is not an encrypted package. EncryptionInfo alone
-     appears in containers this reader has no business guessing about. */
-  if (found_info && found_package) {
+  if (st == CFB_MEMORY) return OLE2_MEMORY;
+  if (st != CFB_OK) return OLE2_UNKNOWN;
+  if (cfb_has_stream(&c, "EncryptionInfo") == CFB_OK &&
+      cfb_has_stream(&c, "EncryptedPackage") == CFB_OK) {
     kind = OLE2_ENCRYPTED;
-  } else if (found_biff) {
+  } else if (cfb_has_stream(&c, "Workbook") == CFB_OK ||
+             cfb_has_stream(&c, "Book") == CFB_OK) {
     kind = OLE2_XLS;
   }
-
-done:
-  free(sector);
-  free(fat);
-  fclose(fp);
+  cfb_close(&c);
   return kind;
 }
 
@@ -393,7 +267,7 @@ static const char *encinfo_status_string(encinfo_status st);
 /* The whole file, into C memory. Read in growing chunks rather than sized
    with ftell(), whose long is 32 bits on Windows. */
 static int read_file(const char *file, uint8_t **out, size_t *out_len) {
-  FILE *fp = fopen(file, "rb");
+  FILE *fp = zuxlsx_fopen_utf8(file);
   uint8_t *buf = NULL;
   size_t len = 0, cap = 0;
 
@@ -402,8 +276,9 @@ static int read_file(const char *file, uint8_t **out, size_t *out_len) {
     size_t got;
     if (len == cap) {
       size_t grown = cap ? cap * 2 : 65536;
-      uint8_t *p = (uint8_t *) realloc(buf, grown);
-      if (p == NULL || grown < cap) {
+      uint8_t *p;
+      /* Checked before the realloc: after a successful one, buf is gone. */
+      if (grown < cap || (p = (uint8_t *) realloc(buf, grown)) == NULL) {
         free(buf);
         fclose(fp);
         return -1;
@@ -497,23 +372,28 @@ done:
 static const char *resolve_source(const char *file, SEXP password, SEXP holder,
                                   zuc_status *crypto) {
   plain_buf *b = (plain_buf *) R_ExternalPtrAddr(holder);
-  ole2_kind_t kind = ole2_kind(file);
+  ole2_kind_t kind;
   uint8_t *bytes = NULL;
   size_t len = 0;
   const char *status;
   int rc;
 
   *crypto = ZUC_OK;
-  if (kind == OLE2_NO) return NULL;
+  if (!file_is_cfb(file)) return NULL;
+
+  /* Read once: the same bytes are classified and, if it comes to that,
+     decrypted. */
+  rc = read_file(file, &bytes, &len);
+  if (rc <= 0) return rc < 0 ? STATUS_MEMORY : STATUS_ZIP_OPEN;
+  kind = ole2_classify(bytes, len);
   /* A password changes nothing for a legacy .xls or an unknown container,
      and without one an encrypted package is still only reported. */
   if (kind != OLE2_ENCRYPTED || password == R_NilValue) {
-    return kind == OLE2_ENCRYPTED ? STATUS_ENCRYPTED
+    free(bytes);
+    return kind == OLE2_MEMORY ? STATUS_MEMORY
+         : kind == OLE2_ENCRYPTED ? STATUS_ENCRYPTED
          : kind == OLE2_XLS ? STATUS_XLS : STATUS_OLE2;
   }
-
-  rc = read_file(file, &bytes, &len);
-  if (rc <= 0) return rc < 0 ? STATUS_MEMORY : STATUS_ZIP_OPEN;
   status = decrypt_package(bytes, len, CHAR(STRING_ELT(password, 0)),
                            &b->data, &b->len, crypto);
   free(bytes);
@@ -551,8 +431,6 @@ static int password_ok(SEXP password) {
           STRING_ELT(password, 0) != NA_STRING);
 }
 
-/* Only asked once a workbook has already failed to declare a worksheet, so
-   the second open costs nothing in the normal case. */
 /* Opens the archive a reader would: the file, or the decrypted package in
    memory when there is one. */
 static int zip_open(mz_zip_archive *zip, const char *file,
@@ -560,6 +438,35 @@ static int zip_open(mz_zip_archive *zip, const char *file,
   memset(zip, 0, sizeof(*zip));
   return buf != NULL ? mz_zip_reader_init_mem(zip, buf, len, 0)
                      : mz_zip_reader_init_file(zip, file, 0);
+}
+
+/* An archive member by part name, matched as patch 0005 matches them inside
+   xlsxio -- backslashes as slashes, ASCII case folded, the first match in the
+   central directory winning -- so a diagnostic looks at the member the
+   reader would have read, not at another copy of it. */
+static int locate_part(mz_zip_archive *zip, const char *name, mz_uint32 *index) {
+  size_t len = strlen(name);
+  mz_uint count = mz_zip_reader_get_num_files(zip);
+  mz_uint i;
+
+  for (i = 0; i < count; i++) {
+    char stored[MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE];
+    size_t j;
+    mz_uint got = mz_zip_reader_get_filename(zip, i, stored, sizeof(stored));
+    if (got == 0 || got > sizeof(stored) || strlen(stored) != len) continue;
+    for (j = 0; j < len; j++) {
+      char a = stored[j] == '\\' ? '/' : stored[j];
+      char b = name[j] == '\\' ? '/' : name[j];
+      if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
+      if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
+      if (a != b) break;
+    }
+    if (j == len) {
+      *index = i;
+      return 1;
+    }
+  }
+  return 0;
 }
 
 static int file_is_xlsb(const char *file, const uint8_t *buf, size_t len) {
@@ -570,7 +477,7 @@ static int file_is_xlsb(const char *file, const uint8_t *buf, size_t len) {
   if (!zip_open(&zip, file, buf, len)) {
     return 0;
   }
-  if (mz_zip_reader_locate_file_v2(&zip, "xl/workbook.bin", NULL, 0, &index)) {
+  if (locate_part(&zip, "xl/workbook.bin", &index)) {
     found = 1;
   }
   mz_zip_reader_end(&zip);
@@ -600,24 +507,42 @@ static int first_malformed_part(const char *file, const uint8_t *zbuf,
     return 0;
   }
   for (i = 0; i < sizeof(PARTS) / sizeof(PARTS[0]); i++) {
-    size_t size = 0;
-    void *buf;
     mz_uint32 index;
+    mz_zip_reader_extract_iter_state *it;
     XML_Parser parser;
+    int bad = 0;
 
-    if (!mz_zip_reader_locate_file_v2(&zip, PARTS[i], NULL, 0, &index)) {
+    if (!locate_part(&zip, PARTS[i], &index)) {
       continue;
     }
-    buf = mz_zip_reader_extract_to_heap(&zip, index, &size, 0);
-    if (buf == NULL) {
+    /* Streamed, as the reader streams it, rather than extracted whole: a
+       member's declared size is the archive's word, not a bound. */
+    it = mz_zip_reader_extract_iter_new(&zip, index, 0);
+    if (it == NULL) {
       continue;
     }
     parser = XML_ParserCreate(NULL);
     if (parser == NULL) {
-      mz_free(buf);
+      mz_zip_reader_extract_iter_free(it);
       continue;
     }
-    if (XML_Parse(parser, (const char *)buf, (int)size, 1) == XML_STATUS_ERROR) {
+    for (;;) {
+      void *chunk = XML_GetBuffer(parser, 65536);
+      size_t got;
+      if (chunk == NULL) {
+        break;
+      }
+      got = mz_zip_reader_extract_iter_read(it, chunk, 65536);
+      if (XML_ParseBuffer(parser, (int)got, got == 0) == XML_STATUS_ERROR) {
+        bad = 1;
+        break;
+      }
+      if (got == 0) {
+        break;
+      }
+    }
+    mz_zip_reader_extract_iter_free(it);
+    if (bad) {
       size_t n = strlen(PARTS[i]);
       if (n >= outlen) {
         n = outlen - 1;
@@ -628,7 +553,6 @@ static int first_malformed_part(const char *file, const uint8_t *zbuf,
       found = 1;
     }
     XML_ParserFree(parser);
-    mz_free(buf);
     if (found) {
       break;
     }
@@ -873,12 +797,90 @@ static int cell_list_push(cell_list *cells, size_t row, size_t col, int type,
   return 0;
 }
 
+/* Days from 1970-01-01 to the given proleptic Gregorian date (H. Hinnant's
+   days_from_civil). */
+static double days_from_civil(long y, unsigned m, unsigned d) {
+  long era;
+  unsigned yoe, doy, doe;
+  y -= m <= 2;
+  era = (y >= 0 ? y : y - 399) / 400;
+  yoe = (unsigned)(y - era * 400);
+  doy = (153 * (m > 2 ? m - 3 : m + 9) + 2) / 5 + d - 1;
+  doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+  return (double)era * 146097.0 + (double)doe - 719468.0;
+}
+
+static int read_digits(const char **p, int n, unsigned *out) {
+  unsigned v = 0;
+  int i;
+  for (i = 0; i < n; i++) {
+    if ((*p)[i] < '0' || (*p)[i] > '9') return 0;
+    v = v * 10 + (unsigned)((*p)[i] - '0');
+  }
+  *p += n;
+  *out = v;
+  return 1;
+}
+
+/* The serial an Excel number would carry for an ISO 8601 t="d" value, in the
+   workbook's own epoch, so that R converts both kinds of date the same way.
+   Accepts YYYY-MM-DD, an optional [T ]hh:mm[:ss[.fff]] (or the time alone),
+   and an optional trailing Z. Returns 0 for anything else. */
+static int iso_to_serial(const char *text, int date1904, double *serial) {
+  const char *p = text;
+  unsigned y = 0, mo = 0, d = 0, h = 0, mi = 0, sec = 0;
+  double days = 0, frac = 0, scale = 0.1;
+  int has_date = 0, has_time = 0;
+  static const unsigned mdays[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+
+  if (read_digits(&p, 4, &y) && *p == '-') {
+    p++;
+    if (!read_digits(&p, 2, &mo) || *p++ != '-' || !read_digits(&p, 2, &d)) return 0;
+    if (mo < 1 || mo > 12 || d < 1) return 0;
+    if (d > mdays[mo - 1] + (mo == 2 && ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0))) {
+      return 0;
+    }
+    has_date = 1;
+    if (*p == 'T' || *p == ' ') p++;
+  } else {
+    p = text;
+    if (*p == 'T') p++;
+  }
+  if (*p != 0 && *p != 'Z') {
+    if (!read_digits(&p, 2, &h) || *p++ != ':' || !read_digits(&p, 2, &mi)) return 0;
+    if (*p == ':') {
+      p++;
+      if (!read_digits(&p, 2, &sec)) return 0;
+      if (*p == '.') {
+        for (p++; *p >= '0' && *p <= '9'; p++, scale /= 10) frac += (*p - '0') * scale;
+      }
+    }
+    if (h > 24 || mi > 59 || sec > 60) return 0;
+    has_time = 1;
+  }
+  if (*p == 'Z') p++;
+  if (*p != 0 || (!has_date && !has_time)) return 0;
+
+  if (has_date) {
+    if (date1904) {
+      days = days_from_civil((long)y, mo, d) - days_from_civil(1904, 1, 1);
+    } else {
+      days = days_from_civil((long)y, mo, d) - days_from_civil(1899, 12, 30);
+      /* The 1900 system counts a 29 February 1900 that never was, so a date
+         before 1 March 1900 is one serial lower than the day count. */
+      if (days < 61) days -= 1;
+    }
+  }
+  *serial = days + ((double)h * 3600.0 + (double)mi * 60.0 + (double)sec + frac) / 86400.0;
+  return 1;
+}
+
 /* Maps what xlsxio reports onto the design section 13 type. A date is not an
    OOXML type of its own: except for the rare t="d", it is a number whose
    style carries a date format, which is why the format table is consulted
    rather than the type alone. */
 static int classify_cell(int xlsxio_type, int is_date, const char *value,
-                         double *number) {
+                         int date1904, double *number) {
   char *end = NULL;
   *number = NA_REAL;
 
@@ -894,14 +896,22 @@ static int classify_cell(int xlsxio_type, int is_date, const char *value,
     case XLSXIOREAD_CELLTYPE_STRING:
       return ZU_CELL_STRING;
     case XLSXIOREAD_CELLTYPE_DATE:
-      return ZU_CELL_DATE;
+      /* An ISO 8601 date in the text. Kept as text if it cannot be read, so
+         nothing the workbook says is lost. */
+      return iso_to_serial(value, date1904, number) ? ZU_CELL_DATE
+                                                    : ZU_CELL_STRING;
     case XLSXIOREAD_CELLTYPE_NUMBER:
     default:
       break;
   }
   /* A number, or a date stored as one. strtod is the only conversion: the
      serial value is kept as written and interpreted in R, where the 1900 and
-     1904 epochs can be told apart using the workbook's own setting. */
+     1904 epochs can be told apart using the workbook's own setting. It is
+     shown only what a decimal number can be made of -- it would also take
+     "inf", "nan" and hex, which OOXML numbers never are. */
+  if (strspn(value, "0123456789+-.eE") != strlen(value)) {
+    return ZU_CELL_STRING;
+  }
   *number = strtod(value, &end);
   if (end == value || (end != NULL && *end != 0)) {
     *number = NA_REAL;
@@ -979,6 +989,42 @@ static void reader_handle_finalizer(SEXP ptr) {
   }
 }
 
+/* After a row loop that ran until xlsxioread_sheet_next_row() returned 0:
+   NULL if the worksheet was read in full, otherwise the status to report,
+   with the XML line in *line. A worksheet that ends early looks exactly like
+   one that ends, so without this a damaged one reads as a short one. */
+static const char *sheet_end_status(xlsxioreadersheet worksheet, int *line) {
+  unsigned long at = 0;
+  int why = xlsxioread_sheet_finish(worksheet, &at);
+  *line = at > (unsigned long)INT_MAX ? 0 : (int)at;
+  switch (why) {
+    case XLSXIOREAD_SHEET_ERROR_NONE:
+      return NULL;
+    case XLSXIOREAD_SHEET_ERROR_RANGE:
+      return STATUS_SHEET_RANGE;
+    case XLSXIOREAD_SHEET_ERROR_SHAREDSTRING:
+      return STATUS_SHEET_SHARED;
+    case XLSXIOREAD_SHEET_ERROR_ZIP:
+      return STATUS_SHEET_ZIP;
+    default:
+      return STATUS_SHEET_XML;
+  }
+}
+
+/* The result for a worksheet that could not be read in full. Allocates, so it
+   is only called once nothing but R-owned memory is held. */
+static SEXP sheet_failure(const char *status, const char *sheetname, int line) {
+  const char *fields[] = {"sheet", "line", ""};
+  SEXP detail = PROTECT(Rf_mkNamed(VECSXP, fields));
+  SEXP name = PROTECT(Rf_mkCharCE(sheetname, CE_UTF8));
+  SEXP res;
+  SET_VECTOR_ELT(detail, 0, Rf_ScalarString(name));
+  SET_VECTOR_ELT(detail, 1, Rf_ScalarInteger(line));
+  res = result(status, detail);
+  UNPROTECT(2);
+  return res;
+}
+
 SEXP C_xlsx_cells(SEXP path, SEXP sheet, SEXP password) {
   const char *file;
   const char *sheetname;
@@ -992,6 +1038,8 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet, SEXP password) {
   size_t i;
   size_t rownr = 0;
   int date1904 = 0;
+  const char *end = NULL;
+  int line = 0;
 
   if (TYPEOF(path) != STRSXP || XLENGTH(path) < 1 ||
       STRING_ELT(path, 0) == NA_STRING ||
@@ -1042,6 +1090,7 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet, SEXP password) {
     UNPROTECT(2);
     return result(STATUS_NO_SHEET, R_NilValue);
   }
+  date1904 = xlsxioread_sheet_date1904(worksheet);
 
   while (xlsxioread_sheet_next_row(worksheet)) {
     size_t colnr = 0;
@@ -1054,7 +1103,7 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet, SEXP password) {
       double number;
       int type = classify_cell(xlsxioread_sheet_last_cell_type(worksheet),
                                xlsxioread_sheet_last_cell_is_date(worksheet),
-                               value, &number);
+                               value, date1904, &number);
       colnr++;
       if (cell_list_push(cells, rownr, colnr, type, value, number) != 0) {
         free(value);
@@ -1069,7 +1118,9 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet, SEXP password) {
       break;
     }
   }
-  date1904 = xlsxioread_sheet_date1904(worksheet);
+  if (!cells->oom) {
+    end = sheet_end_status(worksheet, &line);
+  }
   xlsxioread_sheet_close(worksheet);
   xlsxioread_close(reader);
   plain_buf_finalizer(holder);
@@ -1079,6 +1130,12 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet, SEXP password) {
     UNPROTECT(2);
     return result(STATUS_MEMORY, R_NilValue);
   }
+  if (end != NULL) {
+    cell_list_finalizer(bag);
+    res = sheet_failure(end, sheetname, line);
+    UNPROTECT(2);
+    return res;
+  }
 
   out = PROTECT(cells_to_list(cells, date1904));
   cell_list_finalizer(bag);
@@ -1086,6 +1143,56 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet, SEXP password) {
   res = PROTECT(result(STATUS_OK, out));
   UNPROTECT(4);
   return res;
+}
+
+/* Calls the R callback on one chunk. If it unwinds -- an error, an
+   interrupt, a restart -- the reader is closed and the plaintext wiped there
+   and then, rather than whenever the finalizers next run. */
+typedef struct {
+  SEXP callback;
+  SEXP arg;
+  SEXP env;
+} callback_call;
+
+typedef struct {
+  SEXP holder;
+  SEXP bag;
+} callback_owner;
+
+static SEXP callback_body(void *data) {
+  callback_call *c = (callback_call *)data;
+  SEXP call = PROTECT(Rf_lang2(c->callback, c->arg));
+  SEXP val = Rf_eval(call, c->env);
+  UNPROTECT(1);
+  return val;
+}
+
+static void callback_cleanup(void *data, Rboolean jump) {
+  callback_owner *o = (callback_owner *)data;
+  if (jump) {
+    reader_handle_finalizer(o->holder);
+    cell_list_finalizer(o->bag);
+  }
+}
+
+/* Returns nonzero if the callback asked to stop. */
+static int run_callback(SEXP callback, SEXP env, const cell_list *cells,
+                        int date1904, SEXP holder, SEXP bag) {
+  callback_call c;
+  callback_owner o;
+  SEXP cont, val;
+  int stop;
+
+  c.callback = callback;
+  c.env = env;
+  c.arg = PROTECT(cells_to_list(cells, date1904));
+  o.holder = holder;
+  o.bag = bag;
+  cont = PROTECT(R_MakeUnwindCont());
+  val = PROTECT(R_UnwindProtect(callback_body, &c, callback_cleanup, &o, cont));
+  stop = (TYPEOF(val) == LGLSXP && XLENGTH(val) >= 1 && LOGICAL(val)[0] == FALSE);
+  UNPROTECT(3);
+  return stop;
 }
 
 /* Reads a worksheet a chunk at a time, handing each chunk to an R function.
@@ -1114,6 +1221,8 @@ SEXP C_xlsx_read_cells(SEXP path, SEXP sheet, SEXP callback, SEXP env,
   size_t rownr = 0;
   int date1904 = 0;
   int stopped = 0;
+  const char *end = NULL;
+  int line = 0;
 
   if (TYPEOF(path) != STRSXP || XLENGTH(path) < 1 ||
       STRING_ELT(path, 0) == NA_STRING ||
@@ -1194,7 +1303,7 @@ SEXP C_xlsx_read_cells(SEXP path, SEXP sheet, SEXP callback, SEXP env,
       double num;
       int type = classify_cell(xlsxioread_sheet_last_cell_type(handle->sheet),
                                xlsxioread_sheet_last_cell_is_date(handle->sheet),
-                               value, &num);
+                               value, date1904, &num);
       colnr++;
       if (cell_list_push(cells, rownr, colnr, type, value, num) != 0) {
         free(value);
@@ -1208,12 +1317,7 @@ SEXP C_xlsx_read_cells(SEXP path, SEXP sheet, SEXP callback, SEXP env,
     /* Emitted between rows, never inside one, so a chunk boundary can never
        fall in the middle of a row and split it across two callbacks. */
     if (cells->n >= limit) {
-      SEXP arg = PROTECT(cells_to_list(cells, date1904));
-      SEXP call = PROTECT(Rf_lang2(callback, arg));
-      SEXP val = PROTECT(Rf_eval(call, env));
-      stopped = (TYPEOF(val) == LGLSXP && XLENGTH(val) >= 1 &&
-                 LOGICAL(val)[0] == FALSE);
-      UNPROTECT(3);
+      stopped = run_callback(callback, env, cells, date1904, holder, bag);
       cell_list_free(cells);
     }
   }
@@ -1224,13 +1328,17 @@ SEXP C_xlsx_read_cells(SEXP path, SEXP sheet, SEXP callback, SEXP env,
     UNPROTECT(3);
     return result(STATUS_MEMORY, R_NilValue);
   }
-  if (!stopped && cells->n > 0) {
-    SEXP arg = PROTECT(cells_to_list(cells, date1904));
-    SEXP call = PROTECT(Rf_lang2(callback, arg));
-    SEXP val = PROTECT(Rf_eval(call, env));
-    stopped = (TYPEOF(val) == LGLSXP && XLENGTH(val) >= 1 &&
-               LOGICAL(val)[0] == FALSE);
+  /* Chunks already delivered stay delivered, but a worksheet that turns out
+     to be damaged is still reported rather than ending quietly. */
+  if (!stopped && (end = sheet_end_status(handle->sheet, &line)) != NULL) {
+    reader_handle_finalizer(holder);
+    cell_list_finalizer(bag);
+    res = sheet_failure(end, sheetname, line);
     UNPROTECT(3);
+    return res;
+  }
+  if (!stopped && cells->n > 0) {
+    stopped = run_callback(callback, env, cells, date1904, holder, bag);
   }
 
   reader_handle_finalizer(holder);
@@ -1300,6 +1408,8 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
   size_t ncol = 0, nrow = 0, body_first = 0;
   unsigned int *mask = NULL;
   int *kind = NULL;
+  const char *end = NULL;
+  int line = 0;
 
   if (TYPEOF(path) != STRSXP || XLENGTH(path) < 1 ||
       STRING_ELT(path, 0) == NA_STRING ||
@@ -1318,6 +1428,14 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
     max_row = REAL(bounds)[1];
     min_col = REAL(bounds)[2];
     max_col = REAL(bounds)[3];
+    /* parse_range() refuses anything outside the grid; the symbol is
+       reachable without it, and these sizes become allocations below. */
+    if ((!ISNA(min_row) && !(min_row >= 1 && max_row >= min_row &&
+                             max_row <= 1048576)) ||
+        (!ISNA(min_col) && !(min_col >= 1 && max_col >= min_col &&
+                             max_col <= 16384))) {
+      return result(STATUS_BAD_PATH, R_NilValue);
+    }
   }
   file = Rf_translateCharUTF8(STRING_ELT(path, 0));
   sheetname = Rf_translateCharUTF8(STRING_ELT(sheet, 0));
@@ -1362,6 +1480,7 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
     UNPROTECT(2);
     return result(STATUS_NO_SHEET, R_NilValue);
   }
+  date1904 = xlsxioread_sheet_date1904(worksheet);
 
   while (xlsxioread_sheet_next_row(worksheet)) {
     size_t colnr = 0;
@@ -1371,7 +1490,7 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
       double num;
       int type = classify_cell(xlsxioread_sheet_last_cell_type(worksheet),
                                xlsxioread_sheet_last_cell_is_date(worksheet),
-                               value, &num);
+                               value, date1904, &num);
       colnr++;
       /* Cells outside the range are dropped here rather than after the fact,
          so a range never pays for the rest of the worksheet in memory. */
@@ -1393,7 +1512,9 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
       break;
     }
   }
-  date1904 = xlsxioread_sheet_date1904(worksheet);
+  if (!cells->oom) {
+    end = sheet_end_status(worksheet, &line);
+  }
   xlsxioread_sheet_close(worksheet);
   xlsxioread_close(reader);
   plain_buf_finalizer(holder);
@@ -1402,6 +1523,12 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
     cell_list_finalizer(bag);
     UNPROTECT(2);
     return result(STATUS_MEMORY, R_NilValue);
+  }
+  if (end != NULL) {
+    cell_list_finalizer(bag);
+    res = sheet_failure(end, sheetname, line);
+    UNPROTECT(2);
+    return res;
   }
   if (cells->n == 0) {
     cell_list_finalizer(bag);
@@ -1438,15 +1565,11 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
   body_first = (size_t)first_row + (header ? 1u : 0u);
   nrow = (last_row >= (double)body_first) ? (size_t)(last_row - (double)body_first + 1) : 0;
 
-  mask = (unsigned int *)calloc(ncol, sizeof(unsigned int));
-  kind = (int *)calloc(ncol, sizeof(int));
-  if (mask == NULL || kind == NULL) {
-    free(mask);
-    free(kind);
-    cell_list_finalizer(bag);
-    UNPROTECT(2);
-    return result(STATUS_MEMORY, R_NilValue);
-  }
+  /* R_alloc rather than malloc: the column allocations below can fail and
+     longjmp, and R reclaims these when the call ends however it ends. */
+  mask = (unsigned int *)R_alloc(ncol, sizeof(unsigned int));
+  kind = (int *)R_alloc(ncol, sizeof(int));
+  memset(mask, 0, ncol * sizeof(unsigned int));
   for (i = 0; i < cells->n; i++) {
     if (cells->row[i] < body_first || cells->type[i] == ZU_CELL_BLANK) {
       continue;
@@ -1523,8 +1646,6 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
     }
   }
 
-  free(mask);
-  free(kind);
   cell_list_finalizer(bag);
 
   {

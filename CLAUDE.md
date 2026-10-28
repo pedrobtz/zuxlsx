@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state: 0.1.0, and the reader is done
 
-The reading API of design §12 is implemented and the package is CRAN-ready apart from the two steps that must happen on submission day, which are in [.agents/release-checklist.md](.agents/release-checklist.md). 870 tests pass, shuffled, and `R CMD check --as-cran` is 0 errors / 0 warnings / 0 notes.
+The reading API of design §12 is implemented. The siblings are on CRAN and `Remotes:` is gone; what is left before submission is in [.agents/release-checklist.md](.agents/release-checklist.md). About 1,500 expectations pass, shuffled, in UTF-8, C and Latin-1 locales, and `R CMD check --as-cran` against the CRAN siblings gives only the "New submission" NOTE. The whole-package review of 2026-10-28 is filed as issues labelled `review`.
 
 What is exported:
 
@@ -32,12 +32,12 @@ The build:
 - **There is no `Remotes:`.** zuxml, zukomp and zucrypt all reached CRAN in October 2026 (0.1.0 each), and `Remotes:` was dropped for the CRAN submission, so CI and a GitHub install resolve the siblings from CRAN. To build against a sibling's unreleased `main`, install it first with `pak::pak("pedrobtz/<pkg>")`. The full sequence is in [.agents/release-checklist.md](.agents/release-checklist.md).
 - `src/Makevars` is generated and `.gitignore`d. `cleanup` removes it.
 
-The native layer is [src/zuxlsx.c](src/zuxlsx.c) — every `.Call` entry point, the cell reader and the column builders in one translation unit — plus [src/init.c](src/init.c) for registration and the zucrypt backend's lifetime (`zuc_init()` on load, `zuc_shutdown()` on unload), [src/agile.c](src/agile.c), the decryption core, [src/cfb.c](src/cfb.c), which reads stream contents out of a CFB container in memory, and [src/encinfo.c](src/encinfo.c), which parses `EncryptionInfo`. None includes an R header, so all three can be fuzzed outside R (#45).
+The native layer is [src/zuxlsx.c](src/zuxlsx.c) — every `.Call` entry point, the cell reader and the column builders in one translation unit — plus [src/init.c](src/init.c) for registration and the zucrypt backend's lifetime (`zuc_init()` on load, `zuc_shutdown()` on unload), [src/agile.c](src/agile.c), the decryption core, [src/cfb.c](src/cfb.c), which reads stream contents out of a CFB container in memory and also decides what kind of OLE2 file a file is, [src/encinfo.c](src/encinfo.c), which parses `EncryptionInfo`, and [src/utf8file.c](src/utf8file.c), which opens a UTF-8 path with `_wfopen` on Windows. None includes an R header, so the first three can be fuzzed outside R (#45).
 
 Vendored, and the corpora:
 
 - [src/vendor/xlsxio/](src/vendor/xlsxio/) — xlsxio 0.2.36, **reader only** (`xlsxio_read.c`, `xlsxio_read_sharedstrings.c`, headers, `LICENSE.txt`). The writer is not bundled; writing is out of scope (§21). Upstream CRLF line endings are kept deliberately.
-- [tools/patches/xlsxio/](tools/patches/xlsxio/) — **seven patches**, applied in order, reproducing the committed copy byte for byte from the pristine 0.2.36 tarball:
+- [tools/patches/xlsxio/](tools/patches/xlsxio/) — **eight patches**, applied in order, reproducing the committed copy byte for byte from the pristine 0.2.36 tarball:
 
   | Patch | What it does |
   | --- | --- |
@@ -48,6 +48,7 @@ Vendored, and the corpora:
   | `0005-tolerant-part-name-lookup` | matches archive members the way OOXML consumers compare part names |
   | `0006-strict-ooxml-relationship-types` | accepts strict OOXML relationship namespaces as well as transitional ones |
   | `0007-null-relationship-id-crash` | a missing relationship `Id` reached `strcasecmp` as `NULL`; found by the fuzzer, reported upstream |
+  | `0008-report-why-a-worksheet-ended` | `xlsxioread_sheet_finish()`: a worksheet that ends on a parse error, a reference past `XFD1048576`, a dangling shared-string index or a bad CRC is reported rather than read short; also corrects 0003's bracket and built-in date rules |
 
   Provenance is in [tools/vendor/manifest.tsv](tools/vendor/manifest.tsv), [tools/vendor/checksums.sha256](tools/vendor/checksums.sha256) and [inst/COPYRIGHTS](inst/COPYRIGHTS); **`tools/vendor/verify` checks all of it offline and is the thing to run after touching anything under `src/vendor/`.**
 - [tests/testthat/sheets/](tests/testthat/sheets/) — seven readxl interoperability workbooks (inline strings, missing parts, nonstandard namespace prefix, UTF-8 sheet names, blanks), MIT, with provenance and checksums in `MANIFEST.tsv` there, all verified byte for byte against readxl at commit `47f8aeac`. `test-corpus.R` asserts their content, not just that they open.

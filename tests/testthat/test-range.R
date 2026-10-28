@@ -2,12 +2,12 @@
 
 test_that("column letters follow Excel's bijective base 26", {
   # Not ordinary base 26: there is no zero digit, so "AA" is 27, not 26.
+  letters_in <- c("A", "B", "Z", "AA", "AB", "AZ", "BA", "ZZ", "AAA", "XFD")
   expect_identical(
-    column_number(c("A", "B", "Z", "AA", "AB", "AZ", "BA", "ZZ", "AAA")),
-    c(1, 2, 26, 27, 28, 52, 53, 702, 703)
+    vapply(letters_in, column_number, numeric(1), USE.NAMES = FALSE),
+    c(1, 2, 26, 27, 28, 52, 53, 702, 703, 16384)
   )
   expect_identical(column_number("a"), 1)
-  expect_true(is.na(column_number("A1")))
 })
 
 test_that("a rectangle takes only its own cells", {
@@ -123,4 +123,20 @@ test_that("a range keeps its types and its epoch", {
 
   out <- read_xlsx(path, col_names = FALSE, range = "B2:B2")
   expect_identical(out$X1, as.Date("2024-02-02"))
+})
+
+test_that("a range may not reach past the last cell of a worksheet", {
+  path <- withr::local_tempfile(fileext = ".xlsx")
+  write_workbook(path, grid_workbook(2L, 2L))
+
+  # The last column is fine, as a bound.
+  expect_identical(
+    dim(read_xlsx(path, range = "A1:XFD2", col_names = FALSE)),
+    c(2L, 16384L)
+  )
+  for (range in c("A1:A1048577", "A1:XFE1", "A1:A99999999999999999999",
+                  "A1:ZZZZZZZZZZZZZZZ2", "A1:A3000000000")) {
+    expect_error(read_xlsx(path, range = range), class = "zuxlsx_input_error",
+                 info = range)
+  }
 })

@@ -187,3 +187,38 @@ test_that("a column of only numbers is a double, not text", {
   expect_type(out, "double")
   expect_identical(out, c(1.5, 2.5))
 })
+
+test_that("a time on the phantom leap day is NA, and its neighbours stay apart", {
+  # 59.5 is noon on 28 February 1900 and 61.5 noon on 1 March. Anything from
+  # 60 to 61 is a time on 29 February 1900, which never existed.
+  path <- withr::local_tempfile(fileext = ".xlsx")
+  write_workbook(path, styled_workbook_parts(
+    cells = list(
+      c(txt("A1", "d")), c(num("A2", 59.5, s = 1)),
+      c(num("A3", 60.5, s = 1)), c(num("A4", 61.5, s = 1))
+    ),
+    formats = c(0L, 22L)
+  ))
+
+  out <- read_xlsx(path)$d
+  expect_identical(
+    format(out, "%Y-%m-%d %H:%M", tz = "UTC"),
+    c("1900-02-28 12:00", NA, "1900-03-01 12:00")
+  )
+})
+
+test_that("ISO 8601 date cells read as dates", {
+  path <- withr::local_tempfile(fileext = ".xlsx")
+  write_workbook(path, styled_workbook_parts(list(
+    c(txt("A1", "d"), txt("B1", "t")),
+    c('<c r="A2" t="d"><v>2024-01-15</v></c>',
+      '<c r="B2" t="d"><v>2024-02-01T10:00:00</v></c>')
+  )))
+
+  out <- read_xlsx(path)
+  expect_identical(out$d, as.Date("2024-01-15"))
+  expect_identical(
+    format(out$t, tz = "UTC"),
+    "2024-02-01 10:00:00"
+  )
+})

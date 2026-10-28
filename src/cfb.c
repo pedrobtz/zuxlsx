@@ -315,6 +315,11 @@ done:
   return st;
 }
 
+cfb_status cfb_has_stream(const cfb *c, const char *name) {
+  const uint8_t *e;
+  return find_at_root(c, name, &e);
+}
+
 cfb_status cfb_stream(const cfb *c, const char *name, uint8_t **out, size_t *out_len) {
   const uint8_t *e;
   uint64_t size;

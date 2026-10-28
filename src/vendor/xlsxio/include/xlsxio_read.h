@@ -305,6 +305,24 @@ DLL_EXPORT_XLSXIO int xlsxioread_sheet_last_cell_is_date (xlsxioreadersheet shee
  */
 DLL_EXPORT_XLSXIO int xlsxioread_sheet_date1904 (xlsxioreadersheet sheethandle);
 
+/*! \brief zuxlsx: why a worksheet stopped, reported by xlsxioread_sheet_finish()
+ * \name   XLSXIOREAD_SHEET_ERROR_*
+ * \{
+ */
+#define XLSXIOREAD_SHEET_ERROR_NONE         0
+#define XLSXIOREAD_SHEET_ERROR_XML          1
+#define XLSXIOREAD_SHEET_ERROR_RANGE        2
+#define XLSXIOREAD_SHEET_ERROR_SHAREDSTRING 3
+#define XLSXIOREAD_SHEET_ERROR_ZIP          4
+/*! @} */
+
+/*! \brief zuxlsx: whether a worksheet read until xlsxioread_sheet_next_row() returned 0 was read in full
+ * \param  sheethandle   read handle for worksheet object
+ * \param  line          if not NULL, receives the XML line of the error, or 0
+ * \return one of XLSXIOREAD_SHEET_ERROR_*
+ */
+DLL_EXPORT_XLSXIO int xlsxioread_sheet_finish (xlsxioreadersheet sheethandle, unsigned long* line);
+
 
 
 

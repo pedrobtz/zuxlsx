@@ -210,7 +210,7 @@ test_that("base64 is decoded exactly, and strictly", {
     doc <- sub('saltValue="[^"]*"', paste0('saltValue="', text, '"'), xml)
     encryption_info(encryption_info_stream(doc))$key_data$salt
   }
-  set.seed(9)
+  withr::local_seed(9)
   for (n in c(1:40, 255)) {
     bytes <- as.raw(sample(0:255, n, TRUE))
     expect_identical(with_salt(base64_encode(bytes)), bytes, info = n)

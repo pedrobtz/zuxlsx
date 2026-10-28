@@ -13,9 +13,6 @@
 #' a row together. `chunk_size` is therefore a lower bound rather than an exact
 #' count: a chunk ends at the first row boundary at or after it.
 #'
-#' @param path Path to an `.xlsx` file.
-#' @param sheet The worksheet to read: either its name, or its position in the
-#'   workbook.
 #' @param callback A function of one argument, called with each chunk of cells.
 #'   Return `FALSE` to stop reading.
 #' @param chunk_size The least number of cells to gather before calling
@@ -23,7 +20,7 @@
 #'
 #' @return `TRUE` if `callback` stopped the read, `FALSE` if the worksheet was
 #'   read to the end. Returned invisibly.
-#' @inheritParams xlsx_sheets
+#' @inheritParams xlsx_cells
 #' @export
 #' @seealso [xlsx_cells()], which reads a whole worksheet at once, and
 #'   [read_xlsx()], which builds columns from it.
@@ -31,10 +28,11 @@
 #' path <- system.file("extdata", "two-sheets.xlsx", package = "zuxlsx")
 #'
 #' # Count the cells of each type without holding the worksheet.
-#' totals <- integer(0)
+#' totals <- 0
 #' xlsx_read_cells(path, 1, function(cells) {
-#'   totals <<- c(totals, table(cells$type))
+#'   totals <<- totals + table(cells$type)
 #' })
+#' totals
 #'
 #' # Stop as soon as something is found. The rest of the sheet is not parsed.
 #' first <- NULL
@@ -46,42 +44,37 @@
 #'   }
 #' })
 #' first
-xlsx_read_cells <- function(path, sheet = 1, callback, chunk_size = 10000L,
-                            password = NULL) {
+xlsx_read_cells <- function(
+  path,
+  sheet = 1,
+  callback,
+  chunk_size = 10000L,
+  password = NULL
+) {
   path <- check_path(path)
   password <- check_optional_password(password)
-  sheet <- resolve_sheet(path, sheet, password)
+  # Before resolve_sheet(), which opens the workbook -- and, for an encrypted
+  # one, decrypts it -- so that a mistyped argument costs nothing.
   if (!is.function(callback)) {
     zuxlsx_stop("zuxlsx_input_error", "`callback` must be a function.")
   }
-  if (!is.numeric(chunk_size) || length(chunk_size) != 1L ||
-      is.na(chunk_size) || chunk_size < 1) {
-    zuxlsx_stop(
-      "zuxlsx_input_error",
-      "`chunk_size` must be a single positive number."
-    )
-  }
+  chunk_size <- check_count(chunk_size, "chunk_size")
+  sheet <- resolve_sheet(path, sheet, password)
 
   # The callback is wrapped rather than passed through, so that the native
-  # layer hands R vectors to one place and the data frame is assembled here,
-  # where the column names and the type labels already live.
-  wrapped <- function(parts) {
-    cells <- data.frame(
-      row = parts[[1L]],
-      col = parts[[2L]],
-      type = factor(CELL_TYPES[parts[[3L]] + 1L], levels = CELL_TYPES),
-      value = parts[[4L]],
-      number = parts[[5L]],
-      stringsAsFactors = FALSE
-    )
-    attr(cells, "date1904") <- parts[[6L]]
-    callback(cells)
-  }
+  # layer hands R vectors to one place and the data frame is assembled where
+  # xlsx_cells() assembles it.
+  wrapped <- function(parts) callback(cells_frame(parts))
 
   stopped <- zuxlsx_unwrap(
     .Call(
-      C_xlsx_read_cells, path, sheet, wrapped, environment(),
-      as.integer(chunk_size), password
+      C_xlsx_read_cells,
+      path,
+      sheet,
+      wrapped,
+      environment(),
+      chunk_size,
+      password
     ),
     path = path
   )
