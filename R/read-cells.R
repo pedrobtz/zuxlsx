@@ -44,8 +44,13 @@
 #'   }
 #' })
 #' first
-xlsx_read_cells <- function(path, sheet = 1, callback, chunk_size = 10000L,
-                            password = NULL) {
+xlsx_read_cells <- function(
+  path,
+  sheet = 1,
+  callback,
+  chunk_size = 10000L,
+  password = NULL
+) {
   path <- check_path(path)
   password <- check_optional_password(password)
   # Before resolve_sheet(), which opens the workbook -- and, for an encrypted
@@ -63,8 +68,13 @@ xlsx_read_cells <- function(path, sheet = 1, callback, chunk_size = 10000L,
 
   stopped <- zuxlsx_unwrap(
     .Call(
-      C_xlsx_read_cells, path, sheet, wrapped, environment(),
-      chunk_size, password
+      C_xlsx_read_cells,
+      path,
+      sheet,
+      wrapped,
+      environment(),
+      chunk_size,
+      password
     ),
     path = path
   )

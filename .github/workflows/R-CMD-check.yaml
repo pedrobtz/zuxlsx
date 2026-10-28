@@ -3,8 +3,9 @@
 # The runners are the shared default plus Windows R-devel: the default has no
 # R-devel runner outside its Linux containers, so without that row nothing
 # checks CRAN's Windows R-devel flavour. nosuggests runs the suite with only
-# the hard dependencies installed, which here is none: zucrypt is in Suggests
-# for the tests that build encrypted fixtures, and they skip without it.
+# the hard dependencies installed. testthat and withr are absent there;
+# zucrypt is in Suggests too, but it is also in LinkingTo, so it is installed
+# wherever zuxlsx can be built and the tests that use it still run.
 on:
   push:
     branches: [main, master]

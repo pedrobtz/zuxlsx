@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state: 0.1.0, and the reader is done
 
-The reading API of design §12 is implemented and the package is CRAN-ready apart from the two steps that must happen on submission day, which are in [.agents/release-checklist.md](.agents/release-checklist.md). 870 tests pass, shuffled, and `R CMD check --as-cran` is 0 errors / 0 warnings / 0 notes.
+The reading API of design §12 is implemented. The siblings are on CRAN and `Remotes:` is gone; what is left before submission is in [.agents/release-checklist.md](.agents/release-checklist.md). About 1,500 expectations pass, shuffled, in UTF-8, C and Latin-1 locales, and `R CMD check --as-cran` against the CRAN siblings gives only the "New submission" NOTE. The whole-package review of 2026-10-28 is filed as issues labelled `review`.
 
 What is exported:
 

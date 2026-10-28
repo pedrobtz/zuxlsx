@@ -310,3 +310,10 @@ base64_encode <- function(bytes) {
   if (pad > 0) substr(out, nchar(out) - pad + 1, nchar(out)) <- strrep("=", pad)
   out
 }
+
+# The status the native layer reports for a file: what tells two failures of
+# the same class apart (a legacy .xls from another OLE2 file, say) without
+# reading the message, whose wording the snapshots in test-conditions.R own.
+native_status <- function(path, password = NULL) {
+  .Call(C_xlsx_sheets, normalizePath(path), password)$status
+}

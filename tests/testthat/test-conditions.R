@@ -101,3 +101,60 @@ test_that("error messages are stable", {
     xlsx_sheets(not_workbook)
   })
 })
+
+test_that("every native status becomes exactly its class vector", {
+  for (status in names(STATUS_CLASSES)) {
+    cond <- tryCatch(
+      zuxlsx_unwrap(list(status = status, value = status_value(status)),
+                    path = "book.xlsx"),
+      error = identity
+    )
+    expect_identical(
+      class(cond),
+      c(STATUS_CLASSES[[status]], "zuxlsx_error", "error", "condition"),
+      info = status
+    )
+    expect_identical(cond$path, "book.xlsx", info = status)
+  }
+})
+
+test_that("every status the C layer defines has a mapping", {
+  # Source-tree only: an installed package has no src/.
+  src_file <- test_path("..", "..", "src", "zuxlsx.c")
+  skip_if_not(file.exists(src_file), "package source not available")
+  src <- readLines(src_file, warn = FALSE)
+  defined <- regmatches(src, regexpr('STATUS_[A-Z0-9_]+ = "[a-z0-9_]+"', src))
+  defined <- sub('.*= "([a-z0-9_]+)"', "\\1", defined)
+  expect_setequal(setdiff(defined, "ok"), names(STATUS_CLASSES))
+})
+
+test_that("the native layer refuses bad arguments by itself", {
+  # The R checks pre-empt these, but the registered symbols are reachable
+  # from the namespace, so the C has to refuse them too.
+  path <- withr::local_tempfile(fileext = ".xlsx")
+  write_workbook(path)
+  expect_identical(.Call(C_xlsx_cells, 1, "Sheet1", NULL)$status, "bad_path")
+  expect_identical(.Call(C_xlsx_cells, path, NA_character_, NULL)$status, "bad_path")
+  expect_identical(
+    .Call(C_read_xlsx, path, "Sheet1", TRUE, c(1, 2e6, 1, 1), NULL)$status,
+    "bad_path"
+  )
+  # xlsxio cannot tell a name the workbook lacks from a listed worksheet
+  # whose part is missing; resolve_sheet() is what reports the first.
+  expect_identical(.Call(C_xlsx_cells, path, "Nope", NULL)$status, "sheet_missing")
+})
+
+test_that("every status's message is stable", {
+  message_of <- function(status) {
+    conditionMessage(tryCatch(
+      zuxlsx_unwrap(list(status = status, value = status_value(status)),
+                    path = "book.xlsx"),
+      error = identity
+    ))
+  }
+  expect_snapshot({
+    for (status in c(names(STATUS_CLASSES), "not_a_real_status")) {
+      cat("-- ", status, "\n", message_of(status), "\n", sep = "")
+    }
+  })
+})

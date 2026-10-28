@@ -40,7 +40,9 @@ parse_range <- function(range, call = sys.call(-1L)) {
       "zuxlsx_input_error",
       paste0(
         "`range` must be an A1-style cell range such as \"B2:D10\", ",
-        "\"A:C\" or \"2:10\", not ", encodeString(range, quote = "\""), "."
+        "\"A:C\" or \"2:10\", not ",
+        encodeString(range, quote = '"'),
+        "."
       ),
       call = call
     )
@@ -72,11 +74,14 @@ parse_range <- function(range, call = sys.call(-1L)) {
   }
   rows <- c(from$row, to$row)
   cols <- c(from$col, to$col)
-  if (any(rows > MAX_ROWS, na.rm = TRUE) || any(cols > MAX_COLS, na.rm = TRUE)) {
+  if (
+    any(rows > MAX_ROWS, na.rm = TRUE) || any(cols > MAX_COLS, na.rm = TRUE)
+  ) {
     zuxlsx_stop(
       "zuxlsx_input_error",
       paste0(
-        "`range` ", encodeString(range, quote = "\""),
+        "`range` ",
+        encodeString(range, quote = '"'),
         " reaches past XFD1048576, the last cell a worksheet can have."
       ),
       call = call

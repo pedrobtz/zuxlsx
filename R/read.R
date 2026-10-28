@@ -52,8 +52,13 @@
 #'
 #' # Without a header row, columns are named by position.
 #' read_xlsx(path, range = "A2:B4", col_names = FALSE)
-read_xlsx <- function(path, sheet = 1, col_names = TRUE, range = NULL,
-                      password = NULL) {
+read_xlsx <- function(
+  path,
+  sheet = 1,
+  col_names = TRUE,
+  range = NULL,
+  password = NULL
+) {
   if (!is.logical(col_names) || length(col_names) != 1L || is.na(col_names)) {
     zuxlsx_stop(
       "zuxlsx_input_error",

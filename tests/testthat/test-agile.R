@@ -312,6 +312,7 @@ test_that("zucrypt's own namespace can be loaded alongside, and both work", {
 })
 
 test_that("every hash and key size the decryptor accepts decrypts", {
+  skip_if_light()
   # Excel writes SHA-512 with AES-256, which is all the committed fixtures
   # cover. Office 2010 wrote SHA-1 with AES-128, and where the hash is
   # shorter than the key the derived key is padded with 0x36 rather than

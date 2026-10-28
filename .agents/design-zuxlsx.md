@@ -1003,7 +1003,23 @@ read through the sheet-list path, is still the pinned gap. `range` is bounded
 to the grid in R and again in C. The nesting test used to put its nesting
 outside the root element, so it was refused for having two roots; it now
 nests 100,000 deep inside a real workbook and worksheet, and both read.
-Compression bombs remain uncovered.
+Compression bombs are covered too: `helper-zip.R` now writes DEFLATE members
+(memCompress()'s zlib stream with its header and trailer cut off), and
+`test-hostile.R` builds a 50 MB worksheet that deflates to about 50 KB. Read
+honestly it streams through and is then refused on its (deliberately wrong)
+checksum without the uncompressed size ever being held; declaring 2000 bytes
+for it cuts it off at the declared size, which ends the worksheet early and
+is an error. The diagnostic path that re-parses `[Content_Types].xml` and
+`xl/workbook.xml` streams them too, instead of extracting each to the heap at
+its declared size, and it locates members as patch 0005 does, first match
+and tolerant of case and backslashes, so it diagnoses the part the reader
+read.
+
+Under gctorture the tests that build tens of megabytes in R -- the bomb, the
+DIFAT container, 100,000-deep nesting, the many-segment decryption and the
+hash-and-key grid -- skip, through `ZUXLSX_LIGHT_TESTS`, and the damage sweeps
+run a seventh of their cases: they test limits, not protection, and at a
+collection per twenty allocations they took the job past two hours.
 
 No configurable limits exist yet. Nothing in the reader caps a part size, a
 string length or a sheet count; the defenses that hold today come from Expat's

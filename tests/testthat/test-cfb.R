@@ -44,6 +44,7 @@ test_that("streams of every size class come back exactly, in v3 and v4", {
 })
 
 test_that("a FAT past the header's 109 entries is followed into DIFAT sectors", {
+  skip_if_light()
   # 110 FAT sectors at 128 entries each: a stream of just over 7 MB.
   withr::local_seed(1)
   streams <- list(large = as.raw(sample(0:255, 7.3e6, TRUE)),

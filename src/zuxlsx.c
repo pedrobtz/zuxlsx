@@ -1,23 +1,22 @@
-/* The smallest surface that proves the LinkingTo wiring works end to end.
+/* Every .Call entry point, the cell reader and the column builders.
  *
- * This is not the start of the public API -- read_xlsx(), the cell reader and
- * the column builders in design sections 12-14 come later, and will not go
- * through xlsxio's string callbacks the way this does. It exists so that a
- * broken link is a failing test rather than something discovered in the first
- * real feature:
+ *   C_xlsx_sheets     the worksheet names, through xlsxio's sheet list
+ *   C_xlsx_cells      a whole worksheet as parallel cell vectors
+ *   C_xlsx_read_cells a worksheet a chunk at a time, calling back into R
+ *   C_read_xlsx       a worksheet as typed columns (design section 14)
+ *   C_zuxlsx_native   the versions linked in; it calls Expat and zucrypt
+ *                     directly, so a header on the path without its archive
+ *                     fails at link time
  *
- *   zuxlsx_native()  calls Expat directly, so it fails to link without
- *                    libzuxml.a, and reports what the headers on the
- *                    LinkingTo path say.
- *   xlsx_sheets()    goes through xlsxio, which means miniz opens the ZIP
- *                    (libzukomp.a) and Expat parses xl/workbook.xml
- *                    (libzuxml.a). Both archives, on a real file.
+ * plus the internal entry points the decryption tests use. A password-
+ * protected workbook is classified and decrypted by resolve_source() before
+ * any reader opens; see section 21g.
  *
- * Nothing here calls Rf_error(). Both entry points return a two-element list
+ * Nothing here calls Rf_error(). Every entry point returns a two-element list
  * (status, value), and R turns a non-"ok" status into a classed condition.
  * That is the convention the zu* packages share, and it matters more here than
  * in a pure-C package: Rf_error() longjmps past every free(), and an XLSX read
- * holds a ZIP handle, an Expat parser and -- later -- column builders at once.
+ * holds a ZIP handle, an Expat parser and the cells it has gathered at once.
  */
 #define R_NO_REMAP
 #include <R.h>
@@ -432,8 +431,6 @@ static int password_ok(SEXP password) {
           STRING_ELT(password, 0) != NA_STRING);
 }
 
-/* Only asked once a workbook has already failed to declare a worksheet, so
-   the second open costs nothing in the normal case. */
 /* Opens the archive a reader would: the file, or the decrypted package in
    memory when there is one. */
 static int zip_open(mz_zip_archive *zip, const char *file,
@@ -441,6 +438,35 @@ static int zip_open(mz_zip_archive *zip, const char *file,
   memset(zip, 0, sizeof(*zip));
   return buf != NULL ? mz_zip_reader_init_mem(zip, buf, len, 0)
                      : mz_zip_reader_init_file(zip, file, 0);
+}
+
+/* An archive member by part name, matched as patch 0005 matches them inside
+   xlsxio -- backslashes as slashes, ASCII case folded, the first match in the
+   central directory winning -- so a diagnostic looks at the member the
+   reader would have read, not at another copy of it. */
+static int locate_part(mz_zip_archive *zip, const char *name, mz_uint32 *index) {
+  size_t len = strlen(name);
+  mz_uint count = mz_zip_reader_get_num_files(zip);
+  mz_uint i;
+
+  for (i = 0; i < count; i++) {
+    char stored[MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE];
+    size_t j;
+    mz_uint got = mz_zip_reader_get_filename(zip, i, stored, sizeof(stored));
+    if (got == 0 || got > sizeof(stored) || strlen(stored) != len) continue;
+    for (j = 0; j < len; j++) {
+      char a = stored[j] == '\\' ? '/' : stored[j];
+      char b = name[j] == '\\' ? '/' : name[j];
+      if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
+      if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
+      if (a != b) break;
+    }
+    if (j == len) {
+      *index = i;
+      return 1;
+    }
+  }
+  return 0;
 }
 
 static int file_is_xlsb(const char *file, const uint8_t *buf, size_t len) {
@@ -451,7 +477,7 @@ static int file_is_xlsb(const char *file, const uint8_t *buf, size_t len) {
   if (!zip_open(&zip, file, buf, len)) {
     return 0;
   }
-  if (mz_zip_reader_locate_file_v2(&zip, "xl/workbook.bin", NULL, 0, &index)) {
+  if (locate_part(&zip, "xl/workbook.bin", &index)) {
     found = 1;
   }
   mz_zip_reader_end(&zip);
@@ -481,24 +507,42 @@ static int first_malformed_part(const char *file, const uint8_t *zbuf,
     return 0;
   }
   for (i = 0; i < sizeof(PARTS) / sizeof(PARTS[0]); i++) {
-    size_t size = 0;
-    void *buf;
     mz_uint32 index;
+    mz_zip_reader_extract_iter_state *it;
     XML_Parser parser;
+    int bad = 0;
 
-    if (!mz_zip_reader_locate_file_v2(&zip, PARTS[i], NULL, 0, &index)) {
+    if (!locate_part(&zip, PARTS[i], &index)) {
       continue;
     }
-    buf = mz_zip_reader_extract_to_heap(&zip, index, &size, 0);
-    if (buf == NULL) {
+    /* Streamed, as the reader streams it, rather than extracted whole: a
+       member's declared size is the archive's word, not a bound. */
+    it = mz_zip_reader_extract_iter_new(&zip, index, 0);
+    if (it == NULL) {
       continue;
     }
     parser = XML_ParserCreate(NULL);
     if (parser == NULL) {
-      mz_free(buf);
+      mz_zip_reader_extract_iter_free(it);
       continue;
     }
-    if (XML_Parse(parser, (const char *)buf, (int)size, 1) == XML_STATUS_ERROR) {
+    for (;;) {
+      void *chunk = XML_GetBuffer(parser, 65536);
+      size_t got;
+      if (chunk == NULL) {
+        break;
+      }
+      got = mz_zip_reader_extract_iter_read(it, chunk, 65536);
+      if (XML_ParseBuffer(parser, (int)got, got == 0) == XML_STATUS_ERROR) {
+        bad = 1;
+        break;
+      }
+      if (got == 0) {
+        break;
+      }
+    }
+    mz_zip_reader_extract_iter_free(it);
+    if (bad) {
       size_t n = strlen(PARTS[i]);
       if (n >= outlen) {
         n = outlen - 1;
@@ -509,7 +553,6 @@ static int first_malformed_part(const char *file, const uint8_t *zbuf,
       found = 1;
     }
     XML_ParserFree(parser);
-    mz_free(buf);
     if (found) {
       break;
     }
@@ -863,7 +906,12 @@ static int classify_cell(int xlsxio_type, int is_date, const char *value,
   }
   /* A number, or a date stored as one. strtod is the only conversion: the
      serial value is kept as written and interpreted in R, where the 1900 and
-     1904 epochs can be told apart using the workbook's own setting. */
+     1904 epochs can be told apart using the workbook's own setting. It is
+     shown only what a decimal number can be made of -- it would also take
+     "inf", "nan" and hex, which OOXML numbers never are. */
+  if (strspn(value, "0123456789+-.eE") != strlen(value)) {
+    return ZU_CELL_STRING;
+  }
   *number = strtod(value, &end);
   if (end == value || (end != NULL && *end != 0)) {
     *number = NA_REAL;

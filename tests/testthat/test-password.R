@@ -44,9 +44,10 @@ test_that("the callback reader reads it too, holding the plaintext across calls"
 })
 
 test_that("an error inside the callback still disposes of the decrypted package", {
-  # The finalizer that closes the reader also wipes and frees the plaintext;
-  # the error unwinds past the C stack, and nothing may be left for the
-  # garbage collector to trip over.
+  # The callback runs under R_UnwindProtect, whose cleanup closes the reader
+  # and wipes the plaintext as the error unwinds. What R can see is that the
+  # reads still work; that nothing leaked, and nothing was freed twice, is
+  # what valgrind and ASan in native-checks.yaml assert.
   for (i in 1:3) {
     expect_error(
       xlsx_read_cells(encrypted(), 1, function(cells) stop("boom"),
@@ -133,7 +134,7 @@ test_that("standard encryption is refused by name, with a password or without", 
   cond <- expect_error(read_xlsx(file, password = "zuxlsx"),
                        class = "zuxlsx_unsupported_format_error")
   expect_false(inherits(cond, "zuxlsx_encrypted_error"))
-  expect_match(conditionMessage(cond), "standard encryption")
+  expect_identical(native_status(file, "zuxlsx"), "encryption_standard")
   # Without a password it is still, first, a password-protected workbook.
   expect_error(read_xlsx(file), class = "zuxlsx_encrypted_error")
 })
@@ -172,8 +173,8 @@ test_that("a decrypted package with a broken workbook part names the part", {
   parts <- workbook_parts()
   parts[["xl/workbook.xml"]] <- "<workbook><sheets><sheet"
   file <- local_workbook_bytes(agile_encrypt(workbook_bytes(parts), "pw"))
-  cond <- expect_error(xlsx_sheets(file, password = "pw"), class = "zuxlsx_xml_error")
-  expect_match(conditionMessage(cond), "xl/workbook.xml", fixed = TRUE)
+  expect_error(xlsx_sheets(file, password = "pw"), class = "zuxlsx_xml_error")
+  expect_identical(.Call(C_xlsx_sheets, file, "pw")$value$part, "xl/workbook.xml")
 })
 
 test_that("a decrypted package that is not a ZIP is a ZIP error", {
@@ -182,9 +183,9 @@ test_that("a decrypted package that is not a ZIP is a ZIP error", {
 })
 
 test_that("large packages decrypt across many segments", {
+  skip_if_light()
   # 200 x 20 cells is well past one 4096-byte segment. (grid_workbook()
-  # names columns A to Z, so no wider.)
-  skip_if_not_installed("zucrypt")
+  # names columns A to Z, so no wider.) agile_encrypt() skips without zucrypt.
   path <- withr::local_tempfile(fileext = ".xlsx")
   write_workbook(path, grid_workbook(200, 20))
   plain <- readBin(path, "raw", file.size(path))

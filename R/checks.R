@@ -60,13 +60,22 @@ check_password <- function(password, call = sys.call(-1L)) {
 
 # A whole number between 1 and the largest R integer, as an integer.
 check_count <- function(x, arg, call = sys.call(-1L)) {
-  if (!is.numeric(x) || length(x) != 1L || !is.finite(x) ||
-    x < 1 || x != trunc(x) || x > .Machine$integer.max) {
+  if (
+    !is.numeric(x) ||
+      length(x) != 1L ||
+      !is.finite(x) ||
+      x < 1 ||
+      x != trunc(x) ||
+      x > .Machine$integer.max
+  ) {
     zuxlsx_stop(
       "zuxlsx_input_error",
       paste0(
-        "`", arg, "` must be a single whole number between 1 and ",
-        .Machine$integer.max, "."
+        "`",
+        arg,
+        "` must be a single whole number between 1 and ",
+        .Machine$integer.max,
+        "."
       ),
       call = call
     )
@@ -80,8 +89,10 @@ check_count <- function(x, arg, call = sys.call(-1L)) {
 # clear R-level error rather than a missing worksheet.
 resolve_sheet <- function(path, sheet, password = NULL, call = sys.call(-1L)) {
   is_name <- is.character(sheet) && length(sheet) == 1L && !is.na(sheet)
-  is_position <- is.numeric(sheet) && length(sheet) == 1L &&
-    is.finite(sheet) && sheet == trunc(sheet)
+  is_position <- is.numeric(sheet) &&
+    length(sheet) == 1L &&
+    is.finite(sheet) &&
+    sheet == trunc(sheet)
   if (!is_name && !is_position) {
     zuxlsx_stop(
       "zuxlsx_input_error",
@@ -117,8 +128,13 @@ resolve_sheet <- function(path, sheet, password = NULL, call = sys.call(-1L)) {
     zuxlsx_stop(
       "zuxlsx_sheet_error",
       paste0(
-        "`sheet` is ", sheet, ", but the workbook has ",
-        length(sheets), " worksheet", if (length(sheets) == 1L) "" else "s", "."
+        "`sheet` is ",
+        sheet,
+        ", but the workbook has ",
+        length(sheets),
+        " worksheet",
+        if (length(sheets) == 1L) "" else "s",
+        "."
       ),
       path = path,
       call = call
