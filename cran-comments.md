@@ -39,7 +39,7 @@ explanatory message if they are absent, rather than failing at link time.
 ## Bundled and linked third-party code
 
 `src/vendor/xlsxio/` contains a reduced copy of the xlsxio reader (MIT), with
-nine local patches recorded in `tools/patches/xlsxio/`. Its author is listed
+ten local patches recorded in `tools/patches/xlsxio/`. Its author is listed
 in `Authors@R` as a copyright holder.
 
 Expat (MIT), miniz (MIT) and TF-PSA-Crypto (Apache-2.0) are not bundled, but

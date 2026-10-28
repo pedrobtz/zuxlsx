@@ -965,8 +965,9 @@ xlsxio function whose "did it parse?" answer upstream had commented out, so
 damage there loaded as far as the damage. Patch 0009 adds a checked variant;
 a part that is not well formed is `zuxlsx_xml_error` naming it, and one that
 fails its size or CRC-32 is `zuxlsx_zip_error` (`part_zip`). The parts read
-to find the worksheets -- `[Content_Types].xml`, every `.rels` part and
-`xl/workbook.xml` -- go through paths that report nothing, so
+to find the worksheets -- `[Content_Types].xml`, `xl/workbook.xml` and its
+relationships, `xl/_rels/workbook.xml.rels` -- go through paths that report
+nothing, so
 `C_xlsx_sheets` validates their CRC-32 with `mz_zip_validate_file()` while
 listing, which every reader does first; they are small, so listing stays
 cheap. A workbook part under another name is not covered. The pinned
@@ -1048,6 +1049,19 @@ DIFAT container, 100,000-deep nesting, the many-segment decryption and the
 hash-and-key grid -- skip, through `ZUXLSX_LIGHT_TESTS`, and the damage sweeps
 run a seventh of their cases: they test limits, not protection, and at a
 collection per twenty allocations they took the job past two hours.
+
+**Update, 2026-10-28: DOCTYPE (#47).** zuxlsx links raw Expat, so it gets
+zuxml's compiled-in policy -- `XML_GE 0`, no `XML_DTD`, so no entity is
+expanded and none is fetched -- but not the DOCTYPE refusal zuxml applies at
+its own seam. An internal subset's `&e;` therefore reached a cell as literal
+text. Patch 0010 installs a start-DOCTYPE handler on every parser xlsxio
+creates, and `check_part()` in `src/zuxlsx.c` does the same for the parts
+listing validates (now parsed as well as CRC-checked, so a broken
+`xl/_rels/workbook.xml.rels` is an error naming it rather than worksheets
+that read as empty). Parts xlsxio never reads are not checked: POI's
+`xlsx-corrupted.xlsx` has a root `_rels/.rels` that is the word
+"CORRUPTED", and its data is intact and reads. `encinfo.c` already refused one. Either way a DOCTYPE is
+`zuxlsx_xml_error`, in any part.
 
 No configurable limits exist yet. Nothing in the reader caps a part size, a
 string length or a sheet count; the defenses that hold today come from Expat's

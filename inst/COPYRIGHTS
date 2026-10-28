@@ -18,7 +18,7 @@ Only the XLSX *reader* is bundled: xlsxio_read.c, xlsxio_read_sharedstrings.c
 and their headers. The writer (xlsxio_write.c) is deliberately not bundled --
 writing workbooks is out of scope (design section 21).
 
-The bundled copy carries nine local patches, in tools/patches/xlsxio/,
+The bundled copy carries ten local patches, in tools/patches/xlsxio/,
 applied in order. None is in upstream; the crash 0007 fixes has been
 reported there.
 
@@ -82,12 +82,18 @@ reported there.
       XML or fails its ZIP size or CRC-32 check, by name, where both used
       to load as far as the damage. Written for zuxlsx.
 
-Running the nine patches in order against the pristine 0.2.36 release archive
+  0010-refuse-doctype.patch
+      Refuses a DOCTYPE in every part, through a start-DOCTYPE handler on
+      each parser xlsxio creates; no part of a workbook has one, and an
+      internal subset's entity used to reach a cell as literal text.
+      Written for zuxlsx.
+
+Running the ten patches in order against the pristine 0.2.36 release archive
 reproduces src/vendor/xlsxio/ byte for byte, including line endings. No other
 modification is made to the bundled code, and it is never edited in place:
 tools/vendor/fetch re-derives it, and tools/vendor/verify checks the result.
 
-Line endings are CRLF, as shipped by upstream, except on the lines the nine
+Line endings are CRLF, as shipped by upstream, except on the lines the ten
 patches introduce. They are deliberately not normalised, so the kept files
 still match the release archive.
 

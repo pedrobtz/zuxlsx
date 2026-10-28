@@ -26,9 +26,10 @@ test_that("internal entities are not expanded", {
   )
   write_workbook(path, parts)
 
-  sheets <- xlsx_sheets(path)
-  # The reference survives verbatim rather than becoming 10000 characters.
-  expect_identical(sheets, "&d;")
+  # Not expanded, and not read either: no part of a workbook carries a
+  # DOCTYPE, so one is refused outright (#47). It used to come back as the
+  # literal reference "&d;".
+  expect_error(xlsx_sheets(path), class = "zuxlsx_xml_error")
 })
 
 test_that("external entities are not resolved off disk", {
@@ -47,9 +48,43 @@ test_that("external entities are not resolved off disk", {
   )
   write_workbook(path, parts)
 
-  sheets <- xlsx_sheets(path)
-  expect_false(any(grepl("CANARY", sheets, fixed = TRUE)))
-  expect_identical(sheets, "&x;")
+  cond <- tryCatch(xlsx_sheets(path), error = identity)
+  expect_s3_class(cond, "zuxlsx_xml_error")
+  expect_false(grepl("CANARY", conditionMessage(cond), fixed = TRUE))
+})
+
+test_that("a DOCTYPE is refused in every part, not only the workbook", {
+  # An internal subset declaring an entity, then a reference to it. Under
+  # zuxml's XML_GE 0 the entity is not expanded, so before #47 the reference
+  # reached the cell as the literal text "&e;".
+  doctype <- '<!DOCTYPE x [<!ENTITY e "expanded">]>'
+  ns <- 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+  part_with_doctype <- function(name, body) {
+    path <- withr::local_tempfile(fileext = ".xlsx", .local_envir = parent.frame())
+    parts <- styled_workbook_parts(c('<c r="A1" t="s"><v>0</v></c>', txt("B1", "&e;")))
+    parts[["xl/sharedStrings.xml"]] <- paste0(
+      '<?xml version="1.0"?><sst ', ns, "><si><t>zero</t></si></sst>"
+    )
+    parts[["xl/_rels/workbook.xml.rels"]] <- sub(
+      "</Relationships>",
+      paste0(
+        '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/',
+        'officeDocument/2006/relationships/sharedStrings" ',
+        'Target="sharedStrings.xml"/></Relationships>'
+      ),
+      parts[["xl/_rels/workbook.xml.rels"]],
+      fixed = TRUE
+    )
+    parts[[name]] <- sub("?>", paste0("?>", doctype), parts[[name]], fixed = TRUE)
+    write_workbook(path, parts)
+    path
+  }
+  for (name in c("xl/worksheets/sheet1.xml", "xl/sharedStrings.xml",
+                 "xl/styles.xml", "xl/_rels/workbook.xml.rels",
+                 "[Content_Types].xml")) {
+    path <- part_with_doctype(name)
+    expect_error(xlsx_cells(path), class = "zuxlsx_xml_error", info = name)
+  }
 })
 
 test_that("a duplicated archive member resolves to the first one, always", {

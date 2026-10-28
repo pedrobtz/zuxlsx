@@ -82,6 +82,9 @@ so an installed zuxlsx has no run-time dependency on any of them.
   or its compressed data fails its checksum -- is an error, never a shorter
   sheet.
 
+* A part carrying a DOCTYPE is an XML error: no workbook part has one, and an
+  internal subset is how entities are declared.
+
 * A file that is a spreadsheet zuxlsx cannot read is reported as such rather
   than as damage. A legacy `.xls` is an OLE2 container, not a ZIP, and an
   `.xlsb` stores its worksheets as binary records; both raise

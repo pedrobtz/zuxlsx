@@ -496,6 +496,74 @@ static int file_is_xlsb(const char *file, const uint8_t *buf, size_t len) {
  * Only the two parts that must be well-formed for a workbook to be found are
  * checked. A malformed worksheet is a different failure, reached later, and
  * is not what this path is explaining. */
+static void XMLCALL refuse_doctype(void *data, const XML_Char *name,
+                                   const XML_Char *sysid,
+                                   const XML_Char *pubid,
+                                   int has_internal_subset) {
+  (void) name; (void) sysid; (void) pubid; (void) has_internal_subset;
+  XML_StopParser((XML_Parser) data, XML_FALSE);
+}
+
+/* Streams one member through Expat: 0 if it is well-formed XML and passes
+   its ZIP size and CRC-32 checks, 1 if it is not well formed -- and a
+   DOCTYPE counts, since no part of a workbook has one (#47) -- with the line
+   in *line, 2 if the ZIP checks fail, -1 if it cannot be read at all.
+   Streamed rather than extracted whole: a member's declared size is the
+   archive's word, not a bound. */
+static int check_part(mz_zip_archive *zip, mz_uint32 index, int *line) {
+  mz_zip_reader_extract_iter_state *it;
+  XML_Parser parser;
+  int bad = 0;
+
+  it = mz_zip_reader_extract_iter_new(zip, index, 0);
+  if (it == NULL) {
+    return -1;
+  }
+  parser = XML_ParserCreate(NULL);
+  if (parser == NULL) {
+    mz_zip_reader_extract_iter_free(it);
+    return -1;
+  }
+  XML_SetUserData(parser, parser);
+  XML_SetStartDoctypeDeclHandler(parser, refuse_doctype);
+  for (;;) {
+    void *chunk = XML_GetBuffer(parser, 65536);
+    size_t got;
+    if (chunk == NULL) {
+      bad = -1;
+      break;
+    }
+    got = mz_zip_reader_extract_iter_read(it, chunk, 65536);
+    if (XML_ParseBuffer(parser, (int)got, got == 0) == XML_STATUS_ERROR) {
+      *line = (int)XML_GetCurrentLineNumber(parser);
+      bad = 1;
+      break;
+    }
+    if (got == 0) {
+      break;
+    }
+  }
+  XML_ParserFree(parser);
+  if (!mz_zip_reader_extract_iter_free(it) && bad == 0) {
+    bad = 2;
+  }
+  return bad;
+}
+
+static void copy_name(char *out, size_t outlen, const char *name) {
+  size_t n = strlen(name);
+  if (n >= outlen) n = outlen - 1;
+  memcpy(out, name, n);
+  out[n] = '\0';
+}
+
+/* Which part, if any, is not well-formed XML.
+ *
+ * Asked only once a workbook has already failed to declare a worksheet, so
+ * the cost is irrelevant and the answer is the difference between "this file
+ * is not a workbook" and "xl/workbook.xml is broken at line 4". xlsxio does
+ * not report why its parse produced nothing, but Expat and miniz are both
+ * linked here directly, so the question can be asked without it. */
 static int first_malformed_part(const char *file, const uint8_t *zbuf,
                                 size_t zlen, char *out, size_t outlen,
                                 int *line) {
@@ -507,98 +575,58 @@ static int first_malformed_part(const char *file, const uint8_t *zbuf,
   if (!zip_open(&zip, file, zbuf, zlen)) {
     return 0;
   }
-  for (i = 0; i < sizeof(PARTS) / sizeof(PARTS[0]); i++) {
+  for (i = 0; i < sizeof(PARTS) / sizeof(PARTS[0]) && !found; i++) {
     mz_uint32 index;
-    mz_zip_reader_extract_iter_state *it;
-    XML_Parser parser;
-    int bad = 0;
-
-    if (!locate_part(&zip, PARTS[i], &index)) {
-      continue;
-    }
-    /* Streamed, as the reader streams it, rather than extracted whole: a
-       member's declared size is the archive's word, not a bound. */
-    it = mz_zip_reader_extract_iter_new(&zip, index, 0);
-    if (it == NULL) {
-      continue;
-    }
-    parser = XML_ParserCreate(NULL);
-    if (parser == NULL) {
-      mz_zip_reader_extract_iter_free(it);
-      continue;
-    }
-    for (;;) {
-      void *chunk = XML_GetBuffer(parser, 65536);
-      size_t got;
-      if (chunk == NULL) {
-        break;
-      }
-      got = mz_zip_reader_extract_iter_read(it, chunk, 65536);
-      if (XML_ParseBuffer(parser, (int)got, got == 0) == XML_STATUS_ERROR) {
-        bad = 1;
-        break;
-      }
-      if (got == 0) {
-        break;
-      }
-    }
-    mz_zip_reader_extract_iter_free(it);
-    if (bad) {
-      size_t n = strlen(PARTS[i]);
-      if (n >= outlen) {
-        n = outlen - 1;
-      }
-      memcpy(out, PARTS[i], n);
-      out[n] = '\0';
-      *line = (int)XML_GetCurrentLineNumber(parser);
+    if (locate_part(&zip, PARTS[i], &index) && check_part(&zip, index, line) == 1) {
+      copy_name(out, outlen, PARTS[i]);
       found = 1;
-    }
-    XML_ParserFree(parser);
-    if (found) {
-      break;
     }
   }
   mz_zip_reader_end(&zip);
   return found;
 }
 
-/* The first part whose CRC-32 or size does not match the central directory,
-   among those xlsxio reads to find the worksheets: the content types, every
-   relationship part and xl/workbook.xml. Patches 0008 and 0009 check the
-   worksheet, shared-string and styles parts as they are read; these are read
-   through paths that do not report, so they are checked here, once, while
-   listing -- which every reader does first. All are small, so this does not
-   cost what reading a worksheet would. */
-static int corrupt_listing_part(const char *file, const uint8_t *buf, size_t len,
-                                char *out, size_t outlen) {
+/* The first damaged part among those xlsxio reads to find the worksheets:
+   the content types, the workbook part and its relationships. Only those:
+   a part xlsxio never reads -- the package's root _rels/.rels, a drawing's
+   relationships -- cannot change what is read, and refusing a workbook
+   over one would make intact data unreadable. Patches
+   0008 to 0010 check the worksheet, shared-string and styles parts as they
+   are read; these go through xlsxio paths that report nothing -- a damaged
+   relationship part just leaves a worksheet unfound, which reads as empty
+   -- so they are checked here, once, while listing, which every reader does
+   first. All are small, so this does not cost what reading a worksheet
+   would. Returns STATUS_XML (with the line) or STATUS_PART_ZIP, naming the
+   part in `out`, or NULL. */
+static const char *damaged_listing_part(const char *file, const uint8_t *buf,
+                                        size_t len, char *out, size_t outlen,
+                                        int *line) {
   mz_zip_archive zip;
   mz_uint count, i;
-  int found = 0;
+  const char *why = NULL;
 
   if (!zip_open(&zip, file, buf, len)) {
-    return 0;
+    return NULL;
   }
   count = mz_zip_reader_get_num_files(&zip);
-  for (i = 0; i < count && !found; i++) {
+  for (i = 0; i < count && why == NULL; i++) {
     char name[MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE];
     mz_uint got = mz_zip_reader_get_filename(&zip, i, name, sizeof(name));
-    size_t n;
+    int st;
     if (got == 0 || got > sizeof(name)) continue;
-    n = strlen(name);
     if (!(strcmp(name, "[Content_Types].xml") == 0 ||
           strcmp(name, "xl/workbook.xml") == 0 ||
-          (n >= 5 && strcmp(name + n - 5, ".rels") == 0))) {
+          strcmp(name, "xl/_rels/workbook.xml.rels") == 0)) {
       continue;
     }
-    if (!mz_zip_validate_file(&zip, i, 0)) {
-      if (n >= outlen) n = outlen - 1;
-      memcpy(out, name, n);
-      out[n] = '\0';
-      found = 1;
+    st = check_part(&zip, i, line);
+    if (st == 1 || st == 2) {
+      copy_name(out, outlen, name);
+      why = st == 1 ? STATUS_XML : STATUS_PART_ZIP;
     }
   }
   mz_zip_reader_end(&zip);
-  return found;
+  return why;
 }
 
 SEXP C_xlsx_sheets(SEXP path, SEXP password) {
@@ -699,14 +727,17 @@ SEXP C_xlsx_sheets(SEXP path, SEXP password) {
   }
   {
     char part[MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE];
-    if (corrupt_listing_part(file, plain->data, plain->len, part, sizeof(part))) {
+    int line = 0;
+    const char *why = damaged_listing_part(file, plain->data, plain->len,
+                                           part, sizeof(part), &line);
+    if (why != NULL) {
       const char *fields[] = {"part", "line", ""};
       sheet_list_finalizer(bag);
       plain_buf_finalizer(holder);
       detail = PROTECT(Rf_mkNamed(VECSXP, fields));
       SET_VECTOR_ELT(detail, 0, Rf_mkString(part));
-      SET_VECTOR_ELT(detail, 1, Rf_ScalarInteger(0));
-      res = PROTECT(result(STATUS_PART_ZIP, detail));
+      SET_VECTOR_ELT(detail, 1, Rf_ScalarInteger(why == STATUS_XML ? line : 0));
+      res = PROTECT(result(why, detail));
       UNPROTECT(4);
       return res;
     }
