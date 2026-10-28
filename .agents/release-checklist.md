@@ -4,21 +4,21 @@ Everything here that could be done early has been. What remains is either
 blocked on something outside this repository, or would break installation if
 done before submission day.
 
-## Blocked: the siblings must be on CRAN first
+## Cleared: the siblings are on CRAN
 
-`LinkingTo: zukomp, zuxml`, and **CRAN ignores `Remotes:`** -- it is a
-devtools and remotes field, not an R one. A submission made while those two
-are only on GitHub fails at incoming checks, before a human sees it, because
-the declared dependencies cannot be installed from CRAN.
+`LinkingTo: zucrypt, zukomp, zuxml`, and **CRAN ignores `Remotes:`** -- it is
+a devtools and remotes field, not an R one -- so a submission made while any
+of the three was only on GitHub would have failed at incoming checks.
 
-So the order is fixed: `zuxml` and `zukomp` are accepted, then zuxlsx is
-submitted. Nothing in this package can shorten that.
-
-Check with:
+That block is gone: zukomp 0.1.0 (2026-10-16), zucrypt 0.1.0 (2026-10-23) and
+zuxml 0.1.0 (2026-10-27) are all on CRAN, and each CRAN build installs its
+`lib/` archive. On 2026-10-28 `R CMD check --as-cran` passed against those
+three CRAN builds, with `Remotes:` removed, in the C locale: only the
+"New submission" NOTE.
 
 ```r
 p <- rownames(available.packages(repos = "https://cloud.r-project.org"))
-c("zuxml", "zukomp") %in% p
+c("zuxml", "zukomp", "zucrypt") %in% p
 ```
 
 ## Do these on submission day, not before
@@ -55,6 +55,10 @@ dependencies resolve, so the check that matters is the one after the edit.
 
 ## Worth re-checking at the time
 
+- That the tests pass in a locale that is not UTF-8
+  (`LANG=C LC_ALL=C Rscript -e 'devtools::test()'`). CRAN's Debian clang
+  machine runs them that way, and CI here does not; a non-ASCII password
+  literal once failed only there.
 - `tools/vendor/verify` and `tools/fixtures/make-extdata.R --check`, so the
   vendored tree and the generated fixture still match what is recorded.
 - That the minimum sibling version named in `configure` is still right. It
