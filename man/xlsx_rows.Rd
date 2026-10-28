@@ -10,7 +10,12 @@ xlsx_rows(path, sheet = 1, password = NULL)
 \item{path}{Path to an \code{.xlsx} file.}
 
 \item{sheet}{The worksheet to read: either its name, or its position in the
-workbook.}
+workbook.
+
+Cells the worksheet leaves out between the ones it writes come back as
+\code{"blank"}, and so may a few the file never names: the reader pads to keep
+positions aligned. \code{\link[=read_xlsx]{read_xlsx()}} ignores blank cells when it decides where
+a table starts and ends.}
 
 \item{password}{The password of a password-protected workbook, or \code{NULL}
 (the default) for one without. The workbook is decrypted in memory and

@@ -1332,6 +1332,24 @@ themselves carry, which is independent of that padding. The quirk is pinned by
 a characterisation test rather than patched in xlsxio, since nothing above the
 cell layer needs the padding to be right.
 
+**Correction, 2026-10-28 (#40).** That last clause was wrong. The padding
+also emits one blank cell above a table that starts at row 3 or below, and
+`read_xlsx()` took the extent from every cell, blanks included, so such a
+table read with that padding row as its header. Without `range`, the
+extent now comes from non-blank cells only, as in readxl: empty rows above
+and below the table and empty columns either side are not part of it, and a
+sheet whose styled empty cells run far past its data reads as its data.
+`xlsx_cells()` still reports padding blanks, and its documentation says so.
+`xlsx_rows()` runs from row 1, so `rows[[n]]` is row n.
+
+**Interrupts (#42).** Every row loop checks for an interrupt every thousand
+rows, under `R_UnwindProtect`: the cleanup closes the reader and worksheet,
+wipes the plaintext and frees the cells as the interrupt -- or a
+`setTimeLimit()` limit, which is signalled at the same check -- unwinds. The
+continuation is made before any reader opens and kept in the cell bag's
+protected slot, so the check never allocates while the C stack owns an open
+handle.
+
 ### 17.4d Strict OOXML, 2026-09-20: found by looking, not by erroring
 
 `strict_ooxml.xlsx` was listed here as still to build, and needing a real

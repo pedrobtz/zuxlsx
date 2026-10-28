@@ -10,7 +10,12 @@ read_xlsx(path, sheet = 1, col_names = TRUE, range = NULL, password = NULL)
 \item{path}{Path to an \code{.xlsx} file.}
 
 \item{sheet}{The worksheet to read: either its name, or its position in the
-workbook.}
+workbook.
+
+Cells the worksheet leaves out between the ones it writes come back as
+\code{"blank"}, and so may a few the file never names: the reader pads to keep
+positions aligned. \code{\link[=read_xlsx]{read_xlsx()}} ignores blank cells when it decides where
+a table starts and ends.}
 
 \item{col_names}{Whether the first row holds column names. When \code{FALSE},
 columns are named \code{X1}, \code{X2} and so on. When \code{TRUE}, a column whose
@@ -46,11 +51,12 @@ the type its cells support. This is the high-level reader; \code{\link[=xlsx_cel
 gives the same worksheet cell by cell.
 }
 \details{
-A worksheet may leave a row out of its XML rather than write an empty one.
-Such a row is kept, as a row of \code{NA}, wherever it falls -- including
-directly beneath the header. Keeping every blank row is easier to predict
-than keeping only the interior ones, and \code{range} is the way to begin
-further down the sheet.
+Without \code{range}, the table is the rectangle its non-blank cells span:
+empty rows above and below it, and empty columns either side, are not
+part of it, so a table that starts at \code{B3} reads with its header from row
+3. Inside that rectangle a worksheet may leave a row out of its XML rather
+than write an empty one; such a row is kept, as a row of \code{NA}, wherever it
+falls -- including directly beneath the header.
 
 Column types are inferred by promotion. A column of blanks is logical, one
 of booleans stays logical, numbers give a double, and anything that mixes

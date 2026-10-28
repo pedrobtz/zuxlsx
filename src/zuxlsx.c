@@ -1098,6 +1098,60 @@ static SEXP sheet_failure(const char *status, const char *sheetname,
   return res;
 }
 
+/* Interrupts while a reader is open (#42).
+ *
+ * A whole-sheet read is one .Call, so without a check it cannot be stopped.
+ * R_CheckUserInterrupt() longjmps, though, and the reader, the worksheet,
+ * the plaintext and the cells gathered so far would be left for the garbage
+ * collector -- or, for the two xlsxio handles on the C stack, leaked. So the
+ * check runs under R_UnwindProtect, whose cleanup closes them all at the
+ * point the interrupt (or a setTimeLimit() limit) unwinds.
+ *
+ * The continuation is made when the cell bag is, before any reader opens,
+ * and kept in the bag's protected slot: so a check never allocates while
+ * something only the C stack owns is open. */
+#define INTERRUPT_ROWS 1000
+
+typedef struct {
+  xlsxioreader *reader;      /* on the C stack, or NULL */
+  xlsxioreadersheet *sheet;  /* on the C stack, or NULL */
+  SEXP plain;                /* a plain_buf holder, or R_NilValue */
+  SEXP handle;               /* a reader_handle holder, or R_NilValue */
+  SEXP bag;                  /* the cell bag, which holds the continuation */
+} read_owner;
+
+static SEXP interrupt_body(void *unused) {
+  (void) unused;
+  R_CheckUserInterrupt();
+  return R_NilValue;
+}
+
+static void read_owner_cleanup(void *data, Rboolean jump) {
+  read_owner *o = (read_owner *) data;
+  if (!jump) return;
+  if (o->sheet != NULL && *o->sheet != NULL) {
+    xlsxioread_sheet_close(*o->sheet);
+    *o->sheet = NULL;
+  }
+  if (o->reader != NULL && *o->reader != NULL) {
+    xlsxioread_close(*o->reader);
+    *o->reader = NULL;
+  }
+  if (o->handle != R_NilValue) reader_handle_finalizer(o->handle);
+  if (o->plain != R_NilValue) plain_buf_finalizer(o->plain);
+  cell_list_finalizer(o->bag);
+}
+
+/* Gives the bag its continuation. Allocates: called before a reader opens. */
+static void read_owner_prepare(SEXP bag) {
+  R_SetExternalPtrProtected(bag, R_MakeUnwindCont());
+}
+
+static void check_interrupt(read_owner *o) {
+  R_UnwindProtect(interrupt_body, NULL, read_owner_cleanup, o,
+                  R_ExternalPtrProtected(o->bag));
+}
+
 SEXP C_xlsx_cells(SEXP path, SEXP sheet, SEXP password) {
   const char *file;
   const char *sheetname;
@@ -1130,6 +1184,7 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet, SEXP password) {
   }
   bag = PROTECT(R_MakeExternalPtr(cells, R_NilValue, R_NilValue));
   R_RegisterCFinalizerEx(bag, cell_list_finalizer, TRUE);
+  read_owner_prepare(bag);
   holder = PROTECT(make_plain_holder());
   if (holder == R_NilValue) {
     cell_list_finalizer(bag);
@@ -1166,10 +1221,14 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet, SEXP password) {
   }
   date1904 = xlsxioread_sheet_date1904(worksheet);
 
+  read_owner owner = {&reader, &worksheet, holder, R_NilValue, bag};
   while (xlsxioread_sheet_next_row(worksheet)) {
     size_t colnr = 0;
     char *value;
     rownr++;
+    if (rownr % INTERRUPT_ROWS == 0) {
+      check_interrupt(&owner);
+    }
     /* NULL means end of row, not a blank cell: a blank arrives as a
        non-NULL empty string. Treating NULL as a value would never
        terminate the row. */
@@ -1336,6 +1395,7 @@ SEXP C_xlsx_read_cells(SEXP path, SEXP sheet, SEXP callback, SEXP env,
   }
   bag = PROTECT(R_MakeExternalPtr(cells, R_NilValue, R_NilValue));
   R_RegisterCFinalizerEx(bag, cell_list_finalizer, TRUE);
+  read_owner_prepare(bag);
 
   handle = (reader_handle *)calloc(1, sizeof(reader_handle));
   if (handle == NULL) {
@@ -1370,10 +1430,14 @@ SEXP C_xlsx_read_cells(SEXP path, SEXP sheet, SEXP callback, SEXP env,
   }
   date1904 = xlsxioread_sheet_date1904(handle->sheet);
 
+  read_owner owner = {NULL, NULL, R_NilValue, holder, bag};
   while (!stopped && xlsxioread_sheet_next_row(handle->sheet)) {
     size_t colnr = 0;
     char *value;
     rownr++;
+    if (rownr % INTERRUPT_ROWS == 0) {
+      check_interrupt(&owner);
+    }
     while ((value = xlsxioread_sheet_next_cell(handle->sheet)) != NULL) {
       double num;
       int type = classify_cell(xlsxioread_sheet_last_cell_type(handle->sheet),
@@ -1539,6 +1603,7 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
   }
   bag = PROTECT(R_MakeExternalPtr(cells, R_NilValue, R_NilValue));
   R_RegisterCFinalizerEx(bag, cell_list_finalizer, TRUE);
+  read_owner_prepare(bag);
 
   /* No R allocation until xlsxioread_close(). */
   reader = open_reader(file, plain);
@@ -1558,10 +1623,14 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
   }
   date1904 = xlsxioread_sheet_date1904(worksheet);
 
+  read_owner owner = {&reader, &worksheet, holder, R_NilValue, bag};
   while (xlsxioread_sheet_next_row(worksheet)) {
     size_t colnr = 0;
     char *value;
     rownr++;
+    if (rownr % INTERRUPT_ROWS == 0) {
+      check_interrupt(&owner);
+    }
     while ((value = xlsxioread_sheet_next_cell(worksheet)) != NULL) {
       double num;
       int type = classify_cell(xlsxioread_sheet_last_cell_type(worksheet),
@@ -1620,17 +1689,46 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
     }
   }
 
-  /* A range asks for its own rectangle whether or not cells fill it; without
-     one the extent is whatever the worksheet used. Rows are spanned rather
-     than taken from the rows that carry a cell, so an omitted row stays a
-     row, so that row n of the result is row n of the sheet (after the
-     header) wherever blank rows fall. */
-  first_row = (double)cells->row[0];
-  last_row = first_row;
-  for (i = 0; i < cells->n; i++) {
-    if ((double)cells->row[i] < first_row) first_row = (double)cells->row[i];
-    if ((double)cells->row[i] > last_row) last_row = (double)cells->row[i];
-    if (cells->col[i] > ncol) ncol = cells->col[i];
+  /* A range asks for its own rectangle whether or not cells fill it.
+     Without one the table is the rectangle its non-blank cells span, as in
+     readxl: blank cells do not count, because xlsxio pads blanks the file
+     never wrote -- one cell above a table that starts at row 3 or below,
+     which used to become the header row (#40) -- and a sheet styled far
+     past its data has blank cells there. Leading and trailing empty rows,
+     and leading empty columns, are therefore dropped. Inside the span rows
+     are spanned rather than taken from the rows that carry a cell, so an
+     omitted row stays a row. */
+  if (ISNA(min_row) && ISNA(min_col)) {
+    size_t lo_col = 0, hi_col = 0;
+    int any = 0;
+    for (i = 0; i < cells->n; i++) {
+      double r = (double)cells->row[i];
+      if (cells->type[i] == ZU_CELL_BLANK) continue;
+      if (!any || r < first_row) first_row = r;
+      if (!any || r > last_row) last_row = r;
+      if (!any || cells->col[i] < lo_col) lo_col = cells->col[i];
+      if (!any || cells->col[i] > hi_col) hi_col = cells->col[i];
+      any = 1;
+    }
+    if (!any) {
+      cell_list_finalizer(bag);
+      UNPROTECT(2);
+      return result(STATUS_OK, R_NilValue);
+    }
+    /* Columns are renumbered from the first non-blank one; a cell left of
+       it gets column 0, which every loop below skips. */
+    for (i = 0; i < cells->n; i++) {
+      cells->col[i] = cells->col[i] < lo_col ? 0 : cells->col[i] - (lo_col - 1);
+    }
+    ncol = hi_col - lo_col + 1;
+  } else {
+    first_row = (double)cells->row[0];
+    last_row = first_row;
+    for (i = 0; i < cells->n; i++) {
+      if ((double)cells->row[i] < first_row) first_row = (double)cells->row[i];
+      if ((double)cells->row[i] > last_row) last_row = (double)cells->row[i];
+      if (cells->col[i] > ncol) ncol = cells->col[i];
+    }
   }
   if (!ISNA(min_row)) {
     first_row = 1;
@@ -1648,7 +1746,9 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
   kind = (int *)R_alloc(ncol, sizeof(int));
   memset(mask, 0, ncol * sizeof(unsigned int));
   for (i = 0; i < cells->n; i++) {
-    if (cells->row[i] < body_first || cells->type[i] == ZU_CELL_BLANK) {
+    if (cells->row[i] < body_first || cells->row[i] > (size_t)last_row ||
+        cells->type[i] == ZU_CELL_BLANK || cells->col[i] == 0 ||
+        cells->col[i] > ncol) {
       continue;
     }
     mask[cells->col[i] - 1] |= TYPEMASK(cells->type[i]);
@@ -1687,7 +1787,7 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
     size_t c = cells->col[i] - 1;
     SEXP col;
     R_xlen_t at;
-    if (c >= ncol) {
+    if (cells->col[i] == 0 || c >= ncol) {
       continue;
     }
     if (header && cells->row[i] == (size_t)first_row) {

@@ -366,3 +366,48 @@ test_that("a deflated worksheet reads like a stored one", {
   expect_identical(read_xlsx(path, col_names = FALSE),
                    read_xlsx(stored, col_names = FALSE))
 })
+
+test_that("a long read can be interrupted, and leaves nothing open", {
+  # The reader checks for an interrupt every thousand rows. An elapsed-time
+  # limit is signalled at the same check, so it stands in for Ctrl-C here
+  # (#42). The cleanup closes the reader as the error unwinds; that nothing
+  # leaked is for valgrind and ASan to show, and a clean read afterwards is
+  # what R can see.
+  skip_on_cran()
+  skip_if_light()
+  n <- 600000L
+  sheet <- charToRaw(paste0(
+    '<?xml version="1.0"?>',
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
+    "<sheetData>",
+    paste0('<row r="', seq_len(n), '"><c r="A', seq_len(n), '"><v>',
+           seq_len(n), "</v></c></row>", collapse = ""),
+    "</sheetData></worksheet>"
+  ))
+  path <- withr::local_tempfile(fileext = ".xlsx")
+  parts <- workbook_parts()
+  entries <- lapply(names(parts), function(nm) zip_entry(nm, parts[[nm]]))
+  at <- which(names(parts) == "xl/worksheets/sheet1.xml")
+  # CRC left wrong (computing it in R is slow): the read is stopped long
+  # before the end, where the checksum would be compared.
+  entries[[at]] <- zip_entry("xl/worksheets/sheet1.xml", sheet,
+                             declared_crc = as.raw(c(0, 0, 0, 0)), deflate = TRUE)
+  write_zip(path, entries)
+
+  for (reader in list(
+    function() read_xlsx(path),
+    function() xlsx_cells(path),
+    function() xlsx_read_cells(path, 1, function(cells) NULL)
+  )) {
+    elapsed <- system.time(expect_error(local({
+      setTimeLimit(elapsed = 0.1, transient = TRUE)
+      on.exit(setTimeLimit(elapsed = Inf))
+      reader()
+    }), "time limit"))[["elapsed"]]
+    expect_lt(elapsed, 5)
+  }
+
+  small <- withr::local_tempfile(fileext = ".xlsx")
+  write_workbook(small, grid_workbook(3L, 3L))
+  expect_identical(dim(read_xlsx(small, col_names = FALSE)), c(3L, 3L))
+})

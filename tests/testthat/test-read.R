@@ -222,3 +222,39 @@ test_that("ISO 8601 date cells read as dates", {
     "2024-02-01 10:00:00"
   )
 })
+
+test_that("a table is found wherever it starts, and blank cells do not move it", {
+  # xlsxio pads one blank cell above a table that starts at row 3 or below,
+  # which used to become the header row (#40). And a sheet whose blank
+  # cells reach past its data -- styled empty cells -- reads as its data.
+  table_at <- function(top, left = 1L, extra = NULL) {
+    path <- withr::local_tempfile(fileext = ".xlsx", .local_envir = parent.frame())
+    col <- function(k) LETTERS[left + k - 1L]
+    rows <- paste0(
+      '<row r="', top, '">', txt(paste0(col(1), top), "name"),
+      txt(paste0(col(2), top), "n"), "</row>",
+      '<row r="', top + 1L, '">', txt(paste0(col(1), top + 1L), "a"),
+      num(paste0(col(2), top + 1L), 1), "</row>",
+      extra
+    )
+    parts <- workbook_parts()
+    parts[["xl/worksheets/sheet1.xml"]] <- paste0(
+      '<?xml version="1.0"?>',
+      '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
+      "<sheetData>", rows, "</sheetData></worksheet>"
+    )
+    write_workbook(path, parts)
+    read_xlsx(path)
+  }
+  expected <- data.frame(name = "a", n = 1, stringsAsFactors = FALSE)
+  for (top in c(1L, 2L, 3L, 10L)) {
+    expect_identical(table_at(top), expected, info = top)
+  }
+  # Leading empty columns too.
+  expect_identical(table_at(3L, left = 2L), expected)
+  # Blank cells below and to the right are not data.
+  expect_identical(
+    table_at(1L, extra = '<row r="50"><c r="A50" s="1"/><c r="H50"/></row>'),
+    expected
+  )
+})

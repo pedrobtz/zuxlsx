@@ -12,6 +12,11 @@ CELL_TYPES <- c("blank", "number", "string", "boolean", "error", "date")
 #' @param sheet The worksheet to read: either its name, or its position in the
 #'   workbook.
 #'
+#' Cells the worksheet leaves out between the ones it writes come back as
+#' `"blank"`, and so may a few the file never names: the reader pads to keep
+#' positions aligned. [read_xlsx()] ignores blank cells when it decides where
+#' a table starts and ends.
+#'
 #' @return A data frame with one row per cell and the columns:
 #'   \describe{
 #'     \item{`row`, `col`}{Position, counting from 1.}
