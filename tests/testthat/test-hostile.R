@@ -242,7 +242,7 @@ test_that("a shared-string index that does not resolve is an error, not a blank"
   shared <- paste0(
     '<?xml version="1.0"?>',
     '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
-    "<si><t>zero</t></si></sst>"
+    "<si><t>zero</t></si><si/><si><t>two</t></si></sst>"
   )
   read_index <- function(v, with_table = TRUE) {
     path <- withr::local_tempfile(fileext = ".xlsx", .local_envir = parent.frame())
@@ -265,12 +265,28 @@ test_that("a shared-string index that does not resolve is an error, not a blank"
   }
 
   expect_identical(read_index("0")$value, "zero")
-  for (v in c("1", "-1", "x")) {
+  # XML Schema allows whitespace around an integer, and real writers use it
+  # (POI's bug69769.xlsx has <v>2 </v>).
+  expect_identical(read_index(" 0 ")$value, "zero")
+  # An empty <si/> is in the table: a blank cell, not a missing string --
+  # and the entry after it is still at its own index. xlsxio used to skip
+  # <si/>, which moved every later string up by one.
+  expect_identical(as.character(read_index("1")$type), "blank")
+  expect_identical(read_index("2")$value, "two")
+  for (v in c("3", "-1", "x")) {
     expect_error(read_index(v), class = "zuxlsx_ooxml_error", info = v)
   }
   # An empty <v/> names no index at all, and is a blank cell.
   expect_identical(as.character(read_index("")$type), "blank")
   expect_error(read_index("0", with_table = FALSE), class = "zuxlsx_ooxml_error")
+
+  # A table whose elements carry a namespace prefix is the same table.
+  shared <- paste0(
+    '<?xml version="1.0"?>',
+    '<x:sst xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
+    "<x:si><x:t>zero</x:t></x:si></x:sst>"
+  )
+  expect_identical(read_index("0")$value, "zero")
 })
 
 test_that("a worksheet whose CRC-32 does not match is a ZIP error", {

@@ -1605,16 +1605,23 @@ void data_sheet_expat_callback_find_cell_end (void* callbackdata, const XML_Char
         long num = XML_Char_strtol(data->celldata, &p, 10);
         const XML_Char* s = NULL;
         //zuxlsx: an index that is not a number, is negative or is past the
-        //table is a malformed worksheet, not a blank cell
-        if ((!p || (p != data->celldata && *p == 0)) && num >= 0)
-          s = sharedstringlist_get(data->sharedstrings, (size_t)num);
-        if (!s) {
+        //table is a malformed worksheet, not a blank cell. Whitespace around
+        //it is allowed, as XML Schema allows it around an integer: some
+        //writers emit <v>2 </v>, which used to read as the text "2 ".
+        if (p)
+          while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')
+            p++;
+        //An entry may itself be NULL: that is an empty <si/>, a blank cell,
+        //so it is the table's size that says whether the index resolves.
+        if (!((!p || (p != data->celldata && *p == 0)) && num >= 0 &&
+              (size_t)num < sharedstringlist_size(data->sharedstrings))) {
           sheet_error(data, XLSXIOREAD_SHEET_ERROR_SHAREDSTRING);
           XML_StopParser(data->xmlparser, XML_FALSE);
           return;
         }
+        s = sharedstringlist_get(data->sharedstrings, (size_t)num);
         free(data->celldata);
-        data->celldata = XML_Char_dup(s);
+        data->celldata = (s ? XML_Char_dup(s) : NULL);
       } else if (data->cell_string_type == none) {
         //unknown value type
         free(data->celldata);
@@ -1754,9 +1761,11 @@ DLL_EXPORT_XLSXIO int xlsxioread_sheet_finish (xlsxioreadersheet sheethandle, un
     *line = 0;
   if (!sheethandle)
     return XLSXIOREAD_SHEET_ERROR_XML;
-  //a worksheet whose part was never found reads as no rows at all
+  //No part was opened: a chartsheet or dialogsheet, which the workbook lists
+  //among its sheets but which has no worksheet part, or a relationship that
+  //leads nowhere. Both read as no rows, as they always have.
   if (!sheethandle->zipfile)
-    return XLSXIOREAD_SHEET_ERROR_MISSING;
+    return XLSXIOREAD_SHEET_ERROR_NONE;
   result = sheethandle->processcallbackdata.zuxlsx_error;
   if (line)
     *line = sheethandle->processcallbackdata.zuxlsx_error_line;
@@ -2087,8 +2096,12 @@ DLL_EXPORT_XLSXIO XLSXIOCHAR* xlsxioread_sheet_next_cell (xlsxioreadersheet shee
   }
   //get value
   if (!sheethandle->processcallbackdata.celldata)
-    if (sheet_resume(sheethandle) != XML_STATUS_SUSPENDED)
+    if (sheet_resume(sheethandle) != XML_STATUS_SUSPENDED) {
+      //zuxlsx: a parse that stops inside a cell leaves its text gathered so
+      //far here; it was set to NULL without being freed
+      free(sheethandle->processcallbackdata.celldata);
       sheethandle->processcallbackdata.celldata = NULL;
+    }
   //insert empty rows if needed
   if (!(sheethandle->processcallbackdata.flags & XLSXIOREAD_SKIP_EMPTY_ROWS) && sheethandle->lastrownr + 1 < sheethandle->processcallbackdata.rownr) {
     sheethandle->paddingrow = sheethandle->lastrownr + 1;

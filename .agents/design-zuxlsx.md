@@ -920,7 +920,7 @@ xlsxio's `xlsxioread_sheet_next_row()` returns 0 at the end of a worksheet and
 on an error alike, so a damaged or truncated worksheet used to read as the
 rows before the damage, with `"ok"`. Patch 0008 adds
 `xlsxioread_sheet_finish()`, which every reader calls once the row loop has
-run out, and five statuses come from it:
+run out, and four statuses come from it:
 
 | Status | Class | Why the worksheet stopped |
 | --- | --- | --- |
@@ -928,18 +928,33 @@ run out, and five statuses come from it:
 | `sheet_range` | `zuxlsx_ooxml_error` | a cell reference past `XFD1048576` |
 | `sheet_shared_string` | `zuxlsx_ooxml_error` | a `t="s"` index that is not a number, is negative, or is past the table |
 | `sheet_zip` | `zuxlsx_zip_error` | the member's size or CRC-32 did not match, which miniz checks when it is closed |
-| `sheet_missing` | `zuxlsx_ooxml_error` | the worksheet's part was never found |
 
 The detail carries the worksheet's name and the XML line rather than a part
-name, which xlsxio resolves internally and does not expose. A worksheet that
-cannot be found was an empty sheet before; it is now an error, since a
-listed worksheet with no part is a broken workbook and not an empty one. The
+name, which xlsxio resolves internally and does not expose. A sheet whose
+part is never found still reads as empty: a chartsheet is listed among the
+sheets and has no worksheet part, and making that an error broke real
+workbooks in the corpus (`WithChartSheet.xlsx`, `56557.xlsx`). The
 callback reader reports the failure after the chunks it has already handed
 over -- those stay handed over -- and only when the callback did not stop the
 read itself.
 
 `zuxlsx_ooxml_error` therefore now means "well formed, but not a valid
 workbook" rather than only "declares no worksheet".
+
+The corpus run caught two things the hand-built tests did not. A
+shared-string table may hold an empty `<si/>`, which xlsxio stores as a NULL
+entry, so it is the table's size, not a NULL lookup, that says whether an
+index resolves. And `bug69769.xlsx` writes an index as `<v>2 </v>`; XML
+Schema allows whitespace around an integer, and that cell used to read as
+the text "2 " rather than as its string. Both are in patch 0008, as are two shared-string bugs that read as blank or
+wrong text without any error: an empty `<si/>` was never added to the table,
+so every later index resolved one entry off; and a table written with a
+namespace prefix (`<x:sst><x:si>`, as `style-alternate-content.xlsx` and a
+report generator in the corpus write it) was not read at all, so every
+string came back blank. Workbooks
+whose string table xlsxio cannot read at all -- an Excel 2007 beta file with
+`<sstItem>` rather than `<si>` -- used to read every string as blank; they
+are now `zuxlsx_ooxml_error`, which `tools/corpus/expected.tsv` records.
 
 `agile_crypto` and the unrecognised-status fallback carry `zuxlsx_error`
 alone; they used to list it twice.

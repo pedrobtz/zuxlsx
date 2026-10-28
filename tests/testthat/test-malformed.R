@@ -182,11 +182,11 @@ test_that("a relationship with no Id does not crash the process", {
   )
   write_workbook(path, parts)
 
-  # The worksheet is listed but cannot be reached, which is reported rather
-  # than read as an empty sheet.
+  # The worksheet is listed but cannot be reached. It reads as empty, the
+  # way a chartsheet -- listed, with no worksheet part -- has to.
   expect_identical(xlsx_sheets(path), "Sheet1")
-  expect_error(read_xlsx(path), class = "zuxlsx_ooxml_error")
-  expect_error(xlsx_cells(path, 1), class = "zuxlsx_ooxml_error")
+  expect_s3_class(read_xlsx(path), "data.frame")
+  expect_identical(nrow(xlsx_cells(path, 1)), 0L)
 })
 
 test_that("a relationship with an empty Id does not crash either", {
@@ -203,7 +203,7 @@ test_that("a relationship with an empty Id does not crash either", {
   )
   write_workbook(path, parts)
 
-  expect_error(read_xlsx(path), class = "zuxlsx_ooxml_error")
+  expect_s3_class(read_xlsx(path), "data.frame")
 })
 
 test_that("a worksheet that breaks off is an error, not a shorter sheet", {

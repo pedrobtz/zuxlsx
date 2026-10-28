@@ -314,7 +314,6 @@ DLL_EXPORT_XLSXIO int xlsxioread_sheet_date1904 (xlsxioreadersheet sheethandle);
 #define XLSXIOREAD_SHEET_ERROR_RANGE        2
 #define XLSXIOREAD_SHEET_ERROR_SHAREDSTRING 3
 #define XLSXIOREAD_SHEET_ERROR_ZIP          4
-#define XLSXIOREAD_SHEET_ERROR_MISSING      5
 /*! @} */
 
 /*! \brief zuxlsx: whether a worksheet read until xlsxioread_sheet_next_row() returned 0 was read in full

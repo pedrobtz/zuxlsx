@@ -68,9 +68,11 @@ reported there.
       Adds xlsxioread_sheet_finish(), which says whether a worksheet ended
       because it was read in full or because of a parse error, a cell
       reference past XFD1048576, a shared-string index that does not
-      resolve, a failed ZIP size or CRC-32 check, or a worksheet part that
-      was never found -- all of which used to read as a shorter or empty
-      sheet. Saturates cell reference parsing at the grid's edge. Corrects
+      resolve, or a failed ZIP size or CRC-32 check -- all of which used to
+      read as a shorter sheet. Frees a cell's text when a parse stops
+      inside it, and adds an empty <si/> to the shared-string table, which
+      was skipped and shifted every later index by one; and reads a
+      shared-string table whose elements carry a namespace prefix. Saturates cell reference parsing at the grid's edge. Corrects
       patch 0003's number-format predicates: bracketed locale tags and
       colours are no longer elapsed time, and the East Asian and Thai
       built-in date formats are dates. Written for zuxlsx.

@@ -202,7 +202,7 @@ poi/clusterfuzz-testcase-minimized-POIXSSFFuzzer-4828727001088000.xlsx	zuxlsx_zi
 poi/clusterfuzz-testcase-minimized-POIXSSFFuzzer-5089447305609216.xlsx	zuxlsx_zip_error	0	0
 poi/clusterfuzz-testcase-minimized-POIXSSFFuzzer-5185049589579776.xlsx	zuxlsx_zip_error	0	0
 poi/clusterfuzz-testcase-minimized-POIXSSFFuzzer-5265527465181184.xlsx	ok	2	0
-poi/clusterfuzz-testcase-minimized-POIXSSFFuzzer-5937385319563264.xlsx	ok	12	3677
+poi/clusterfuzz-testcase-minimized-POIXSSFFuzzer-5937385319563264.xlsx	zuxlsx_zip_error	12	2395
 poi/clusterfuzz-testcase-minimized-POIXSSFFuzzer-6123461607817216.xlsx	zuxlsx_zip_error	0	0
 poi/clusterfuzz-testcase-minimized-POIXSSFFuzzer-6419366255919104.xlsx	zuxlsx_zip_error	0	0
 poi/clusterfuzz-testcase-minimized-POIXSSFFuzzer-6448258963341312.xlsx	zuxlsx_zip_error	0	0
@@ -290,7 +290,7 @@ poi/reordered_sheets.xlsx	ok	4	2
 poi/RepeatingRowsCols.xlsx	ok	4	40
 poi/resize_compare.xlsx	ok	1	2
 poi/right-to-left.xlsx	ok	2	8
-poi/sample-beta.xlsx	ok	3	20
+poi/sample-beta.xlsx	zuxlsx_ooxml_error	3	0
 poi/sample.strict.xlsx	ok	3	37
 poi/sample.xlsb	zuxlsx_unsupported_format_error	0	0
 poi/sample.xlsx	ok	3	37

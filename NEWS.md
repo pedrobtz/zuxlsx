@@ -69,8 +69,8 @@ so an installed zuxlsx has no run-time dependency on any of them.
 
 * A worksheet that cannot be read in full -- its XML breaks off, it refers to
   a cell past `XFD1048576` or to a shared string that does not exist, its
-  compressed data fails its checksum, or its part is missing -- is an error,
-  never a shorter or empty sheet.
+  or its compressed data fails its checksum -- is an error, never a shorter
+  sheet.
 
 * A file that is a spreadsheet zuxlsx cannot read is reported as such rather
   than as damage. A legacy `.xls` is an OLE2 container, not a ZIP, and an

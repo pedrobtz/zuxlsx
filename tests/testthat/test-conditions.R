@@ -64,6 +64,15 @@ test_that("every zuxlsx error is catchable as zuxlsx_error", {
   }
 })
 
+test_that("a native failure is reported against the exported function", {
+  # Not data.frame(), or whatever internal call happened to force it.
+  path <- withr::local_tempfile(fileext = ".xlsx")
+  write_workbook(path, styled_workbook_parts('<c r="A1" t="s"><v>9</v></c>'))
+  cond <- tryCatch(xlsx_cells(path), error = identity)
+  expect_s3_class(cond, "zuxlsx_ooxml_error")
+  expect_identical(conditionCall(cond)[[1]], quote(xlsx_cells))
+})
+
 test_that("conditions carry the path they are about", {
   not_xlsx <- withr::local_tempfile(fileext = ".xlsx")
   writeBin(charToRaw("no"), not_xlsx)
@@ -139,9 +148,9 @@ test_that("the native layer refuses bad arguments by itself", {
     .Call(C_read_xlsx, path, "Sheet1", TRUE, c(1, 2e6, 1, 1), NULL)$status,
     "bad_path"
   )
-  # xlsxio cannot tell a name the workbook lacks from a listed worksheet
-  # whose part is missing; resolve_sheet() is what reports the first.
-  expect_identical(.Call(C_xlsx_cells, path, "Nope", NULL)$status, "sheet_missing")
+  # xlsxio opens no part for a name the workbook lacks, which reads as no
+  # rows; resolve_sheet() is what reports it.
+  expect_identical(.Call(C_xlsx_cells, path, "Nope", NULL)$status, "ok")
 })
 
 test_that("every status's message is stable", {

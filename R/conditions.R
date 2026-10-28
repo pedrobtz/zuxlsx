@@ -29,7 +29,7 @@
 #'   \item{`zuxlsx_ooxml_error`}{The XML is well formed but is not a valid
 #'     workbook: the archive declares no worksheet, or a worksheet refers to
 #'     a cell beyond `XFD1048576` or to a shared string that does not
-#'     exist, or a worksheet it lists cannot be found in it.}
+#'     exist.}
 #'   \item{`zuxlsx_sheet_error`}{The workbook opened, but the requested
 #'     worksheet is not in it.}
 #'   \item{`zuxlsx_encrypted_error`}{The workbook is password-protected and
@@ -159,17 +159,6 @@ zuxlsx_unwrap <- function(res, path = NULL, call = sys.call(-1L)) {
           paste0(" (line ", res$value$line, ")")
         },
         "."
-      )
-    ),
-    sheet_missing = list(
-      class = "zuxlsx_ooxml_error",
-      message = paste0(
-        "'",
-        path,
-        "' is not a valid xlsx workbook.\n",
-        "No part holding the worksheet ",
-        encodeString(res$value$sheet, quote = "'"),
-        " can be found through its relationships."
       )
     ),
     sheet_zip = list(

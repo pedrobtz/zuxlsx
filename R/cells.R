@@ -48,10 +48,13 @@ xlsx_cells <- function(path, sheet = 1, password = NULL) {
   password <- check_optional_password(password)
   sheet <- resolve_sheet(path, sheet, password)
 
-  cells_frame(zuxlsx_unwrap(
+  # Unwrapped here rather than inside cells_frame()'s argument, where lazy
+  # evaluation would make data.frame() the call an error reports.
+  parts <- zuxlsx_unwrap(
     .Call(C_xlsx_cells, path, sheet, password),
     path = path
-  ))
+  )
+  cells_frame(parts)
 }
 
 # The data frame xlsx_cells() returns and xlsx_read_cells() hands to its

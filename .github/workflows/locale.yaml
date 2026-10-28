@@ -24,7 +24,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        locale: [C, en_US.ISO-8859-1]
+        # en_US is Latin-1 on Ubuntu; locale-gen refuses the long name.
+        locale: [C, en_US]
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
     steps:

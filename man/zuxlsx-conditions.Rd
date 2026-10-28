@@ -25,7 +25,7 @@ way rather than read as a shorter one.}
 \item{\code{zuxlsx_ooxml_error}}{The XML is well formed but is not a valid
 workbook: the archive declares no worksheet, or a worksheet refers to
 a cell beyond \code{XFD1048576} or to a shared string that does not
-exist, or a worksheet it lists cannot be found in it.}
+exist.}
 \item{\code{zuxlsx_sheet_error}}{The workbook opened, but the requested
 worksheet is not in it.}
 \item{\code{zuxlsx_encrypted_error}}{The workbook is password-protected and

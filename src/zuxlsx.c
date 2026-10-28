@@ -55,7 +55,6 @@ static const char *const STATUS_SHEET_XML = "sheet_xml";
 static const char *const STATUS_SHEET_RANGE = "sheet_range";
 static const char *const STATUS_SHEET_SHARED = "sheet_shared_string";
 static const char *const STATUS_SHEET_ZIP = "sheet_zip";
-static const char *const STATUS_SHEET_MISSING = "sheet_missing";
 static const char *const STATUS_AGILE_PASSWORD = "agile_password";
 static const char *const STATUS_AGILE_INTEGRITY = "agile_integrity";
 static const char *const STATUS_AGILE_MALFORMED = "agile_malformed";
@@ -277,8 +276,9 @@ static int read_file(const char *file, uint8_t **out, size_t *out_len) {
     size_t got;
     if (len == cap) {
       size_t grown = cap ? cap * 2 : 65536;
-      uint8_t *p = (uint8_t *) realloc(buf, grown);
-      if (p == NULL || grown < cap) {
+      uint8_t *p;
+      /* Checked before the realloc: after a successful one, buf is gone. */
+      if (grown < cap || (p = (uint8_t *) realloc(buf, grown)) == NULL) {
         free(buf);
         fclose(fp);
         return -1;
@@ -1006,8 +1006,6 @@ static const char *sheet_end_status(xlsxioreadersheet worksheet, int *line) {
       return STATUS_SHEET_SHARED;
     case XLSXIOREAD_SHEET_ERROR_ZIP:
       return STATUS_SHEET_ZIP;
-    case XLSXIOREAD_SHEET_ERROR_MISSING:
-      return STATUS_SHEET_MISSING;
     default:
       return STATUS_SHEET_XML;
   }

@@ -14,7 +14,6 @@ STATUS_CLASSES <- list(
   sheet_range = "zuxlsx_ooxml_error",
   sheet_shared_string = "zuxlsx_ooxml_error",
   sheet_zip = "zuxlsx_zip_error",
-  sheet_missing = "zuxlsx_ooxml_error",
   format_encrypted = c("zuxlsx_encrypted_error", "zuxlsx_unsupported_format_error"),
   format_xls = "zuxlsx_unsupported_format_error",
   format_ole2 = "zuxlsx_unsupported_format_error",
@@ -45,8 +44,7 @@ status_value <- function(status) {
     sheet_xml = ,
     sheet_range = ,
     sheet_shared_string = ,
-    sheet_zip = ,
-    sheet_missing = list(sheet = "Sheet1", line = 7L),
+    sheet_zip = list(sheet = "Sheet1", line = 7L),
     agile_crypto = "ZUC_ERR_BACKEND",
     NULL
   )
