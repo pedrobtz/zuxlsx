@@ -29,14 +29,16 @@ A data frame with one row per cell and the columns:
 \item{\code{number}}{The numeric value for \code{"number"}, \code{"boolean"} and
 \code{"date"} cells, and \code{NA} otherwise. A date is its Excel serial
 number; it is not converted here, because the epoch is a property of
-the workbook rather than of the cell.}
+the workbook rather than of the cell. A date written as ISO 8601 text
+(\code{t="d"}) is given the serial an Excel number would have; one that
+cannot be read as a date is a \code{"string"}.}
 }
 }
 \description{
 Reads a worksheet one cell at a time and returns them in a data frame, one
 row per cell. This is the low-level reader: it reports what is in each cell
-without assembling columns or guessing a type for them, which is what
-\code{read_xlsx()} will do on top of it.
+without assembling columns or guessing a type for them; \code{\link[=read_xlsx]{read_xlsx()}} does
+that.
 }
 \examples{
 path <- system.file("extdata", "two-sheets.xlsx", package = "zuxlsx")

@@ -64,6 +64,7 @@ test_that("a relationship type from another vocabulary is not accepted", {
   )
   write_workbook(path, parts)
 
-  # The worksheet is not located, so no cells are found.
-  expect_identical(nrow(xlsx_cells(path, 1)), 0L)
+  # The worksheet is not located, which is reported rather than read as an
+  # empty sheet.
+  expect_error(xlsx_cells(path, 1), class = "zuxlsx_ooxml_error")
 })

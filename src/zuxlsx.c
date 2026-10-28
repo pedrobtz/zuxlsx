@@ -32,6 +32,7 @@
 #include "cfb.h"
 #include "encinfo.h"
 
+#include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -50,6 +51,11 @@ static const char *const STATUS_ENCRYPTED = "format_encrypted";
 static const char *const STATUS_XLS = "format_xls";
 static const char *const STATUS_XLSB = "format_xlsb";
 static const char *const STATUS_XML = "xml_malformed";
+static const char *const STATUS_SHEET_XML = "sheet_xml";
+static const char *const STATUS_SHEET_RANGE = "sheet_range";
+static const char *const STATUS_SHEET_SHARED = "sheet_shared_string";
+static const char *const STATUS_SHEET_ZIP = "sheet_zip";
+static const char *const STATUS_SHEET_MISSING = "sheet_missing";
 static const char *const STATUS_AGILE_PASSWORD = "agile_password";
 static const char *const STATUS_AGILE_INTEGRITY = "agile_integrity";
 static const char *const STATUS_AGILE_MALFORMED = "agile_malformed";
@@ -873,12 +879,90 @@ static int cell_list_push(cell_list *cells, size_t row, size_t col, int type,
   return 0;
 }
 
+/* Days from 1970-01-01 to the given proleptic Gregorian date (H. Hinnant's
+   days_from_civil). */
+static double days_from_civil(long y, unsigned m, unsigned d) {
+  long era;
+  unsigned yoe, doy, doe;
+  y -= m <= 2;
+  era = (y >= 0 ? y : y - 399) / 400;
+  yoe = (unsigned)(y - era * 400);
+  doy = (153 * (m > 2 ? m - 3 : m + 9) + 2) / 5 + d - 1;
+  doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+  return (double)era * 146097.0 + (double)doe - 719468.0;
+}
+
+static int read_digits(const char **p, int n, unsigned *out) {
+  unsigned v = 0;
+  int i;
+  for (i = 0; i < n; i++) {
+    if ((*p)[i] < '0' || (*p)[i] > '9') return 0;
+    v = v * 10 + (unsigned)((*p)[i] - '0');
+  }
+  *p += n;
+  *out = v;
+  return 1;
+}
+
+/* The serial an Excel number would carry for an ISO 8601 t="d" value, in the
+   workbook's own epoch, so that R converts both kinds of date the same way.
+   Accepts YYYY-MM-DD, an optional [T ]hh:mm[:ss[.fff]] (or the time alone),
+   and an optional trailing Z. Returns 0 for anything else. */
+static int iso_to_serial(const char *text, int date1904, double *serial) {
+  const char *p = text;
+  unsigned y = 0, mo = 0, d = 0, h = 0, mi = 0, sec = 0;
+  double days = 0, frac = 0, scale = 0.1;
+  int has_date = 0, has_time = 0;
+  static const unsigned mdays[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+
+  if (read_digits(&p, 4, &y) && *p == '-') {
+    p++;
+    if (!read_digits(&p, 2, &mo) || *p++ != '-' || !read_digits(&p, 2, &d)) return 0;
+    if (mo < 1 || mo > 12 || d < 1) return 0;
+    if (d > mdays[mo - 1] + (mo == 2 && ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0))) {
+      return 0;
+    }
+    has_date = 1;
+    if (*p == 'T' || *p == ' ') p++;
+  } else {
+    p = text;
+    if (*p == 'T') p++;
+  }
+  if (*p != 0 && *p != 'Z') {
+    if (!read_digits(&p, 2, &h) || *p++ != ':' || !read_digits(&p, 2, &mi)) return 0;
+    if (*p == ':') {
+      p++;
+      if (!read_digits(&p, 2, &sec)) return 0;
+      if (*p == '.') {
+        for (p++; *p >= '0' && *p <= '9'; p++, scale /= 10) frac += (*p - '0') * scale;
+      }
+    }
+    if (h > 24 || mi > 59 || sec > 60) return 0;
+    has_time = 1;
+  }
+  if (*p == 'Z') p++;
+  if (*p != 0 || (!has_date && !has_time)) return 0;
+
+  if (has_date) {
+    if (date1904) {
+      days = days_from_civil((long)y, mo, d) - days_from_civil(1904, 1, 1);
+    } else {
+      days = days_from_civil((long)y, mo, d) - days_from_civil(1899, 12, 30);
+      /* The 1900 system counts a 29 February 1900 that never was, so a date
+         before 1 March 1900 is one serial lower than the day count. */
+      if (days < 61) days -= 1;
+    }
+  }
+  *serial = days + ((double)h * 3600.0 + (double)mi * 60.0 + (double)sec + frac) / 86400.0;
+  return 1;
+}
+
 /* Maps what xlsxio reports onto the design section 13 type. A date is not an
    OOXML type of its own: except for the rare t="d", it is a number whose
    style carries a date format, which is why the format table is consulted
    rather than the type alone. */
 static int classify_cell(int xlsxio_type, int is_date, const char *value,
-                         double *number) {
+                         int date1904, double *number) {
   char *end = NULL;
   *number = NA_REAL;
 
@@ -894,7 +978,10 @@ static int classify_cell(int xlsxio_type, int is_date, const char *value,
     case XLSXIOREAD_CELLTYPE_STRING:
       return ZU_CELL_STRING;
     case XLSXIOREAD_CELLTYPE_DATE:
-      return ZU_CELL_DATE;
+      /* An ISO 8601 date in the text. Kept as text if it cannot be read, so
+         nothing the workbook says is lost. */
+      return iso_to_serial(value, date1904, number) ? ZU_CELL_DATE
+                                                    : ZU_CELL_STRING;
     case XLSXIOREAD_CELLTYPE_NUMBER:
     default:
       break;
@@ -979,6 +1066,44 @@ static void reader_handle_finalizer(SEXP ptr) {
   }
 }
 
+/* After a row loop that ran until xlsxioread_sheet_next_row() returned 0:
+   NULL if the worksheet was read in full, otherwise the status to report,
+   with the XML line in *line. A worksheet that ends early looks exactly like
+   one that ends, so without this a damaged one reads as a short one. */
+static const char *sheet_end_status(xlsxioreadersheet worksheet, int *line) {
+  unsigned long at = 0;
+  int why = xlsxioread_sheet_finish(worksheet, &at);
+  *line = at > (unsigned long)INT_MAX ? 0 : (int)at;
+  switch (why) {
+    case XLSXIOREAD_SHEET_ERROR_NONE:
+      return NULL;
+    case XLSXIOREAD_SHEET_ERROR_RANGE:
+      return STATUS_SHEET_RANGE;
+    case XLSXIOREAD_SHEET_ERROR_SHAREDSTRING:
+      return STATUS_SHEET_SHARED;
+    case XLSXIOREAD_SHEET_ERROR_ZIP:
+      return STATUS_SHEET_ZIP;
+    case XLSXIOREAD_SHEET_ERROR_MISSING:
+      return STATUS_SHEET_MISSING;
+    default:
+      return STATUS_SHEET_XML;
+  }
+}
+
+/* The result for a worksheet that could not be read in full. Allocates, so it
+   is only called once nothing but R-owned memory is held. */
+static SEXP sheet_failure(const char *status, const char *sheetname, int line) {
+  const char *fields[] = {"sheet", "line", ""};
+  SEXP detail = PROTECT(Rf_mkNamed(VECSXP, fields));
+  SEXP name = PROTECT(Rf_mkCharCE(sheetname, CE_UTF8));
+  SEXP res;
+  SET_VECTOR_ELT(detail, 0, Rf_ScalarString(name));
+  SET_VECTOR_ELT(detail, 1, Rf_ScalarInteger(line));
+  res = result(status, detail);
+  UNPROTECT(2);
+  return res;
+}
+
 SEXP C_xlsx_cells(SEXP path, SEXP sheet, SEXP password) {
   const char *file;
   const char *sheetname;
@@ -992,6 +1117,8 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet, SEXP password) {
   size_t i;
   size_t rownr = 0;
   int date1904 = 0;
+  const char *end = NULL;
+  int line = 0;
 
   if (TYPEOF(path) != STRSXP || XLENGTH(path) < 1 ||
       STRING_ELT(path, 0) == NA_STRING ||
@@ -1042,6 +1169,7 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet, SEXP password) {
     UNPROTECT(2);
     return result(STATUS_NO_SHEET, R_NilValue);
   }
+  date1904 = xlsxioread_sheet_date1904(worksheet);
 
   while (xlsxioread_sheet_next_row(worksheet)) {
     size_t colnr = 0;
@@ -1054,7 +1182,7 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet, SEXP password) {
       double number;
       int type = classify_cell(xlsxioread_sheet_last_cell_type(worksheet),
                                xlsxioread_sheet_last_cell_is_date(worksheet),
-                               value, &number);
+                               value, date1904, &number);
       colnr++;
       if (cell_list_push(cells, rownr, colnr, type, value, number) != 0) {
         free(value);
@@ -1069,7 +1197,9 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet, SEXP password) {
       break;
     }
   }
-  date1904 = xlsxioread_sheet_date1904(worksheet);
+  if (!cells->oom) {
+    end = sheet_end_status(worksheet, &line);
+  }
   xlsxioread_sheet_close(worksheet);
   xlsxioread_close(reader);
   plain_buf_finalizer(holder);
@@ -1079,6 +1209,12 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet, SEXP password) {
     UNPROTECT(2);
     return result(STATUS_MEMORY, R_NilValue);
   }
+  if (end != NULL) {
+    cell_list_finalizer(bag);
+    res = sheet_failure(end, sheetname, line);
+    UNPROTECT(2);
+    return res;
+  }
 
   out = PROTECT(cells_to_list(cells, date1904));
   cell_list_finalizer(bag);
@@ -1086,6 +1222,56 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet, SEXP password) {
   res = PROTECT(result(STATUS_OK, out));
   UNPROTECT(4);
   return res;
+}
+
+/* Calls the R callback on one chunk. If it unwinds -- an error, an
+   interrupt, a restart -- the reader is closed and the plaintext wiped there
+   and then, rather than whenever the finalizers next run. */
+typedef struct {
+  SEXP callback;
+  SEXP arg;
+  SEXP env;
+} callback_call;
+
+typedef struct {
+  SEXP holder;
+  SEXP bag;
+} callback_owner;
+
+static SEXP callback_body(void *data) {
+  callback_call *c = (callback_call *)data;
+  SEXP call = PROTECT(Rf_lang2(c->callback, c->arg));
+  SEXP val = Rf_eval(call, c->env);
+  UNPROTECT(1);
+  return val;
+}
+
+static void callback_cleanup(void *data, Rboolean jump) {
+  callback_owner *o = (callback_owner *)data;
+  if (jump) {
+    reader_handle_finalizer(o->holder);
+    cell_list_finalizer(o->bag);
+  }
+}
+
+/* Returns nonzero if the callback asked to stop. */
+static int run_callback(SEXP callback, SEXP env, const cell_list *cells,
+                        int date1904, SEXP holder, SEXP bag) {
+  callback_call c;
+  callback_owner o;
+  SEXP cont, val;
+  int stop;
+
+  c.callback = callback;
+  c.env = env;
+  c.arg = PROTECT(cells_to_list(cells, date1904));
+  o.holder = holder;
+  o.bag = bag;
+  cont = PROTECT(R_MakeUnwindCont());
+  val = PROTECT(R_UnwindProtect(callback_body, &c, callback_cleanup, &o, cont));
+  stop = (TYPEOF(val) == LGLSXP && XLENGTH(val) >= 1 && LOGICAL(val)[0] == FALSE);
+  UNPROTECT(3);
+  return stop;
 }
 
 /* Reads a worksheet a chunk at a time, handing each chunk to an R function.
@@ -1114,6 +1300,8 @@ SEXP C_xlsx_read_cells(SEXP path, SEXP sheet, SEXP callback, SEXP env,
   size_t rownr = 0;
   int date1904 = 0;
   int stopped = 0;
+  const char *end = NULL;
+  int line = 0;
 
   if (TYPEOF(path) != STRSXP || XLENGTH(path) < 1 ||
       STRING_ELT(path, 0) == NA_STRING ||
@@ -1194,7 +1382,7 @@ SEXP C_xlsx_read_cells(SEXP path, SEXP sheet, SEXP callback, SEXP env,
       double num;
       int type = classify_cell(xlsxioread_sheet_last_cell_type(handle->sheet),
                                xlsxioread_sheet_last_cell_is_date(handle->sheet),
-                               value, &num);
+                               value, date1904, &num);
       colnr++;
       if (cell_list_push(cells, rownr, colnr, type, value, num) != 0) {
         free(value);
@@ -1208,12 +1396,7 @@ SEXP C_xlsx_read_cells(SEXP path, SEXP sheet, SEXP callback, SEXP env,
     /* Emitted between rows, never inside one, so a chunk boundary can never
        fall in the middle of a row and split it across two callbacks. */
     if (cells->n >= limit) {
-      SEXP arg = PROTECT(cells_to_list(cells, date1904));
-      SEXP call = PROTECT(Rf_lang2(callback, arg));
-      SEXP val = PROTECT(Rf_eval(call, env));
-      stopped = (TYPEOF(val) == LGLSXP && XLENGTH(val) >= 1 &&
-                 LOGICAL(val)[0] == FALSE);
-      UNPROTECT(3);
+      stopped = run_callback(callback, env, cells, date1904, holder, bag);
       cell_list_free(cells);
     }
   }
@@ -1224,13 +1407,17 @@ SEXP C_xlsx_read_cells(SEXP path, SEXP sheet, SEXP callback, SEXP env,
     UNPROTECT(3);
     return result(STATUS_MEMORY, R_NilValue);
   }
-  if (!stopped && cells->n > 0) {
-    SEXP arg = PROTECT(cells_to_list(cells, date1904));
-    SEXP call = PROTECT(Rf_lang2(callback, arg));
-    SEXP val = PROTECT(Rf_eval(call, env));
-    stopped = (TYPEOF(val) == LGLSXP && XLENGTH(val) >= 1 &&
-               LOGICAL(val)[0] == FALSE);
+  /* Chunks already delivered stay delivered, but a worksheet that turns out
+     to be damaged is still reported rather than ending quietly. */
+  if (!stopped && (end = sheet_end_status(handle->sheet, &line)) != NULL) {
+    reader_handle_finalizer(holder);
+    cell_list_finalizer(bag);
+    res = sheet_failure(end, sheetname, line);
     UNPROTECT(3);
+    return res;
+  }
+  if (!stopped && cells->n > 0) {
+    stopped = run_callback(callback, env, cells, date1904, holder, bag);
   }
 
   reader_handle_finalizer(holder);
@@ -1300,6 +1487,8 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
   size_t ncol = 0, nrow = 0, body_first = 0;
   unsigned int *mask = NULL;
   int *kind = NULL;
+  const char *end = NULL;
+  int line = 0;
 
   if (TYPEOF(path) != STRSXP || XLENGTH(path) < 1 ||
       STRING_ELT(path, 0) == NA_STRING ||
@@ -1318,6 +1507,14 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
     max_row = REAL(bounds)[1];
     min_col = REAL(bounds)[2];
     max_col = REAL(bounds)[3];
+    /* parse_range() refuses anything outside the grid; the symbol is
+       reachable without it, and these sizes become allocations below. */
+    if ((!ISNA(min_row) && !(min_row >= 1 && max_row >= min_row &&
+                             max_row <= 1048576)) ||
+        (!ISNA(min_col) && !(min_col >= 1 && max_col >= min_col &&
+                             max_col <= 16384))) {
+      return result(STATUS_BAD_PATH, R_NilValue);
+    }
   }
   file = Rf_translateCharUTF8(STRING_ELT(path, 0));
   sheetname = Rf_translateCharUTF8(STRING_ELT(sheet, 0));
@@ -1362,6 +1559,7 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
     UNPROTECT(2);
     return result(STATUS_NO_SHEET, R_NilValue);
   }
+  date1904 = xlsxioread_sheet_date1904(worksheet);
 
   while (xlsxioread_sheet_next_row(worksheet)) {
     size_t colnr = 0;
@@ -1371,7 +1569,7 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
       double num;
       int type = classify_cell(xlsxioread_sheet_last_cell_type(worksheet),
                                xlsxioread_sheet_last_cell_is_date(worksheet),
-                               value, &num);
+                               value, date1904, &num);
       colnr++;
       /* Cells outside the range are dropped here rather than after the fact,
          so a range never pays for the rest of the worksheet in memory. */
@@ -1393,7 +1591,9 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
       break;
     }
   }
-  date1904 = xlsxioread_sheet_date1904(worksheet);
+  if (!cells->oom) {
+    end = sheet_end_status(worksheet, &line);
+  }
   xlsxioread_sheet_close(worksheet);
   xlsxioread_close(reader);
   plain_buf_finalizer(holder);
@@ -1402,6 +1602,12 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
     cell_list_finalizer(bag);
     UNPROTECT(2);
     return result(STATUS_MEMORY, R_NilValue);
+  }
+  if (end != NULL) {
+    cell_list_finalizer(bag);
+    res = sheet_failure(end, sheetname, line);
+    UNPROTECT(2);
+    return res;
   }
   if (cells->n == 0) {
     cell_list_finalizer(bag);
@@ -1438,15 +1644,11 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
   body_first = (size_t)first_row + (header ? 1u : 0u);
   nrow = (last_row >= (double)body_first) ? (size_t)(last_row - (double)body_first + 1) : 0;
 
-  mask = (unsigned int *)calloc(ncol, sizeof(unsigned int));
-  kind = (int *)calloc(ncol, sizeof(int));
-  if (mask == NULL || kind == NULL) {
-    free(mask);
-    free(kind);
-    cell_list_finalizer(bag);
-    UNPROTECT(2);
-    return result(STATUS_MEMORY, R_NilValue);
-  }
+  /* R_alloc rather than malloc: the column allocations below can fail and
+     longjmp, and R reclaims these when the call ends however it ends. */
+  mask = (unsigned int *)R_alloc(ncol, sizeof(unsigned int));
+  kind = (int *)R_alloc(ncol, sizeof(int));
+  memset(mask, 0, ncol * sizeof(unsigned int));
   for (i = 0; i < cells->n; i++) {
     if (cells->row[i] < body_first || cells->type[i] == ZU_CELL_BLANK) {
       continue;
@@ -1523,8 +1725,6 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
     }
   }
 
-  free(mask);
-  free(kind);
   cell_list_finalizer(bag);
 
   {

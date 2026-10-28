@@ -548,6 +548,26 @@ A column whose serials are whole numbers becomes `Date`; one where any cell
 carries a time of day becomes `POSIXct` in UTC, since coercing to `Date` would
 drop the time silently.
 
+### Status, 2026-10-28: three fixes from the whole-package review
+
+- **`t="d"` cells** used to reach R as type `date` with no number, so a column
+  of them read as all `NA`. `classify_cell()` now parses the ISO 8601 text
+  (`YYYY-MM-DD`, an optional time, an optional `Z`) into the serial an Excel
+  number would carry *in the workbook's own epoch*, the phantom leap day
+  included, so R converts both kinds of date with the same code. Text that is
+  not a date stays a `string` rather than being lost.
+- **Bracketed sections** of a format code were elapsed time if they contained
+  h, m or s anywhere, which made `[$$-en-US]` (US dollars) and `[Magenta]`
+  dates. A bracket is now elapsed time only when it is one of h, m or s
+  repeated (`[h]`, `[mm]`, `[ss]`). Patch 0008.
+- **Built-in ids 27-36, 50-58 and 71-81**, the East Asian and Thai date
+  formats Excel writes without a format code, are dates, as in readxl.
+  Patch 0008.
+
+And `shift_1900()` now makes any serial from 60 up to 61 `NA` -- a time on the
+day that never existed -- rather than only 60 itself, which had collapsed 59.5
+and 60.5 onto one instant.
+
 ---
 
 ## 12. Proposed R API
@@ -894,6 +914,36 @@ Useful context should include:
 
 Malformed XLSX input should never cause undefined behavior or process crashes.
 
+### Status, 2026-10-28: a worksheet that ends early is an error
+
+xlsxio's `xlsxioread_sheet_next_row()` returns 0 at the end of a worksheet and
+on an error alike, so a damaged or truncated worksheet used to read as the
+rows before the damage, with `"ok"`. Patch 0008 adds
+`xlsxioread_sheet_finish()`, which every reader calls once the row loop has
+run out, and five statuses come from it:
+
+| Status | Class | Why the worksheet stopped |
+| --- | --- | --- |
+| `sheet_xml` | `zuxlsx_xml_error` | Expat reported a parse error, recorded when it happened |
+| `sheet_range` | `zuxlsx_ooxml_error` | a cell reference past `XFD1048576` |
+| `sheet_shared_string` | `zuxlsx_ooxml_error` | a `t="s"` index that is not a number, is negative, or is past the table |
+| `sheet_zip` | `zuxlsx_zip_error` | the member's size or CRC-32 did not match, which miniz checks when it is closed |
+| `sheet_missing` | `zuxlsx_ooxml_error` | the worksheet's part was never found |
+
+The detail carries the worksheet's name and the XML line rather than a part
+name, which xlsxio resolves internally and does not expose. A worksheet that
+cannot be found was an empty sheet before; it is now an error, since a
+listed worksheet with no part is a broken workbook and not an empty one. The
+callback reader reports the failure after the chunks it has already handed
+over -- those stay handed over -- and only when the callback did not stop the
+read itself.
+
+`zuxlsx_ooxml_error` therefore now means "well formed, but not a valid
+workbook" rather than only "declares no worksheet".
+
+`agile_crypto` and the unrecognised-status fallback carry `zuxlsx_error`
+alone; they used to list it twice.
+
 ---
 
 ## 16. Security and robustness
@@ -939,6 +989,21 @@ fuzzer found a NULL dereference there (`0007-null-relationship-id-crash`).
 CRC-32 is not detected, and the test says so in its name. Invalid
 shared-string indices, extreme row and column indices, integer overflow in
 cell references and compression bombs remain uncovered.
+
+**Update, 2026-10-28.** Invalid shared-string indices, extreme row and
+column indices and integer overflow in cell references are covered, by patch
+0008 and `test-hostile.R`: a reference past `XFD1048576` is
+`zuxlsx_ooxml_error` and is refused before the padding loops walk towards
+it (one cell at `A99999999999` used to keep the reader busy for minutes), and
+the parsers saturate one past the grid so a long reference cannot wrap
+`size_t`. A shared-string index that does not resolve is
+`zuxlsx_ooxml_error` rather than a blank cell; an empty `<v/>` names no index
+and stays blank. A worksheet's CRC-32 is now checked; the workbook part's,
+read through the sheet-list path, is still the pinned gap. `range` is bounded
+to the grid in R and again in C. The nesting test used to put its nesting
+outside the root element, so it was refused for having two roots; it now
+nests 100,000 deep inside a real workbook and worksheet, and both read.
+Compression bombs remain uncovered.
 
 No configurable limits exist yet. Nothing in the reader caps a part size, a
 string length or a sheet count; the defenses that hold today come from Expat's

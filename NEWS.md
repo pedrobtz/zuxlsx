@@ -16,8 +16,8 @@ so an installed zuxlsx has no run-time dependency on any of them.
   numeric value -- the view underneath `read_xlsx()`, for worksheets that are
   not rectangular enough for a data frame.
 
-* `xlsx_rows()` returns a worksheet row by row as text, padded so that the
-  nth element of each row is the nth column.
+* `xlsx_rows()` returns a worksheet row by row as text, from row 1, padded so
+  that the nth element of each row is the nth column.
 
 * `xlsx_read_cells()` reads a worksheet a chunk at a time, passing each chunk
   to a function. Returning `FALSE` stops the read, which is how a caller finds
@@ -49,8 +49,14 @@ so an installed zuxlsx has no run-time dependency on any of them.
 
 * The 1900 system's phantom 29 February 1900 is accounted for: serial 1 is
   1 January 1900 and serial 61 is 1 March 1900, as Excel shows them, and
-  serial 60 -- a day that never existed -- is `NA`. Using a single origin, as
-  is common, puts every date before March 1900 a day early.
+  serial 60 -- a day that never existed -- is `NA`, as is any time on it.
+  Using a single origin, as is common, puts every date before March 1900 a
+  day early.
+
+* A date written as ISO 8601 text (`t="d"`) reads as a date, and a number
+  format is a date only for date and time codes: currency tags such as
+  `[$$-en-US]` and colours such as `[Magenta]` are not. The East Asian and
+  Thai built-in date formats are recognised.
 
 ## Errors
 
@@ -60,6 +66,11 @@ so an installed zuxlsx has no run-time dependency on any of them.
   `zuxlsx_unsupported_format_error`, `zuxlsx_encrypted_error`,
   `zuxlsx_password_error`, `zuxlsx_integrity_error` and
   `zuxlsx_memory_error`. See `?"zuxlsx-conditions"`.
+
+* A worksheet that cannot be read in full -- its XML breaks off, it refers to
+  a cell past `XFD1048576` or to a shared string that does not exist, its
+  compressed data fails its checksum, or its part is missing -- is an error,
+  never a shorter or empty sheet.
 
 * A file that is a spreadsheet zuxlsx cannot read is reported as such rather
   than as damage. A legacy `.xls` is an OLE2 container, not a ZIP, and an

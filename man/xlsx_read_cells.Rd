@@ -54,10 +54,11 @@ count: a chunk ends at the first row boundary at or after it.
 path <- system.file("extdata", "two-sheets.xlsx", package = "zuxlsx")
 
 # Count the cells of each type without holding the worksheet.
-totals <- integer(0)
+totals <- 0
 xlsx_read_cells(path, 1, function(cells) {
-  totals <<- c(totals, table(cells$type))
+  totals <<- totals + table(cells$type)
 })
+totals
 
 # Stop as soon as something is found. The rest of the sheet is not parsed.
 first <- NULL

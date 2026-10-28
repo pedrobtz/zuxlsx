@@ -52,20 +52,6 @@ test_that("external entities are not resolved off disk", {
   expect_identical(sheets, "&x;")
 })
 
-test_that("pathologically nested XML is refused rather than recursed into", {
-  path <- withr::local_tempfile(fileext = ".xlsx")
-  parts <- workbook_parts()
-  parts[["xl/workbook.xml"]] <- paste0(
-    '<?xml version="1.0"?>',
-    paste0(rep("<x>", 5000L), collapse = ""),
-    paste0(rep("</x>", 5000L), collapse = ""),
-    "<workbook/>"
-  )
-  write_workbook(path, parts)
-
-  expect_error(xlsx_sheets(path), class = "zuxlsx_error")
-})
-
 test_that("a duplicated archive member resolves to the first one, always", {
   # Classic ZIP ambiguity: two members with the same name, and different
   # readers disagree about which one wins. Whichever zuxlsx picks, it must
@@ -187,4 +173,120 @@ test_that("members differing only in case or separator still resolve first-first
     first_of("xl\\workbook.xml", "FIRST", "xl/workbook.xml", "SECOND"),
     "FIRST"
   )
+})
+
+test_that("a cell reference past XFD1048576 is refused before it is padded to", {
+  # Without a bound, one cell at A99999999999 had the reader pad a hundred
+  # billion rows; a long column reference also wrapped size_t.
+  refs <- c("A1048577", "XFE1", "A99999999999", "ZZZZZZZZZZZZ1",
+            "A18446744073709551617", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1")
+  for (ref in refs) {
+    path <- withr::local_tempfile(fileext = ".xlsx")
+    write_workbook(path, styled_workbook_parts(c(num("A1", 1), num(ref, 5))))
+    elapsed <- system.time({
+      expect_error(read_xlsx(path), class = "zuxlsx_ooxml_error", info = ref)
+      expect_error(xlsx_cells(path), class = "zuxlsx_ooxml_error", info = ref)
+      expect_error(xlsx_rows(path), class = "zuxlsx_ooxml_error", info = ref)
+      expect_error(
+        xlsx_read_cells(path, 1, function(cells) NULL),
+        class = "zuxlsx_ooxml_error", info = ref
+      )
+    })[["elapsed"]]
+    expect_lt(elapsed, 10)
+  }
+
+  # The last cell itself is within the grid.
+  path <- withr::local_tempfile(fileext = ".xlsx")
+  write_workbook(path, styled_workbook_parts(num("XFD1", 5)))
+  cells <- xlsx_cells(path)
+  expect_identical(max(cells$col), 16384)
+})
+
+test_that("a reference that names no position is read in document order", {
+  # Not an error: r= is optional, and a cell without a usable one takes the
+  # next position, as Excel does.
+  path <- withr::local_tempfile(fileext = ".xlsx")
+  write_workbook(path, styled_workbook_parts(c(
+    '<c r="?"><v>1</v></c>', '<c><v>2</v></c>'
+  )))
+  expect_identical(xlsx_cells(path)$number, c(1, 2))
+})
+
+test_that("a well-formed but deeply nested worksheet or workbook is read", {
+  # Expat's parser is iterative, so depth costs memory rather than stack. The
+  # nesting is inside a real root element: two roots would be refused for
+  # that alone, whatever the depth.
+  deep <- function(n) {
+    paste0(paste0(rep("<x>", n), collapse = ""), paste0(rep("</x>", n), collapse = ""))
+  }
+  path <- withr::local_tempfile(fileext = ".xlsx")
+  parts <- workbook_parts()
+  parts[["xl/workbook.xml"]] <- sub(
+    "<sheets>", paste0(deep(100000L), "<sheets>"), parts[["xl/workbook.xml"]],
+    fixed = TRUE
+  )
+  parts[["xl/worksheets/sheet1.xml"]] <- paste0(
+    '<?xml version="1.0"?>',
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
+    "<sheetData>", deep(100000L),
+    '<row r="1"><c r="A1"><v>7</v></c></row></sheetData></worksheet>'
+  )
+  write_workbook(path, parts)
+
+  expect_identical(xlsx_sheets(path), "Sheet1")
+  expect_identical(xlsx_cells(path)$number, 7)
+})
+
+test_that("a shared-string index that does not resolve is an error, not a blank", {
+  shared <- paste0(
+    '<?xml version="1.0"?>',
+    '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
+    "<si><t>zero</t></si></sst>"
+  )
+  read_index <- function(v, with_table = TRUE) {
+    path <- withr::local_tempfile(fileext = ".xlsx", .local_envir = parent.frame())
+    parts <- styled_workbook_parts(paste0('<c r="A1" t="s"><v>', v, "</v></c>"))
+    if (with_table) {
+      parts[["xl/sharedStrings.xml"]] <- shared
+      parts[["xl/_rels/workbook.xml.rels"]] <- sub(
+        "</Relationships>",
+        paste0(
+          '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/',
+          'officeDocument/2006/relationships/sharedStrings" ',
+          'Target="sharedStrings.xml"/></Relationships>'
+        ),
+        parts[["xl/_rels/workbook.xml.rels"]],
+        fixed = TRUE
+      )
+    }
+    write_workbook(path, parts)
+    xlsx_cells(path)
+  }
+
+  expect_identical(read_index("0")$value, "zero")
+  for (v in c("1", "-1", "x")) {
+    expect_error(read_index(v), class = "zuxlsx_ooxml_error", info = v)
+  }
+  # An empty <v/> names no index at all, and is a blank cell.
+  expect_identical(as.character(read_index("")$type), "blank")
+  expect_error(read_index("0", with_table = FALSE), class = "zuxlsx_ooxml_error")
+})
+
+test_that("a worksheet whose CRC-32 does not match is a ZIP error", {
+  # The workbook part's checksum is the KNOWN GAP above; a worksheet's is
+  # checked when the worksheet has been read to its end.
+  path <- withr::local_tempfile(fileext = ".xlsx")
+  parts <- workbook_parts()
+  entries <- lapply(names(parts), function(n) zip_entry(n, parts[[n]]))
+  sheet <- which(names(parts) == "xl/worksheets/sheet1.xml")
+  entries[[sheet]] <- zip_entry(
+    "xl/worksheets/sheet1.xml",
+    parts[["xl/worksheets/sheet1.xml"]],
+    declared_crc = as.raw(c(0L, 0L, 0L, 0L))
+  )
+  write_zip(path, entries)
+
+  expect_identical(xlsx_sheets(path), "Sheet1")
+  expect_error(xlsx_cells(path), class = "zuxlsx_zip_error")
+  expect_error(read_xlsx(path), class = "zuxlsx_zip_error")
 })
