@@ -25,6 +25,10 @@ FIXTURES <- file.path("tests", "testthat", "fixtures", "ole2")
 SECTOR <- 512L
 ENDOFCHAIN <- 0xFFFFFFFE
 FREESECT   <- 0xFFFFFFFF
+## An absent sibling or child id. Not ENDOFCHAIN: the two differ by one, and
+## a reader that walks the directory tree, as src/cfb.c does, refuses an id
+## of ENDOFCHAIN as pointing past the directory.
+NOSTREAM   <- 0xFFFFFFFF
 FATSECT    <- 0xFFFFFFFD
 
 u16 <- function(x) writeBin(as.integer(x), raw(), size = 2L, endian = "little")
@@ -46,8 +50,8 @@ pad_to <- function(bytes, n) {
 
 ## A directory entry is 128 bytes. [MS-CFB] 2.6.1.
 dir_entry <- function(name, type, start = ENDOFCHAIN, size = 0,
-                      left = ENDOFCHAIN, right = ENDOFCHAIN,
-                      child = ENDOFCHAIN) {
+                      left = NOSTREAM, right = NOSTREAM,
+                      child = NOSTREAM) {
   ## The name is UTF-16LE including its terminating null, and the recorded
   ## length counts that null. Getting this wrong is the classic way a CFB
   ## reader sees a name one character short.
@@ -117,8 +121,8 @@ build_cfb <- function(streams) {
   }
 
   ## The directory. Entry 0 is the root; the rest are the streams, chained as
-  ## a flat right-leaning tree, which is legal and is what matters for a
-  ## reader that walks entries rather than the red-black tree.
+  ## a flat right-leaning tree. That is legal -- [MS-CFB] asks for a
+  ## red-black tree, but readers, src/cfb.c included, only follow the ids.
   entries <- list(dir_entry("Root Entry", type = 5L, child = 1L))
   ids <- seq_along(streams)
   for (i in ids) {
@@ -126,7 +130,7 @@ build_cfb <- function(streams) {
     ch <- chains[[nm]]
     entries[[i + 1L]] <- dir_entry(
       nm, type = 2L, start = ch$start, size = ch$size,
-      right = if (i < length(ids)) i + 1L else ENDOFCHAIN
+      right = if (i < length(ids)) i + 1L else NOSTREAM
     )
   }
   dir_bytes <- pad_to(unlist(entries), SECTOR)
@@ -213,20 +217,40 @@ fixtures <- function() {
   )
 }
 
+## The committed binaries this script does not write, listed so the manifest
+## covers every file in the directory. Their checksums, and the generated
+## files', are in SHA256SUMS beside them, which tools/vendor/verify checks.
+REAL_FIXTURES <- data.frame(
+  file = c("two-sheets-stored.xlsx", "two-sheets-encrypted.xlsx",
+           "two-sheets-encrypted-utf16.xlsx"),
+  streams = c("-", "EncryptionInfo,EncryptedPackage",
+              "EncryptionInfo,EncryptedPackage"),
+  describes = c(
+    "plaintext of the two below: inst/extdata/two-sheets.xlsx, parts stored",
+    "Agile AES-256 SHA-512 100000 spins, password zuxlsx",
+    "Agile AES-256 SHA-512 100000 spins, password z\\u00fc\\u2713\\U0001F511"
+  ),
+  generator = c("zip -0 -X (README.md)", "msoffcrypto-tool 6.0.0 (README.md)",
+                "msoffcrypto-tool 6.0.0 (README.md)")
+)
+
 write_fixtures <- function(dir) {
   dir.create(dir, recursive = TRUE, showWarnings = FALSE)
   all <- fixtures()
   for (nm in names(all)) {
     writeBin(build_cfb(all[[nm]]), file.path(dir, nm))
   }
-  manifest <- data.frame(
-    file = names(all),
-    streams = vapply(all, function(x) paste(names(x), collapse = ","), ""),
-    describes = c("password-protected xlsx (Agile), structure only",
-                  "legacy BIFF8 .xls",
-                  "OLE2 container that is neither"),
-    generator = "tools/make-ole2.R",
-    row.names = NULL
+  manifest <- rbind(
+    data.frame(
+      file = names(all),
+      streams = vapply(all, function(x) paste(names(x), collapse = ","), ""),
+      describes = c("password-protected xlsx (Agile), structure only",
+                    "legacy BIFF8 .xls",
+                    "OLE2 container that is neither"),
+      generator = "tools/make-ole2.R",
+      row.names = NULL
+    ),
+    REAL_FIXTURES
   )
   utils::write.table(manifest, file.path(dir, "MANIFEST.tsv"),
                      sep = "\t", quote = FALSE, row.names = FALSE)

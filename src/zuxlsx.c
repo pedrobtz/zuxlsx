@@ -31,6 +31,7 @@
 #include "agile.h"
 #include "cfb.h"
 #include "encinfo.h"
+#include "utf8file.h"
 
 #include <limits.h>
 #include <stdint.h>
@@ -172,14 +173,12 @@ static int collect_sheet(const char *name, void *data) {
  * those names needs the header, the FAT and the directory chain and nothing
  * else -- no mini stream, no stream contents, no password.
  *
- * That is what ole2_kind() below does, and it is the difference between
- * telling someone their file needs a password and telling them it might.
- *
- * Everything in it is bounds-checked and every walk is bounded, because a
- * workbook that arrives encrypted is a workbook somebody else produced. A
- * container can declare a sector past the end of the file, a FAT chain that
- * points at itself, or a name length that runs off the end of its entry; none
- * of those may do anything but end the walk.
+ * That is what ole2_classify() below asks cfb.c, and it is the difference
+ * between telling someone their file needs a password and telling them it
+ * might. It uses the same reader the decryption does -- DIFAT sectors, 64-bit
+ * offsets, a bounded walk of the root's directory tree -- so a container that
+ * classifies as encrypted is one that can be decrypted, and a stream inside
+ * a storage counts for neither.
  *
  * An .xlsb is a ZIP, and an OPC package, with XML content types and
  * relationships. Only the workbook and worksheet parts differ: BIFF12 binary
@@ -188,178 +187,49 @@ static int collect_sheet(const char *name, void *data) {
  * say so, and costs nothing on the path where a workbook reads normally. */
 
 typedef enum {
-  OLE2_NO = 0,        /* not a CFB container at all */
   OLE2_ENCRYPTED,     /* an encrypted OOXML package */
   OLE2_XLS,           /* a legacy BIFF workbook */
-  OLE2_UNKNOWN        /* a CFB container holding neither */
+  OLE2_UNKNOWN,       /* a CFB container holding neither, or unreadable */
+  OLE2_MEMORY         /* ran out of memory finding out */
 } ole2_kind_t;
 
-static uint16_t le16(const unsigned char *p) {
-  return (uint16_t) (p[0] | ((uint16_t) p[1] << 8));
-}
-
-static uint32_t le32(const unsigned char *p) {
-  return (uint32_t) p[0] | ((uint32_t) p[1] << 8) |
-         ((uint32_t) p[2] << 16) | ((uint32_t) p[3] << 24);
-}
-
-#define CFB_ENDOFCHAIN 0xFFFFFFFEu
-#define CFB_MAX_DIR_SECTORS 4096   /* a directory this long is pathological */
-#define CFB_DIFAT_IN_HEADER 109
-
-/* Reads one sector into buf. Sector n starts at (n + 1) * sector_size,
-   because sector numbering begins after the 512-byte header. Returns 0 if
-   the sector is not wholly within the file. */
-static int cfb_read_sector(FILE *fp, long file_size, uint32_t sector,
-                           uint32_t sector_size, unsigned char *buf) {
-  /* The multiplication is done in 64-bit and checked, so a sector number
-     near 2^32 cannot wrap into a small, valid-looking offset. */
-  uint64_t offset = ((uint64_t) sector + 1u) * (uint64_t) sector_size;
-  if (offset + sector_size > (uint64_t) file_size) {
-    return 0;
-  }
-  if (fseek(fp, (long) offset, SEEK_SET) != 0) {
-    return 0;
-  }
-  return fread(buf, 1, sector_size, fp) == sector_size;
-}
-
-/* Does a directory entry name equal this ASCII string?
- *
- * Names are UTF-16LE and the recorded length counts the terminating null.
- * Comparing against ASCII means every high byte must be zero -- without that
- * check, a name whose characters happen to share low bytes would match. */
-static int dir_name_is(const unsigned char *entry, const char *ascii,
-                       uint32_t sector_size, size_t entry_offset) {
-  uint16_t len = le16(entry + 0x40);
-  size_t want = strlen(ascii);
-  size_t i;
-
-  /* The length lives inside the entry and is attacker-controlled. */
-  if (len < 2 || len > 64 || (len % 2) != 0) {
-    return 0;
-  }
-  if (entry_offset + 128 > sector_size) {
-    return 0;
-  }
-  if ((size_t) (len / 2 - 1) != want) {
-    return 0;
-  }
-  for (i = 0; i < want; i++) {
-    if (entry[i * 2] != (unsigned char) ascii[i] || entry[i * 2 + 1] != 0) {
-      return 0;
-    }
-  }
-  return 1;
-}
-
-static ole2_kind_t ole2_kind(const char *file) {
+/* Does the file start with the CFB signature? Only the eight bytes are read,
+   so a ZIP pays nothing for the question. */
+static int file_is_cfb(const char *file) {
   static const unsigned char CFB_MAGIC[8] = {
     0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1
   };
-  unsigned char header[512];
-  unsigned char *sector = NULL;
-  unsigned char *fat = NULL;
-  FILE *fp;
-  long file_size;
-  uint32_t sector_size, sector_shift, dir_sector, entries_per_fat;
-  uint32_t walked = 0;
-  int found_info = 0, found_package = 0, found_biff = 0;
-  ole2_kind_t kind = OLE2_NO;
+  unsigned char magic[8];
+  FILE *fp = zuxlsx_fopen_utf8(file);
+  int yes;
 
-  fp = fopen(file, "rb");
-  if (fp == NULL) {
-    return OLE2_NO;
-  }
-  if (fread(header, 1, sizeof(header), fp) != sizeof(header) ||
-      memcmp(header, CFB_MAGIC, sizeof(CFB_MAGIC)) != 0) {
-    fclose(fp);
-    return OLE2_NO;
-  }
+  if (fp == NULL) return 0;
+  yes = fread(magic, 1, sizeof(magic), fp) == sizeof(magic) &&
+        memcmp(magic, CFB_MAGIC, sizeof(magic)) == 0;
+  fclose(fp);
+  return yes;
+}
 
-  /* Past this point the file is a CFB container. Every later failure is a
-     container we could not read far enough into, which is still OLE2 --
-     reporting it as "not OLE2" would send the caller back to the ZIP error
-     it already saw. */
-  kind = OLE2_UNKNOWN;
+/* Which kind of CFB container `bytes` is. A container cfb.c cannot read far
+   enough into is still OLE2 -- reporting it as anything else would send the
+   caller back to the ZIP error it already saw. Both encryption streams, or
+   it is not an encrypted package: EncryptionInfo alone appears in containers
+   this reader has no business guessing about. */
+static ole2_kind_t ole2_classify(const uint8_t *bytes, size_t len) {
+  cfb c;
+  cfb_status st = cfb_open(&c, bytes, len);
+  ole2_kind_t kind = OLE2_UNKNOWN;
 
-  if (fseek(fp, 0, SEEK_END) != 0) {
-    goto done;
-  }
-  file_size = ftell(fp);
-  if (file_size < (long) sizeof(header)) {
-    goto done;
-  }
-
-  /* Version 3 uses 512-byte sectors and version 4 uses 4096. Reading the
-     shift rather than assuming the size is what makes this work on both. */
-  sector_shift = le16(header + 0x1E);
-  if (sector_shift != 9 && sector_shift != 12) {
-    goto done;
-  }
-  sector_size = 1u << sector_shift;
-  entries_per_fat = sector_size / 4u;
-  dir_sector = le32(header + 0x30);
-
-  sector = (unsigned char *) malloc(sector_size);
-  fat = (unsigned char *) malloc(sector_size);
-  if (sector == NULL || fat == NULL) {
-    goto done;
-  }
-
-  while (dir_sector != CFB_ENDOFCHAIN && walked < CFB_MAX_DIR_SECTORS) {
-    uint32_t fat_index, fat_sector, i;
-
-    if (!cfb_read_sector(fp, file_size, dir_sector, sector_size, sector)) {
-      break;
-    }
-    for (i = 0; i + 128 <= sector_size; i += 128) {
-      unsigned char *entry = sector + i;
-      unsigned char type = entry[0x42];
-
-      if (type != 2 && type != 1 && type != 5) {   /* stream, storage, root */
-        continue;
-      }
-      if (dir_name_is(entry, "EncryptionInfo", sector_size, i)) {
-        found_info = 1;
-      } else if (dir_name_is(entry, "EncryptedPackage", sector_size, i)) {
-        found_package = 1;
-      } else if (dir_name_is(entry, "Workbook", sector_size, i) ||
-                 dir_name_is(entry, "Book", sector_size, i)) {
-        found_biff = 1;
-      }
-    }
-
-    /* Follow the chain. The FAT entry for a sector lives in the FAT sector
-       the header's DIFAT names; only the 109 entries the header carries are
-       consulted, which covers every directory chain that is not itself
-       enormous, and a file needing more is left as OLE2_UNKNOWN rather than
-       chasing DIFAT sectors for a question this small. */
-    fat_index = dir_sector / entries_per_fat;
-    if (fat_index >= CFB_DIFAT_IN_HEADER) {
-      break;
-    }
-    fat_sector = le32(header + 0x4C + fat_index * 4u);
-    if (fat_sector == CFB_ENDOFCHAIN ||
-        !cfb_read_sector(fp, file_size, fat_sector, sector_size, fat)) {
-      break;
-    }
-    dir_sector = le32(fat + (dir_sector % entries_per_fat) * 4u);
-    walked++;
-  }
-
-  /* Both streams, or it is not an encrypted package. EncryptionInfo alone
-     appears in containers this reader has no business guessing about. */
-  if (found_info && found_package) {
+  if (st == CFB_MEMORY) return OLE2_MEMORY;
+  if (st != CFB_OK) return OLE2_UNKNOWN;
+  if (cfb_has_stream(&c, "EncryptionInfo") == CFB_OK &&
+      cfb_has_stream(&c, "EncryptedPackage") == CFB_OK) {
     kind = OLE2_ENCRYPTED;
-  } else if (found_biff) {
+  } else if (cfb_has_stream(&c, "Workbook") == CFB_OK ||
+             cfb_has_stream(&c, "Book") == CFB_OK) {
     kind = OLE2_XLS;
   }
-
-done:
-  free(sector);
-  free(fat);
-  fclose(fp);
+  cfb_close(&c);
   return kind;
 }
 
@@ -399,7 +269,7 @@ static const char *encinfo_status_string(encinfo_status st);
 /* The whole file, into C memory. Read in growing chunks rather than sized
    with ftell(), whose long is 32 bits on Windows. */
 static int read_file(const char *file, uint8_t **out, size_t *out_len) {
-  FILE *fp = fopen(file, "rb");
+  FILE *fp = zuxlsx_fopen_utf8(file);
   uint8_t *buf = NULL;
   size_t len = 0, cap = 0;
 
@@ -503,23 +373,28 @@ done:
 static const char *resolve_source(const char *file, SEXP password, SEXP holder,
                                   zuc_status *crypto) {
   plain_buf *b = (plain_buf *) R_ExternalPtrAddr(holder);
-  ole2_kind_t kind = ole2_kind(file);
+  ole2_kind_t kind;
   uint8_t *bytes = NULL;
   size_t len = 0;
   const char *status;
   int rc;
 
   *crypto = ZUC_OK;
-  if (kind == OLE2_NO) return NULL;
+  if (!file_is_cfb(file)) return NULL;
+
+  /* Read once: the same bytes are classified and, if it comes to that,
+     decrypted. */
+  rc = read_file(file, &bytes, &len);
+  if (rc <= 0) return rc < 0 ? STATUS_MEMORY : STATUS_ZIP_OPEN;
+  kind = ole2_classify(bytes, len);
   /* A password changes nothing for a legacy .xls or an unknown container,
      and without one an encrypted package is still only reported. */
   if (kind != OLE2_ENCRYPTED || password == R_NilValue) {
-    return kind == OLE2_ENCRYPTED ? STATUS_ENCRYPTED
+    free(bytes);
+    return kind == OLE2_MEMORY ? STATUS_MEMORY
+         : kind == OLE2_ENCRYPTED ? STATUS_ENCRYPTED
          : kind == OLE2_XLS ? STATUS_XLS : STATUS_OLE2;
   }
-
-  rc = read_file(file, &bytes, &len);
-  if (rc <= 0) return rc < 0 ? STATUS_MEMORY : STATUS_ZIP_OPEN;
   status = decrypt_package(bytes, len, CHAR(STRING_ELT(password, 0)),
                            &b->data, &b->len, crypto);
   free(bytes);

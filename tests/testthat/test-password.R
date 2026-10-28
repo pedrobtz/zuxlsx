@@ -192,3 +192,16 @@ test_that("large packages decrypt across many segments", {
   file <- local_workbook_bytes(agile_encrypt(plain, "pw"))
   expect_identical(read_xlsx(file, password = "pw"), read_xlsx(path))
 })
+
+test_that("an encrypted workbook at a non-ASCII path is found and decrypted", {
+  # The container is opened by this package's own code, not by miniz, so it
+  # has to make the same UTF-8 to wide-character conversion miniz makes on
+  # Windows.
+  skip_if_not(l10n_info()[["UTF-8"]], "the locale cannot name such a file")
+  dir <- withr::local_tempdir()
+  path <- file.path(dir, paste0(intToUtf8(c(0x7a, 0xfc, 0x2713)), ".xlsx"))
+  expect_true(file.copy(encrypted(), path))
+  expect_error(xlsx_sheets(path), class = "zuxlsx_encrypted_error")
+  expect_identical(xlsx_sheets(path, password = "zuxlsx"),
+                   xlsx_sheets(stored()))
+})

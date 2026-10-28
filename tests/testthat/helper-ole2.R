@@ -87,9 +87,13 @@ cfb_stream_names <- function(path) {
   vapply(cfb_read(path), function(e) e$name, character(1))
 }
 
+# Committed fixtures, so a missing one is a bug to fail on, not a reason to
+# skip: a skip here would turn most of the decryption suite into skips.
 ole2_fixture <- function(name) {
   path <- test_path("fixtures", "ole2", name)
-  skip_if(!file.exists(path), paste0(name, " fixture is missing"))
+  if (!file.exists(path)) {
+    stop("committed fixture missing: ", path, call. = FALSE)
+  }
   path
 }
 

@@ -48,5 +48,6 @@ OBJECTS = \
   agile.o \
   cfb.o \
   encinfo.o \
+  utf8file.o \
   vendor/xlsxio/lib/xlsxio_read.o \
   vendor/xlsxio/lib/xlsxio_read_sharedstrings.o

@@ -169,13 +169,16 @@ test_that("a truncated container produces a condition, never a crash", {
                  file.size(ole2_fixture("two-sheets-encrypted.xlsx")))
   tmp <- withr::local_tempfile(fileext = ".xlsx")
 
+  # Only a zuxlsx condition counts: an unclassed R error or a warning would
+  # mean damage reached R code that did not expect it, and propagates.
+  #
   # Every length through the header and the first sectors, which is where
   # the header, the FAT and the directory live, then a sparse sweep over the
   # rest. A cut anywhere must end the walk, not read past the end of it.
   lengths <- c(0:200, seq(201L, length(src), by = 211L))
   for (n in lengths) {
     writeBin(src[seq_len(n)], tmp)
-    result <- tryCatch(read_xlsx(tmp), condition = function(e) class(e)[1])
+    result <- tryCatch(read_xlsx(tmp), zuxlsx_error = function(e) class(e)[1])
     expect_true(is.character(result), info = paste("truncated to", n))
   }
 })
@@ -195,7 +198,7 @@ test_that("a corrupted directory or FAT produces a condition", {
     pos <- sample(c(seq_len(600L), seq_along(x)), size = sample.int(6L, 1L))
     x[pos] <- as.raw(sample.int(256L, length(pos), replace = TRUE) - 1L)
     writeBin(x, tmp)
-    result <- tryCatch(read_xlsx(tmp), condition = function(e) class(e)[1])
+    result <- tryCatch(read_xlsx(tmp), zuxlsx_error = function(e) class(e)[1])
     expect_true(is.character(result), info = paste("corruption", i))
   }
 })
@@ -218,6 +221,47 @@ test_that("a self-referential FAT chain terminates", {
     x[512L + i * 4L + 4L] <- as.raw(0L)
   }
   writeBin(x, tmp)
-  result <- tryCatch(read_xlsx(tmp), condition = function(e) class(e)[1])
+  result <- tryCatch(read_xlsx(tmp), zuxlsx_error = function(e) class(e)[1])
   expect_true(is.character(result))
+})
+
+test_that("the classifier reads what the decryptor reads: v4, BIFF5 and storages", {
+  # The file's kind is decided by src/cfb.c, the reader decryption uses, so
+  # a version 4 container is recognised, a BIFF5 "Book" is a legacy .xls,
+  # and streams inside a storage count for neither -- without a password
+  # and with one.
+  skip_if_not_installed("zucrypt")
+  plain <- workbook_bytes()
+
+  v4 <- local_workbook_bytes(agile_encrypt(plain, "pw", spin_count = 10,
+                                           version = 4L))
+  expect_error(read_xlsx(v4), class = "zuxlsx_encrypted_error")
+  expect_identical(xlsx_sheets(v4, password = "pw"), "Sheet1")
+
+  book <- local_workbook_bytes(cfb_build(list(Book = as.raw(1:100))))
+  expect_error(read_xlsx(book), class = "zuxlsx_unsupported_format_error")
+  expect_match(
+    tryCatch(read_xlsx(book), error = conditionMessage),
+    "legacy .xls", fixed = TRUE
+  )
+
+  # Both streams, but under a storage rather than at the root.
+  enc <- agile_encrypt(plain, "pw", spin_count = 10)
+  stored <- cfb_build(list(
+    Holder = raw(0),
+    EncryptionInfo = cfb_stream_r(enc, "EncryptionInfo"),
+    EncryptedPackage = cfb_stream_r(enc, "EncryptedPackage")
+  ))
+  holder <- cfb_entry_offset(stored, "Holder")
+  stored[holder + 0x42 + 1L] <- as.raw(1L)        # a storage, not a stream
+  stored <- put_u32(stored, holder + 0x48, 0xFFFFFFFF)  # no right sibling
+  stored <- put_u32(stored, holder + 0x4C, 2)           # its child
+  # Well formed -- the walk finds the storage -- with nothing at the root.
+  expect_null(cfb_streams(stored, "EncryptionInfo")$EncryptionInfo)
+  in_storage <- local_workbook_bytes(stored)
+  for (pw in list(NULL, "pw")) {
+    cond <- tryCatch(read_xlsx(in_storage, password = pw), error = identity)
+    expect_s3_class(cond, "zuxlsx_unsupported_format_error")
+    expect_false(inherits(cond, "zuxlsx_encrypted_error"))
+  }
 })

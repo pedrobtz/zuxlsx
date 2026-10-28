@@ -32,7 +32,7 @@ The build:
 - **There is no `Remotes:`.** zuxml, zukomp and zucrypt all reached CRAN in October 2026 (0.1.0 each), and `Remotes:` was dropped for the CRAN submission, so CI and a GitHub install resolve the siblings from CRAN. To build against a sibling's unreleased `main`, install it first with `pak::pak("pedrobtz/<pkg>")`. The full sequence is in [.agents/release-checklist.md](.agents/release-checklist.md).
 - `src/Makevars` is generated and `.gitignore`d. `cleanup` removes it.
 
-The native layer is [src/zuxlsx.c](src/zuxlsx.c) — every `.Call` entry point, the cell reader and the column builders in one translation unit — plus [src/init.c](src/init.c) for registration and the zucrypt backend's lifetime (`zuc_init()` on load, `zuc_shutdown()` on unload), [src/agile.c](src/agile.c), the decryption core, [src/cfb.c](src/cfb.c), which reads stream contents out of a CFB container in memory, and [src/encinfo.c](src/encinfo.c), which parses `EncryptionInfo`. None includes an R header, so all three can be fuzzed outside R (#45).
+The native layer is [src/zuxlsx.c](src/zuxlsx.c) — every `.Call` entry point, the cell reader and the column builders in one translation unit — plus [src/init.c](src/init.c) for registration and the zucrypt backend's lifetime (`zuc_init()` on load, `zuc_shutdown()` on unload), [src/agile.c](src/agile.c), the decryption core, [src/cfb.c](src/cfb.c), which reads stream contents out of a CFB container in memory and also decides what kind of OLE2 file a file is, [src/encinfo.c](src/encinfo.c), which parses `EncryptionInfo`, and [src/utf8file.c](src/utf8file.c), which opens a UTF-8 path with `_wfopen` on Windows. None includes an R header, so the first three can be fuzzed outside R (#45).
 
 Vendored, and the corpora:
 

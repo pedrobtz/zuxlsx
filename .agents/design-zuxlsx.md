@@ -1762,9 +1762,32 @@ allocation failure part way through cannot leak them. `cfb_streams()` in
 It works over a buffer rather than a `FILE *`, unlike `ole2_kind()`, because
 decryption needs the whole package in memory regardless -- 21b's "decryption
 cannot stream" -- and because #25 wants reading from memory anyway.
-`ole2_kind()` keeps reading only the header and directory from the file,
-which is what a classifier should cost; replacing it with this reader is a
-decision for #25.
+`ole2_kind()` kept reading only the header and directory from the file,
+which is what a classifier should cost; replacing it with this reader was
+left as a decision for #25.
+
+**Update, 2026-10-28: replaced.** The review of 6327d52 (#89) found that the
+two readers disagreed. `ole2_kind()` consulted only the header's 109 DIFAT
+entries, sized the file with a `long` from `ftell` (32 bits on Windows), and
+counted streams inside a storage, while `cfb.c` follows DIFAT sectors, works
+in 64 bits and looks at the root only. A large encrypted workbook could
+therefore be classified as "some other OLE2 document" although it could be
+decrypted, and streams in a storage were "needs a password" without one and
+unsupported with one. `resolve_source()` now reads an OLE2 file once and
+`ole2_classify()` asks `cfb_open()` and `cfb_has_stream()`; the same bytes
+are then decrypted. Reading the whole container to classify it costs memory
+only for OLE2 files, which is never the normal path. Making the switch
+showed that `tools/make-ole2.R` wrote `ENDOFCHAIN` where [MS-CFB] wants
+`NOSTREAM` for an absent sibling or child, which a reader that follows the
+tree refuses; the generator is fixed and its fixtures regenerated, and every
+file in `fixtures/ole2/` is now pinned in `SHA256SUMS`, which
+`tools/vendor/verify` checks (#83).
+
+Both places that open the file directly, the signature check and
+`read_file()`, go through `zuxlsx_fopen_utf8()` in `src/utf8file.c`, which
+converts the UTF-8 path to UTF-16 and calls `_wfopen` on Windows as miniz
+does for the archive (#90). It is its own translation unit because
+`<windows.h>` and R's headers do not mix.
 
 Where it is stricter than some readers, deliberately:
 
@@ -1884,8 +1907,8 @@ usual.
 **The failure diagnostics look inside the plaintext.** `file_is_xlsb()` and
 `first_malformed_part()` take a buffer as well as a path, so an encrypted
 `.xlsb`, or an encrypted package whose `xl/workbook.xml` is broken, is
-reported as exactly that. `ole2_kind()` still classifies the file on disk,
-before any decryption, which is right: it is asking about the container.
+reported as exactly that. The container is classified before any
+decryption, which is right: it is asking about the container.
 
 **Policy.** A password is ignored for a workbook that is not encrypted, and
 changes nothing for a legacy `.xls` or an unrecognised OLE2 container. A
@@ -1893,6 +1916,22 @@ wrong password is `zuxlsx_password_error` from every reader, a subclass of
 `zuxlsx_encrypted_error`; the two classes and `zuxlsx_integrity_error` are
 now reachable from exported functions and documented in
 `?"zuxlsx-conditions"`, so their provisional status in 21d ends here.
+
+**Hash and key sizes.** The committed fixtures are SHA-512 with AES-256. The
+tests' `agile_encrypt()` takes `hash` and `key_bits`, and every combination
+the decryptor accepts -- SHA-1, SHA-256, SHA-384, SHA-512 with 128, 192 and
+256-bit keys -- round-trips, including those where the hash is shorter than
+the key and the derived key is padded with 0x36 (#82). That encryptor reads
+the same specification the decryptor does, so an independently produced
+SHA-1/AES-128 workbook is still wanted as a fixture.
+
+**The plaintext on an unwind.** `xlsx_read_cells()` calls R while the
+decrypted package is open. The callback now runs under `R_UnwindProtect`,
+whose cleanup closes the reader and wipes the plaintext as the stack
+unwinds, rather than at whatever GC next runs the finalizer (#80). Shared
+strings and Expat's buffers are freed by xlsxio without being wiped; the
+"wiped when the read ends" claim is about the package, not every copy of a
+cell's text.
 
 **Known cost: two decryptions per read.** `resolve_sheet()` lists the
 worksheets through `C_xlsx_sheets` before every read, to check a name or map
