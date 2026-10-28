@@ -959,6 +959,19 @@ are now `zuxlsx_ooxml_error`, which `tools/corpus/expected.tsv` records.
 `agile_crypto` and the unrecognised-status fallback carry `zuxlsx_error`
 alone; they used to list it twice.
 
+**Update, 2026-10-28: every part is checked (#38, #39).** The shared-string
+table and the styles part are parsed before the worksheet, through an
+xlsxio function whose "did it parse?" answer upstream had commented out, so
+damage there loaded as far as the damage. Patch 0009 adds a checked variant;
+a part that is not well formed is `zuxlsx_xml_error` naming it, and one that
+fails its size or CRC-32 is `zuxlsx_zip_error` (`part_zip`). The parts read
+to find the worksheets -- `[Content_Types].xml`, every `.rels` part and
+`xl/workbook.xml` -- go through paths that report nothing, so
+`C_xlsx_sheets` validates their CRC-32 with `mz_zip_validate_file()` while
+listing, which every reader does first; they are small, so listing stays
+cheap. A workbook part under another name is not covered. The pinned
+"KNOWN GAP" CRC test now expects the error.
+
 ---
 
 ## 16. Security and robustness

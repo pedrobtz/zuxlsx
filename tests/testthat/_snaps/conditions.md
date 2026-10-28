@@ -1,3 +1,28 @@
+# error messages are stable
+
+    Code
+      xlsx_sheets(1)
+    Condition
+      Error in `xlsx_sheets()`:
+      ! `path` must be a single non-missing string.
+    Code
+      xlsx_sheets("no-such-file.xlsx")
+    Condition
+      Error in `xlsx_sheets()`:
+      ! `path` does not exist: no-such-file.xlsx
+    Code
+      xlsx_sheets(not_xlsx)
+    Condition
+      Error in `xlsx_sheets()`:
+      ! Cannot open '<tmp>/not-a-zip.xlsx' as an xlsx workbook.
+      The file is not a readable ZIP archive. It may be truncated, corrupt, or not an xlsx file at all.
+    Code
+      xlsx_sheets(not_workbook)
+    Condition
+      Error in `xlsx_sheets()`:
+      ! '<tmp>/not-a-workbook.xlsx' is a ZIP archive but not an xlsx workbook.
+      It declares no worksheets.
+
 # every status's message is stable
 
     Code
@@ -23,6 +48,9 @@
       -- sheet_zip
       'book.xlsx' is damaged.
       The compressed data of worksheet 'Sheet1' does not match its recorded size or checksum.
+      -- part_zip
+      'book.xlsx' is damaged.
+      The compressed data of 'xl/sharedStrings.xml' does not match its recorded size or checksum.
       -- format_encrypted
       'book.xlsx' is a password-protected workbook.
       Pass its password as `password = ` to read it.
@@ -80,29 +108,4 @@
       `path` must be a single non-missing string.
       -- not_a_real_status
       Internal error: unrecognised status 'not_a_real_status' from the native layer.
-
-# error messages are stable
-
-    Code
-      xlsx_sheets(1)
-    Condition
-      Error in `xlsx_sheets()`:
-      ! `path` must be a single non-missing string.
-    Code
-      xlsx_sheets("no-such-file.xlsx")
-    Condition
-      Error in `xlsx_sheets()`:
-      ! `path` does not exist: no-such-file.xlsx
-    Code
-      xlsx_sheets(not_xlsx)
-    Condition
-      Error in `xlsx_sheets()`:
-      ! Cannot open '<tmp>/not-a-zip.xlsx' as an xlsx workbook.
-      The file is not a readable ZIP archive. It may be truncated, corrupt, or not an xlsx file at all.
-    Code
-      xlsx_sheets(not_workbook)
-    Condition
-      Error in `xlsx_sheets()`:
-      ! '<tmp>/not-a-workbook.xlsx' is a ZIP archive but not an xlsx workbook.
-      It declares no worksheets.
 

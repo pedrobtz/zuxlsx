@@ -117,14 +117,10 @@ test_that("a sheet whose relationship is dangling is still named", {
   expect_identical(xlsx_sheets(path), "Orphan")
 })
 
-test_that("KNOWN GAP: a corrupt CRC-32 is not detected", {
-  # Characterization, not endorsement. miniz's extract-iter path does not
-  # verify the checksum, so a member whose bytes were corrupted in transit is
-  # parsed as if intact. Design section 16 lists corrupt archives among the
-  # things to defend against; nothing does so yet.
-  #
-  # When CRC validation is added this test SHOULD fail. Replace it with an
-  # expect_error(class = "zuxlsx_zip_error") at that point.
+test_that("a corrupt CRC-32 on the workbook part is a ZIP error", {
+  # Was a pinned KNOWN GAP: miniz's extract-iterator path does not check the
+  # checksum, so a member corrupted in transit parsed as if intact. Listing
+  # now validates the parts it reads, and every reader lists first.
   path <- withr::local_tempfile(fileext = ".xlsx")
   parts <- workbook_parts()
   entries <- lapply(names(parts), function(n) zip_entry(n, parts[[n]]))
@@ -135,7 +131,10 @@ test_that("KNOWN GAP: a corrupt CRC-32 is not detected", {
   )
   write_zip(path, entries)
 
-  expect_identical(xlsx_sheets(path), "CRCBAD")
+  expect_error(xlsx_sheets(path), class = "zuxlsx_zip_error")
+  expect_error(read_xlsx(path), class = "zuxlsx_zip_error")
+  expect_identical(.Call(C_xlsx_sheets, normalizePath(path), NULL)$value$part,
+                   "xl/workbook.xml")
 })
 
 test_that("members differing only in case or separator still resolve first-first", {
@@ -290,8 +289,7 @@ test_that("a shared-string index that does not resolve is an error, not a blank"
 })
 
 test_that("a worksheet whose CRC-32 does not match is a ZIP error", {
-  # The workbook part's checksum is the KNOWN GAP above; a worksheet's is
-  # checked when the worksheet has been read to its end.
+  # A worksheet's checksum is checked when it has been read to its end.
   path <- withr::local_tempfile(fileext = ".xlsx")
   parts <- workbook_parts()
   entries <- lapply(names(parts), function(n) zip_entry(n, parts[[n]]))

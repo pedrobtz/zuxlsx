@@ -37,7 +37,7 @@ The native layer is [src/zuxlsx.c](src/zuxlsx.c) — every `.Call` entry point, 
 Vendored, and the corpora:
 
 - [src/vendor/xlsxio/](src/vendor/xlsxio/) — xlsxio 0.2.36, **reader only** (`xlsxio_read.c`, `xlsxio_read_sharedstrings.c`, headers, `LICENSE.txt`). The writer is not bundled; writing is out of scope (§21). Upstream CRLF line endings are kept deliberately.
-- [tools/patches/xlsxio/](tools/patches/xlsxio/) — **eight patches**, applied in order, reproducing the committed copy byte for byte from the pristine 0.2.36 tarball:
+- [tools/patches/xlsxio/](tools/patches/xlsxio/) — **nine patches**, applied in order, reproducing the committed copy byte for byte from the pristine 0.2.36 tarball:
 
   | Patch | What it does |
   | --- | --- |
@@ -49,6 +49,7 @@ Vendored, and the corpora:
   | `0006-strict-ooxml-relationship-types` | accepts strict OOXML relationship namespaces as well as transitional ones |
   | `0007-null-relationship-id-crash` | a missing relationship `Id` reached `strcasecmp` as `NULL`; found by the fuzzer, reported upstream |
   | `0008-report-why-a-worksheet-ended` | `xlsxioread_sheet_finish()`: a worksheet that ends on a parse error, a reference past `XFD1048576`, a dangling shared-string index or a bad CRC is reported rather than read short; also corrects 0003's bracket and built-in date rules |
+  | `0009-report-damaged-shared-strings-and-styles` | a shared-string table or styles part that is broken XML or fails its CRC is reported by name, rather than loaded as far as the damage |
 
   Provenance is in [tools/vendor/manifest.tsv](tools/vendor/manifest.tsv), [tools/vendor/checksums.sha256](tools/vendor/checksums.sha256) and [inst/COPYRIGHTS](inst/COPYRIGHTS); **`tools/vendor/verify` checks all of it offline and is the thing to run after touching anything under `src/vendor/`.**
 - [tests/testthat/sheets/](tests/testthat/sheets/) — seven readxl interoperability workbooks (inline strings, missing parts, nonstandard namespace prefix, UTF-8 sheet names, blanks), MIT, with provenance and checksums in `MANIFEST.tsv` there, all verified byte for byte against readxl at commit `47f8aeac`. `test-corpus.R` asserts their content, not just that they open.

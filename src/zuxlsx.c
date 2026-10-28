@@ -55,6 +55,7 @@ static const char *const STATUS_SHEET_XML = "sheet_xml";
 static const char *const STATUS_SHEET_RANGE = "sheet_range";
 static const char *const STATUS_SHEET_SHARED = "sheet_shared_string";
 static const char *const STATUS_SHEET_ZIP = "sheet_zip";
+static const char *const STATUS_PART_ZIP = "part_zip";
 static const char *const STATUS_AGILE_PASSWORD = "agile_password";
 static const char *const STATUS_AGILE_INTEGRITY = "agile_integrity";
 static const char *const STATUS_AGILE_MALFORMED = "agile_malformed";
@@ -561,6 +562,45 @@ static int first_malformed_part(const char *file, const uint8_t *zbuf,
   return found;
 }
 
+/* The first part whose CRC-32 or size does not match the central directory,
+   among those xlsxio reads to find the worksheets: the content types, every
+   relationship part and xl/workbook.xml. Patches 0008 and 0009 check the
+   worksheet, shared-string and styles parts as they are read; these are read
+   through paths that do not report, so they are checked here, once, while
+   listing -- which every reader does first. All are small, so this does not
+   cost what reading a worksheet would. */
+static int corrupt_listing_part(const char *file, const uint8_t *buf, size_t len,
+                                char *out, size_t outlen) {
+  mz_zip_archive zip;
+  mz_uint count, i;
+  int found = 0;
+
+  if (!zip_open(&zip, file, buf, len)) {
+    return 0;
+  }
+  count = mz_zip_reader_get_num_files(&zip);
+  for (i = 0; i < count && !found; i++) {
+    char name[MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE];
+    mz_uint got = mz_zip_reader_get_filename(&zip, i, name, sizeof(name));
+    size_t n;
+    if (got == 0 || got > sizeof(name)) continue;
+    n = strlen(name);
+    if (!(strcmp(name, "[Content_Types].xml") == 0 ||
+          strcmp(name, "xl/workbook.xml") == 0 ||
+          (n >= 5 && strcmp(name + n - 5, ".rels") == 0))) {
+      continue;
+    }
+    if (!mz_zip_validate_file(&zip, i, 0)) {
+      if (n >= outlen) n = outlen - 1;
+      memcpy(out, name, n);
+      out[n] = '\0';
+      found = 1;
+    }
+  }
+  mz_zip_reader_end(&zip);
+  return found;
+}
+
 SEXP C_xlsx_sheets(SEXP path, SEXP password) {
   const char *file;
   const char *status;
@@ -656,6 +696,20 @@ SEXP C_xlsx_sheets(SEXP path, SEXP password) {
     }
     UNPROTECT(2);
     return result(why, R_NilValue);
+  }
+  {
+    char part[MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE];
+    if (corrupt_listing_part(file, plain->data, plain->len, part, sizeof(part))) {
+      const char *fields[] = {"part", "line", ""};
+      sheet_list_finalizer(bag);
+      plain_buf_finalizer(holder);
+      detail = PROTECT(Rf_mkNamed(VECSXP, fields));
+      SET_VECTOR_ELT(detail, 0, Rf_mkString(part));
+      SET_VECTOR_ELT(detail, 1, Rf_ScalarInteger(0));
+      res = PROTECT(result(STATUS_PART_ZIP, detail));
+      UNPROTECT(4);
+      return res;
+    }
   }
   plain_buf_finalizer(holder);
 
@@ -993,10 +1047,19 @@ static void reader_handle_finalizer(SEXP ptr) {
    NULL if the worksheet was read in full, otherwise the status to report,
    with the XML line in *line. A worksheet that ends early looks exactly like
    one that ends, so without this a damaged one reads as a short one. */
-static const char *sheet_end_status(xlsxioreadersheet worksheet, int *line) {
+static const char *sheet_end_status(xlsxioreadersheet worksheet, int *line,
+                                    char *part, size_t partlen) {
   unsigned long at = 0;
   int why = xlsxioread_sheet_finish(worksheet, &at);
+  const char *name = xlsxioread_sheet_error_part(worksheet);
+  size_t n = strlen(name);
+
   *line = at > (unsigned long)INT_MAX ? 0 : (int)at;
+  /* Copied out: the name lives in the sheet handle, which is closed before
+     the failure is reported. */
+  if (n >= partlen) n = partlen - 1;
+  memcpy(part, name, n);
+  part[n] = '\0';
   switch (why) {
     case XLSXIOREAD_SHEET_ERROR_NONE:
       return NULL;
@@ -1006,17 +1069,27 @@ static const char *sheet_end_status(xlsxioreadersheet worksheet, int *line) {
       return STATUS_SHEET_SHARED;
     case XLSXIOREAD_SHEET_ERROR_ZIP:
       return STATUS_SHEET_ZIP;
+    /* The shared-string table or the styles part, read before the worksheet
+       and damaged: reported by its own name, which is what is broken. */
+    case XLSXIOREAD_SHEET_ERROR_PART_XML:
+      return STATUS_XML;
+    case XLSXIOREAD_SHEET_ERROR_PART_ZIP:
+      return STATUS_PART_ZIP;
     default:
       return STATUS_SHEET_XML;
   }
 }
 
 /* The result for a worksheet that could not be read in full. Allocates, so it
-   is only called once nothing but R-owned memory is held. */
-static SEXP sheet_failure(const char *status, const char *sheetname, int line) {
-  const char *fields[] = {"sheet", "line", ""};
-  SEXP detail = PROTECT(Rf_mkNamed(VECSXP, fields));
-  SEXP name = PROTECT(Rf_mkCharCE(sheetname, CE_UTF8));
+   is only called once nothing but R-owned memory is held. A failure in a
+   part read first names that part; one in the worksheet names the sheet. */
+static SEXP sheet_failure(const char *status, const char *sheetname,
+                          const char *part, int line) {
+  int about_part = (status == STATUS_XML || status == STATUS_PART_ZIP);
+  const char *sheet_fields[] = {"sheet", "line", ""};
+  const char *part_fields[] = {"part", "line", ""};
+  SEXP detail = PROTECT(Rf_mkNamed(VECSXP, about_part ? part_fields : sheet_fields));
+  SEXP name = PROTECT(Rf_mkCharCE(about_part ? part : sheetname, CE_UTF8));
   SEXP res;
   SET_VECTOR_ELT(detail, 0, Rf_ScalarString(name));
   SET_VECTOR_ELT(detail, 1, Rf_ScalarInteger(line));
@@ -1040,6 +1113,7 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet, SEXP password) {
   int date1904 = 0;
   const char *end = NULL;
   int line = 0;
+  char part[128];
 
   if (TYPEOF(path) != STRSXP || XLENGTH(path) < 1 ||
       STRING_ELT(path, 0) == NA_STRING ||
@@ -1119,7 +1193,7 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet, SEXP password) {
     }
   }
   if (!cells->oom) {
-    end = sheet_end_status(worksheet, &line);
+    end = sheet_end_status(worksheet, &line, part, sizeof(part));
   }
   xlsxioread_sheet_close(worksheet);
   xlsxioread_close(reader);
@@ -1132,7 +1206,7 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet, SEXP password) {
   }
   if (end != NULL) {
     cell_list_finalizer(bag);
-    res = sheet_failure(end, sheetname, line);
+    res = sheet_failure(end, sheetname, part, line);
     UNPROTECT(2);
     return res;
   }
@@ -1223,6 +1297,7 @@ SEXP C_xlsx_read_cells(SEXP path, SEXP sheet, SEXP callback, SEXP env,
   int stopped = 0;
   const char *end = NULL;
   int line = 0;
+  char part[128];
 
   if (TYPEOF(path) != STRSXP || XLENGTH(path) < 1 ||
       STRING_ELT(path, 0) == NA_STRING ||
@@ -1330,10 +1405,10 @@ SEXP C_xlsx_read_cells(SEXP path, SEXP sheet, SEXP callback, SEXP env,
   }
   /* Chunks already delivered stay delivered, but a worksheet that turns out
      to be damaged is still reported rather than ending quietly. */
-  if (!stopped && (end = sheet_end_status(handle->sheet, &line)) != NULL) {
+  if (!stopped && (end = sheet_end_status(handle->sheet, &line, part, sizeof(part))) != NULL) {
     reader_handle_finalizer(holder);
     cell_list_finalizer(bag);
-    res = sheet_failure(end, sheetname, line);
+    res = sheet_failure(end, sheetname, part, line);
     UNPROTECT(3);
     return res;
   }
@@ -1410,6 +1485,7 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
   int *kind = NULL;
   const char *end = NULL;
   int line = 0;
+  char part[128];
 
   if (TYPEOF(path) != STRSXP || XLENGTH(path) < 1 ||
       STRING_ELT(path, 0) == NA_STRING ||
@@ -1513,7 +1589,7 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
     }
   }
   if (!cells->oom) {
-    end = sheet_end_status(worksheet, &line);
+    end = sheet_end_status(worksheet, &line, part, sizeof(part));
   }
   xlsxioread_sheet_close(worksheet);
   xlsxioread_close(reader);
@@ -1526,7 +1602,7 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
   }
   if (end != NULL) {
     cell_list_finalizer(bag);
-    res = sheet_failure(end, sheetname, line);
+    res = sheet_failure(end, sheetname, part, line);
     UNPROTECT(2);
     return res;
   }

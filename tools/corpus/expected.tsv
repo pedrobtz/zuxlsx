@@ -201,7 +201,7 @@ poi/clusterfuzz-testcase-minimized-POIFuzzer-5040805309710336.xlsx	zuxlsx_ooxml_
 poi/clusterfuzz-testcase-minimized-POIXSSFFuzzer-4828727001088000.xlsx	zuxlsx_zip_error	0	0
 poi/clusterfuzz-testcase-minimized-POIXSSFFuzzer-5089447305609216.xlsx	zuxlsx_zip_error	0	0
 poi/clusterfuzz-testcase-minimized-POIXSSFFuzzer-5185049589579776.xlsx	zuxlsx_zip_error	0	0
-poi/clusterfuzz-testcase-minimized-POIXSSFFuzzer-5265527465181184.xlsx	ok	2	0
+poi/clusterfuzz-testcase-minimized-POIXSSFFuzzer-5265527465181184.xlsx	zuxlsx_zip_error	0	0
 poi/clusterfuzz-testcase-minimized-POIXSSFFuzzer-5937385319563264.xlsx	zuxlsx_zip_error	12	2395
 poi/clusterfuzz-testcase-minimized-POIXSSFFuzzer-6123461607817216.xlsx	zuxlsx_zip_error	0	0
 poi/clusterfuzz-testcase-minimized-POIXSSFFuzzer-6419366255919104.xlsx	zuxlsx_zip_error	0	0
