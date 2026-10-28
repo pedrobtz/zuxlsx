@@ -41,7 +41,7 @@
 </div>
 <div class="section level2">
 <h2 id="current-state-010-and-the-reader-is-done">Current state: 0.1.0, and the reader is done<a class="anchor" aria-label="anchor" href="#current-state-010-and-the-reader-is-done"></a></h2>
-<p>The reading API of design §12 is implemented and the package is CRAN-ready apart from the two steps that must happen on submission day, which are in <a href=".agents/release-checklist.html">.agents/release-checklist.md</a>. 870 tests pass, shuffled, and <code>R CMD check --as-cran</code> is 0 errors / 0 warnings / 0 notes.</p>
+<p>The reading API of design §12 is implemented. The siblings are on CRAN and <code>Remotes:</code> is gone; what is left before submission is in <a href=".agents/release-checklist.html">.agents/release-checklist.md</a>. About 1,500 expectations pass, shuffled, in UTF-8, C and Latin-1 locales, and <code>R CMD check --as-cran</code> against the CRAN siblings gives only the “New submission” NOTE. The whole-package review of 2026-10-28 is filed as issues labelled <code>review</code>.</p>
 <p>What is exported:</p>
 <ul><li>
 <code>read_xlsx(path, sheet = 1, col_names = TRUE, range = NULL, password = NULL)</code> — a worksheet as a data frame. Column types are inferred by promotion: blanks are logical, booleans stay logical, numbers give a double, anything mixed or holding a string or a cell error becomes character, and a column of dates becomes <code>Date</code> or <code>POSIXct</code>. <code>range</code> is A1 notation and either corner may name a cell, a column or a row, so <code>"B2:D10"</code>, <code>"A:C"</code> and <code>"2:10"</code> all work.</li>
@@ -67,11 +67,11 @@
 <strong>There is no <code>Remotes:</code>.</strong> zuxml, zukomp and zucrypt all reached CRAN in October 2026 (0.1.0 each), and <code>Remotes:</code> was dropped for the CRAN submission, so CI and a GitHub install resolve the siblings from CRAN. To build against a sibling’s unreleased <code>main</code>, install it first with <code>pak::pak("pedrobtz/&lt;pkg&gt;")</code>. The full sequence is in <a href=".agents/release-checklist.html">.agents/release-checklist.md</a>.</li>
 <li>
 <code>src/Makevars</code> is generated and <code>.gitignore</code>d. <code>cleanup</code> removes it.</li>
-</ul><p>The native layer is <a href="src/zuxlsx.c">src/zuxlsx.c</a> — every <code>.Call</code> entry point, the cell reader and the column builders in one translation unit — plus <a href="src/init.c">src/init.c</a> for registration and the zucrypt backend’s lifetime (<code>zuc_init()</code> on load, <code>zuc_shutdown()</code> on unload), <a href="src/agile.c">src/agile.c</a>, the decryption core, <a href="src/cfb.c">src/cfb.c</a>, which reads stream contents out of a CFB container in memory, and <a href="src/encinfo.c">src/encinfo.c</a>, which parses <code>EncryptionInfo</code>. None includes an R header, so all three can be fuzzed outside R (#45).</p>
+</ul><p>The native layer is <a href="src/zuxlsx.c">src/zuxlsx.c</a> — every <code>.Call</code> entry point, the cell reader and the column builders in one translation unit — plus <a href="src/init.c">src/init.c</a> for registration and the zucrypt backend’s lifetime (<code>zuc_init()</code> on load, <code>zuc_shutdown()</code> on unload), <a href="src/agile.c">src/agile.c</a>, the decryption core, <a href="src/cfb.c">src/cfb.c</a>, which reads stream contents out of a CFB container in memory and also decides what kind of OLE2 file a file is, <a href="src/encinfo.c">src/encinfo.c</a>, which parses <code>EncryptionInfo</code>, and <a href="src/utf8file.c">src/utf8file.c</a>, which opens a UTF-8 path with <code>_wfopen</code> on Windows. None includes an R header, so the first three can be fuzzed outside R (#45).</p>
 <p>Vendored, and the corpora:</p>
 <ul><li><p><a href="src/vendor/xlsxio/">src/vendor/xlsxio/</a> — xlsxio 0.2.36, <strong>reader only</strong> (<code>xlsxio_read.c</code>, <code>xlsxio_read_sharedstrings.c</code>, headers, <code>LICENSE.txt</code>). The writer is not bundled; writing is out of scope (§21). Upstream CRLF line endings are kept deliberately.</p></li>
 <li>
-<p><a href="tools/patches/xlsxio/">tools/patches/xlsxio/</a> — <strong>seven patches</strong>, applied in order, reproducing the committed copy byte for byte from the pristine 0.2.36 tarball:</p>
+<p><a href="tools/patches/xlsxio/">tools/patches/xlsxio/</a> — <strong>eight patches</strong>, applied in order, reproducing the committed copy byte for byte from the pristine 0.2.36 tarball:</p>
 <table class="table"><colgroup><col width="50%"><col width="50%"></colgroup><thead><tr><th>Patch</th>
 <th>What it does</th>
 </tr></thead><tbody><tr><td><code>0001-miniz-zip-backend</code></td>
@@ -89,6 +89,9 @@
 <td>accepts strict OOXML relationship namespaces as well as transitional ones</td>
 </tr><tr><td><code>0007-null-relationship-id-crash</code></td>
 <td>a missing relationship <code>Id</code> reached <code>strcasecmp</code> as <code>NULL</code>; found by the fuzzer, reported upstream</td>
+</tr><tr><td><code>0008-report-why-a-worksheet-ended</code></td>
+<td>
+<code>xlsxioread_sheet_finish()</code>: a worksheet that ends on a parse error, a reference past <code>XFD1048576</code>, a dangling shared-string index or a bad CRC is reported rather than read short; also corrects 0003’s bracket and built-in date rules</td>
 </tr></tbody></table><p>Provenance is in <a href="tools/vendor/manifest.tsv">tools/vendor/manifest.tsv</a>, <a href="tools/vendor/checksums.sha256">tools/vendor/checksums.sha256</a> and <a href="inst/COPYRIGHTS">inst/COPYRIGHTS</a>; <strong><code>tools/vendor/verify</code> checks all of it offline and is the thing to run after touching anything under <code>src/vendor/</code>.</strong></p>
 </li>
 <li><p><a href="tests/testthat/sheets/">tests/testthat/sheets/</a> — seven readxl interoperability workbooks (inline strings, missing parts, nonstandard namespace prefix, UTF-8 sheet names, blanks), MIT, with provenance and checksums in <code>MANIFEST.tsv</code> there, all verified byte for byte against readxl at commit <code>47f8aeac</code>. <code>test-corpus.R</code> asserts their content, not just that they open.</p></li>

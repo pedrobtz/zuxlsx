@@ -63,7 +63,10 @@ workbook.</p></dd>
 
 <dt id="arg-col-names">col_names<a class="anchor" aria-label="anchor" href="#arg-col-names"></a></dt>
 <dd><p>Whether the first row holds column names. When <code>FALSE</code>,
-columns are named <code>X1</code>, <code>X2</code> and so on.</p></dd>
+columns are named <code>X1</code>, <code>X2</code> and so on. When <code>TRUE</code>, a column whose
+header cell is blank is named <code>X</code> and its position, and repeated names
+are made unique with <code><a href="https://rdrr.io/r/base/make.unique.html" class="external-link">make.unique()</a></code> and an underscore, so a second <code>id</code>
+becomes <code>id_1</code>.</p></dd>
 
 
 <dt id="arg-range">range<a class="anchor" aria-label="anchor" href="#arg-range"></a></dt>
@@ -74,7 +77,8 @@ whole worksheet. Either corner may name a cell, a column or a row, so
 order. A range is read as its own rectangle: cells outside it are ignored,
 the top-left becomes the first row and column, and columns the range
 covers appear even where the worksheet left them empty. When <code>col_names</code>
-is <code>TRUE</code> the first row of the range supplies the names.</p></dd>
+is <code>TRUE</code> the first row of the range supplies the names. A range may not
+reach past <code>XFD1048576</code>, the last cell a worksheet can have.</p></dd>
 
 
 <dt id="arg-password">password<a class="anchor" aria-label="anchor" href="#arg-password"></a></dt>
@@ -88,7 +92,9 @@ erase a string, so the password may stay in memory after the call.</p></dd>
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
-    <p>A data frame.</p>
+    <p>A data frame with one column per worksheet column, typed as
+described above. A worksheet, or a range, with no cells in it gives a
+data frame with no columns and no rows.</p>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>

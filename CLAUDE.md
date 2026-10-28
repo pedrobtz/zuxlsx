@@ -13,12 +13,13 @@ with vendored `xlsxio` supplying the OOXML logic.
 
 ## Current state: 0.1.0, and the reader is done
 
-The reading API of design §12 is implemented and the package is
-CRAN-ready apart from the two steps that must happen on submission day,
-which are in
+The reading API of design §12 is implemented. The siblings are on CRAN
+and `Remotes:` is gone; what is left before submission is in
 [.agents/release-checklist.md](https://pedrobtz.github.io/zuxlsx/.agents/release-checklist.md).
-870 tests pass, shuffled, and `R CMD check --as-cran` is 0 errors / 0
-warnings / 0 notes.
+About 1,500 expectations pass, shuffled, in UTF-8, C and Latin-1
+locales, and `R CMD check --as-cran` against the CRAN siblings gives
+only the “New submission” NOTE. The whole-package review of 2026-10-28
+is filed as issues labelled `review`.
 
 What is exported:
 
@@ -113,10 +114,13 @@ registration and the zucrypt backend’s lifetime (`zuc_init()` on load,
 [src/agile.c](https://pedrobtz.github.io/zuxlsx/src/agile.c), the
 decryption core,
 [src/cfb.c](https://pedrobtz.github.io/zuxlsx/src/cfb.c), which reads
-stream contents out of a CFB container in memory, and
+stream contents out of a CFB container in memory and also decides what
+kind of OLE2 file a file is,
 [src/encinfo.c](https://pedrobtz.github.io/zuxlsx/src/encinfo.c), which
-parses `EncryptionInfo`. None includes an R header, so all three can be
-fuzzed outside R (#45).
+parses `EncryptionInfo`, and
+[src/utf8file.c](https://pedrobtz.github.io/zuxlsx/src/utf8file.c),
+which opens a UTF-8 path with `_wfopen` on Windows. None includes an R
+header, so the first three can be fuzzed outside R (#45).
 
 Vendored, and the corpora:
 
@@ -127,7 +131,7 @@ Vendored, and the corpora:
   are kept deliberately.
 
 - [tools/patches/xlsxio/](https://pedrobtz.github.io/zuxlsx/tools/patches/xlsxio/)
-  — **seven patches**, applied in order, reproducing the committed copy
+  — **eight patches**, applied in order, reproducing the committed copy
   byte for byte from the pristine 0.2.36 tarball:
 
   | Patch | What it does |
@@ -139,6 +143,7 @@ Vendored, and the corpora:
   | `0005-tolerant-part-name-lookup` | matches archive members the way OOXML consumers compare part names |
   | `0006-strict-ooxml-relationship-types` | accepts strict OOXML relationship namespaces as well as transitional ones |
   | `0007-null-relationship-id-crash` | a missing relationship `Id` reached `strcasecmp` as `NULL`; found by the fuzzer, reported upstream |
+  | `0008-report-why-a-worksheet-ended` | `xlsxioread_sheet_finish()`: a worksheet that ends on a parse error, a reference past `XFD1048576`, a dangling shared-string index or a bad CRC is reported rather than read short; also corrects 0003’s bracket and built-in date rules |
 
   Provenance is in
   [tools/vendor/manifest.tsv](https://pedrobtz.github.io/zuxlsx/tools/vendor/manifest.tsv),

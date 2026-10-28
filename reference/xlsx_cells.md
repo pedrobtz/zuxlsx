@@ -2,10 +2,9 @@
 
 Reads a worksheet one cell at a time and returns them in a data frame,
 one row per cell. This is the low-level reader: it reports what is in
-each cell without assembling columns or guessing a type for them, which
-is what
+each cell without assembling columns or guessing a type for them;
 [`read_xlsx()`](https://pedrobtz.github.io/zuxlsx/reference/read_xlsx.md)
-will do on top of it.
+does that.
 
 ## Usage
 
@@ -55,7 +54,9 @@ A data frame with one row per cell and the columns:
   The numeric value for `"number"`, `"boolean"` and `"date"` cells, and
   `NA` otherwise. A date is its Excel serial number; it is not converted
   here, because the epoch is a property of the workbook rather than of
-  the cell.
+  the cell. A date written as ISO 8601 text (`t="d"`) is given the
+  serial an Excel number would have; one that cannot be read as a date
+  is a `"string"`.
 
 ## See also
 

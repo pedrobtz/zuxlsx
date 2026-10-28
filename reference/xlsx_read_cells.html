@@ -114,10 +114,14 @@ count: a chunk ends at the first row boundary at or after it.</p>
     <div class="sourceCode"><pre class="sourceCode r"><code><span class="r-in"><span><span class="va">path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"two-sheets.xlsx"</span>, package <span class="op">=</span> <span class="st">"zuxlsx"</span><span class="op">)</span></span></span>
 <span class="r-in"><span></span></span>
 <span class="r-in"><span><span class="co"># Count the cells of each type without holding the worksheet.</span></span></span>
-<span class="r-in"><span><span class="va">totals</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/integer.html" class="external-link">integer</a></span><span class="op">(</span><span class="fl">0</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="va">totals</span> <span class="op">&lt;-</span> <span class="fl">0</span></span></span>
 <span class="r-in"><span><span class="fu">xlsx_read_cells</span><span class="op">(</span><span class="va">path</span>, <span class="fl">1</span>, <span class="kw">function</span><span class="op">(</span><span class="va">cells</span><span class="op">)</span> <span class="op">{</span></span></span>
-<span class="r-in"><span>  <span class="va">totals</span> <span class="op">&lt;&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="va">totals</span>, <span class="fu"><a href="https://rdrr.io/r/base/table.html" class="external-link">table</a></span><span class="op">(</span><span class="va">cells</span><span class="op">$</span><span class="va">type</span><span class="op">)</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="va">totals</span> <span class="op">&lt;&lt;-</span> <span class="va">totals</span> <span class="op">+</span> <span class="fu"><a href="https://rdrr.io/r/base/table.html" class="external-link">table</a></span><span class="op">(</span><span class="va">cells</span><span class="op">$</span><span class="va">type</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="op">}</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="va">totals</span></span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   blank  number  string boolean   error    date </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>       0       3       7       3       0       3 </span>
 <span class="r-in"><span></span></span>
 <span class="r-in"><span><span class="co"># Stop as soon as something is found. The rest of the sheet is not parsed.</span></span></span>
 <span class="r-in"><span><span class="va">first</span> <span class="op">&lt;-</span> <span class="cn">NULL</span></span></span>

@@ -25,7 +25,10 @@ read_xlsx(path, sheet = 1, col_names = TRUE, range = NULL, password = NULL)
 - col_names:
 
   Whether the first row holds column names. When `FALSE`, columns are
-  named `X1`, `X2` and so on.
+  named `X1`, `X2` and so on. When `TRUE`, a column whose header cell is
+  blank is named `X` and its position, and repeated names are made
+  unique with [`make.unique()`](https://rdrr.io/r/base/make.unique.html)
+  and an underscore, so a second `id` becomes `id_1`.
 
 - range:
 
@@ -36,7 +39,9 @@ read_xlsx(path, sheet = 1, col_names = TRUE, range = NULL, password = NULL)
   order. A range is read as its own rectangle: cells outside it are
   ignored, the top-left becomes the first row and column, and columns
   the range covers appear even where the worksheet left them empty. When
-  `col_names` is `TRUE` the first row of the range supplies the names.
+  `col_names` is `TRUE` the first row of the range supplies the names. A
+  range may not reach past `XFD1048576`, the last cell a worksheet can
+  have.
 
 - password:
 
@@ -49,7 +54,9 @@ read_xlsx(path, sheet = 1, col_names = TRUE, range = NULL, password = NULL)
 
 ## Value
 
-A data frame.
+A data frame with one column per worksheet column, typed as described
+above. A worksheet, or a range, with no cells in it gives a data frame
+with no columns and no rows.
 
 ## Details
 
