@@ -10,7 +10,7 @@
 
 test_that("every reader reads a password-protected workbook as its plaintext", {
   for (case in list(list(encrypted(), "zuxlsx"),
-                    list(utf16(), "zü✓\U0001F511"))) {
+                    list(utf16(), utf16_password()))) {
     path <- case[[1]]
     pw <- case[[2]]
     expect_identical(xlsx_sheets(path, password = pw), xlsx_sheets(stored()))

@@ -247,7 +247,7 @@ test_that("the encrypted-workbook fixtures decrypt from C-read streams", {
     streams <- cfb_streams(readBin(path, "raw", file.size(path)),
                            c("EncryptionInfo", "EncryptedPackage"))
     params <- agile_params(streams$EncryptionInfo)
-    password <- if (grepl("utf16", fixture)) "zü✓\U0001F511" else "zuxlsx"
+    password <- if (grepl("utf16", fixture)) utf16_password() else "zuxlsx"
     expect_identical(agile_decrypt(streams$EncryptedPackage, password, params),
                      agile_plaintext(), info = fixture)
   }

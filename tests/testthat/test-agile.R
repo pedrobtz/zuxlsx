@@ -32,12 +32,12 @@ test_that("a non-ASCII password is hashed as UTF-16LE, surrogate pairs included"
   # "zü✓🔑": one-, two-, three- and four-byte UTF-8. The last is outside the
   # BMP, so it only matches if it becomes a surrogate pair.
   fx <- agile_fixture("two-sheets-encrypted-utf16.xlsx")
-  password <- "zü✓\U0001F511"
+  password <- utf16_password()
   expect_identical(agile_decrypt(fx$package, password, fx$params, fx$path),
                    agile_plaintext())
 
   # Each character is load-bearing: dropping the pair is a different password.
-  expect_error(agile_decrypt(fx$package, "zü✓", fx$params, fx$path),
+  expect_error(agile_decrypt(fx$package, utf16_password(3), fx$params, fx$path),
                class = "zuxlsx_password_error")
 })
 

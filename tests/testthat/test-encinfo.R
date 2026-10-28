@@ -17,7 +17,7 @@ test_that("the C parser reads the fixtures exactly as the R parser does", {
 test_that("a password-protected workbook decrypts from its bytes alone", {
   cases <- list(
     "two-sheets-encrypted.xlsx" = "zuxlsx",
-    "two-sheets-encrypted-utf16.xlsx" = "zü✓\U0001F511"
+    "two-sheets-encrypted-utf16.xlsx" = utf16_password()
   )
   for (fixture in names(cases)) {
     path <- ole2_fixture(fixture)

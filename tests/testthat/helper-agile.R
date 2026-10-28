@@ -94,3 +94,11 @@ workbook_bytes <- function(parts = workbook_parts()) {
 stored <- function() ole2_fixture("two-sheets-stored.xlsx")
 encrypted <- function() ole2_fixture("two-sheets-encrypted.xlsx")
 utf16 <- function() ole2_fixture("two-sheets-encrypted-utf16.xlsx")
+
+# utf16()'s password, "zü✓🔑": one-, two-, three- and four-byte UTF-8. Built
+# from code points because a literal mixing a BMP character with a \U escape
+# beyond it is double-encoded by R's parser in a locale that is not UTF-8,
+# which is how CRAN's Debian clang machine runs the tests.
+utf16_password <- function(n = 4L) {
+  intToUtf8(c(0x7a, 0xfc, 0x2713, 0x1F511)[seq_len(n)])
+}
