@@ -95,20 +95,11 @@ The build:
   statically.
 - `DESCRIPTION` has `LinkingTo: zucrypt, zukomp, zuxml` and **no
   `Imports:`**, which is what design §3 asks for.
-- **`Remotes:` tracks `pedrobtz/zuxml@main`, `pedrobtz/zukomp@main` and
-  `pedrobtz/zucrypt@main`**. All three reached CRAN in October 2026
-  (0.1.0 each), so `Remotes:` is no longer needed to install them, but
-  it is kept until submission day so that development builds against the
-  siblings’ `main`. `@main` is deliberate and is not a version pin: the
-  three packages are developed together, so zuxlsx builds against what
-  the siblings actually are, and a sibling release that breaks this
-  package is a bug to fix in the sibling rather than a version to freeze
-  away from. That has real cost — a zukomp release broke Windows here on
-  2026-09-19 — and it is the cost being chosen. Do not pin a *feature*
-  branch: those are deleted on merge and the ref then 404s. Drop
-  `Remotes:` entirely before any CRAN submission – on submission day,
-  not before, since it is what makes a GitHub install work. The full
-  sequence, including why the siblings must reach CRAN first, is in
+- **There is no `Remotes:`.** zuxml, zukomp and zucrypt all reached CRAN
+  in October 2026 (0.1.0 each), and `Remotes:` was dropped for the CRAN
+  submission, so CI and a GitHub install resolve the siblings from CRAN.
+  To build against a sibling’s unreleased `main`, install it first with
+  `pak::pak("pedrobtz/<pkg>")`. The full sequence is in
   [.agents/release-checklist.md](https://pedrobtz.github.io/zuxlsx/.agents/release-checklist.md).
 - `src/Makevars` is generated and `.gitignore`d. `cleanup` removes it.
 
@@ -371,9 +362,18 @@ its R-level allocation. It does not check the three against each other;
 [tools/corpus/sweep.R](https://pedrobtz.github.io/zuxlsx/tools/corpus/sweep.R)
 is what compares values.
 
-CI is
+CI is the shared `pedrobtz/r-actions` workflows:
 [R-CMD-check.yaml](https://pedrobtz.github.io/zuxlsx/.github/workflows/R-CMD-check.yaml)
-(macOS/Windows/Ubuntu × devel/release/oldrel-1) and
+(macOS/Windows/Ubuntu release, Windows devel, Ubuntu oldrel-1 and 4.1,
+the r-devel containers, `nosuggests`),
+[native-checks.yaml](https://pedrobtz.github.io/zuxlsx/.github/workflows/native-checks.yaml)
+(ASan/UBSan, valgrind, rchk, gctorture, LTO, analyzers, CRAN’s special
+checks; the last only in the full profile, so label a PR `full-ci` to
+run it) and
+[vendor.yaml](https://pedrobtz.github.io/zuxlsx/.github/workflows/vendor.yaml),
+plus this repo’s own
+[corpus.yaml](https://pedrobtz.github.io/zuxlsx/.github/workflows/corpus.yaml)
+and
 [pkgdown.yaml](https://pedrobtz.github.io/zuxlsx/.github/workflows/pkgdown.yaml).
 
 ## Conventions inherited from the `zu*` siblings
