@@ -56,6 +56,23 @@ commit being submitted, then `devtools::submit_cran()`.
 - `urlchecker::url_check()` is clean; all URLs are https and none redirect.
 - LICENSE year is current.
 
+## Decided, 2026-10-28, after the whole-package review
+
+The review of 6327d52 was filed as issues labelled `review` and fixed in
+#110. Three of its points were decisions rather than defects:
+
+- **`xlsx_read_cells(path, sheet = 1, callback, ...)` keeps its argument
+  order** (#109). Every reader takes `(path, sheet = 1, ...)`, and
+  `callback = f` reads better named. Reordering after CRAN would need a
+  deprecation cycle, so this is final.
+- **Decrypting twice per read is accepted for 0.1.0** (#107, milestone
+  v0.1.1). It costs time only, and resolving the sheet in C changes nothing
+  users can see, so it can land in any release.
+- **An independent SHA-1/AES-128 fixture is deferred** (#82, milestone
+  v0.1.1). SHA-512/AES-256, what Excel has written since 2013, is proven by
+  two independently produced fixtures; the rest are covered by round trips
+  through the test encryptor.
+
 ## Worth re-checking at the time
 
 - That `locale.yaml` is green: it runs the tests in the C and Latin-1

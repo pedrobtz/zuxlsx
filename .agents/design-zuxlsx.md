@@ -2009,7 +2009,8 @@ strings and Expat's buffers are freed by xlsxio without being wiped; the
 "wiped when the read ends" claim is about the package, not every copy of a
 cell's text.
 
-**Known cost: two decryptions per read.** `resolve_sheet()` lists the
+**Known cost: two decryptions per read** (accepted for 0.1.0 on
+2026-10-28, #107, milestone v0.1.1). `resolve_sheet()` lists the
 worksheets through `C_xlsx_sheets` before every read, to check a name or map
 a position, and each call decrypts. On the fixture that is 140 ms instead of
 70, almost all of it the spin loop. Resolving the sheet in C, in the same
