@@ -72,8 +72,8 @@ poi/54399.xlsx	ok	1	3
 poi/54436.xlsx	ok	1	29
 poi/54524.xlsx	ok	1	15
 poi/54607.xlsx	ok	3	3
-poi/54764-2.xlsx	ok	3	6
-poi/54764.xlsx	ok	3	6
+poi/54764-2.xlsx	zuxlsx_xml_error	0	0
+poi/54764.xlsx	zuxlsx_xml_error	3	0
 poi/55406_Conditional_formatting_sample.xlsx	ok	1	39
 poi/55640.xlsx	ok	3	4
 poi/55745.xlsx	ok	2	46
@@ -280,8 +280,8 @@ poi/NumberFormatTests.xlsx	ok	2	1328
 poi/picture-and-shape-same-size.xlsx	ok	1	1
 poi/picture.xlsx	ok	3	20
 poi/poc-shared-strings.xlsx	ok	1	12000
-poi/poc-xmlbomb-empty.xlsx	ok	1	1
-poi/poc-xmlbomb.xlsx	ok	1	1
+poi/poc-xmlbomb-empty.xlsx	zuxlsx_xml_error	1	0
+poi/poc-xmlbomb.xlsx	zuxlsx_xml_error	1	0
 poi/protected_passtika.xlsb	zuxlsx_encrypted_error	0	0
 poi/protected_passtika.xlsx	zuxlsx_encrypted_error	0	0
 poi/ref-56737.xlsx	ok	3	21

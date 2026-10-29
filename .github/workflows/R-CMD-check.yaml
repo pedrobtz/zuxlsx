@@ -1,5 +1,8 @@
 # R CMD check, from the shared reusable workflow in pedrobtz/r-actions.
 #
+# R 4.1 runs on Windows too: there R was still multiarch, and configure.win
+# has to find the siblings' archives under lib/x64 (#44).
+#
 # The runners are the shared default plus Windows R-devel: the default has no
 # R-devel runner outside its Linux containers, so without that row nothing
 # checks CRAN's Windows R-devel flavour. nosuggests runs the suite with only
@@ -25,6 +28,7 @@ jobs:
          {"os": "windows-latest", "r": "devel"},
          {"os": "ubuntu-latest", "r": "release"},
          {"os": "ubuntu-latest", "r": "oldrel-1"},
-         {"os": "ubuntu-latest", "r": "4.1"}]
+         {"os": "ubuntu-latest", "r": "4.1"},
+         {"os": "windows-latest", "r": "4.1"}]
       nosuggests: true
       nold: false

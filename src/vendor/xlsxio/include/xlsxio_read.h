@@ -314,6 +314,8 @@ DLL_EXPORT_XLSXIO int xlsxioread_sheet_date1904 (xlsxioreadersheet sheethandle);
 #define XLSXIOREAD_SHEET_ERROR_RANGE        2
 #define XLSXIOREAD_SHEET_ERROR_SHAREDSTRING 3
 #define XLSXIOREAD_SHEET_ERROR_ZIP          4
+#define XLSXIOREAD_SHEET_ERROR_PART_XML     5
+#define XLSXIOREAD_SHEET_ERROR_PART_ZIP     6
 /*! @} */
 
 /*! \brief zuxlsx: whether a worksheet read until xlsxioread_sheet_next_row() returned 0 was read in full
@@ -322,6 +324,12 @@ DLL_EXPORT_XLSXIO int xlsxioread_sheet_date1904 (xlsxioreadersheet sheethandle);
  * \return one of XLSXIOREAD_SHEET_ERROR_*
  */
 DLL_EXPORT_XLSXIO int xlsxioread_sheet_finish (xlsxioreadersheet sheethandle, unsigned long* line);
+
+/*! \brief zuxlsx: the shared-string or styles part a PART_* error is about
+ * \param  sheethandle   read handle for worksheet object
+ * \return the part name, or an empty string
+ */
+DLL_EXPORT_XLSXIO const char* xlsxioread_sheet_error_part (xlsxioreadersheet sheethandle);
 
 
 

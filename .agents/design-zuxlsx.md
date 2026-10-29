@@ -959,6 +959,20 @@ are now `zuxlsx_ooxml_error`, which `tools/corpus/expected.tsv` records.
 `agile_crypto` and the unrecognised-status fallback carry `zuxlsx_error`
 alone; they used to list it twice.
 
+**Update, 2026-10-28: every part is checked (#38, #39).** The shared-string
+table and the styles part are parsed before the worksheet, through an
+xlsxio function whose "did it parse?" answer upstream had commented out, so
+damage there loaded as far as the damage. Patch 0009 adds a checked variant;
+a part that is not well formed is `zuxlsx_xml_error` naming it, and one that
+fails its size or CRC-32 is `zuxlsx_zip_error` (`part_zip`). The parts read
+to find the worksheets -- `[Content_Types].xml`, `xl/workbook.xml` and its
+relationships, `xl/_rels/workbook.xml.rels` -- go through paths that report
+nothing, so
+`C_xlsx_sheets` validates their CRC-32 with `mz_zip_validate_file()` while
+listing, which every reader does first; they are small, so listing stays
+cheap. A workbook part under another name is not covered. The pinned
+"KNOWN GAP" CRC test now expects the error.
+
 ---
 
 ## 16. Security and robustness
@@ -1035,6 +1049,19 @@ DIFAT container, 100,000-deep nesting, the many-segment decryption and the
 hash-and-key grid -- skip, through `ZUXLSX_LIGHT_TESTS`, and the damage sweeps
 run a seventh of their cases: they test limits, not protection, and at a
 collection per twenty allocations they took the job past two hours.
+
+**Update, 2026-10-28: DOCTYPE (#47).** zuxlsx links raw Expat, so it gets
+zuxml's compiled-in policy -- `XML_GE 0`, no `XML_DTD`, so no entity is
+expanded and none is fetched -- but not the DOCTYPE refusal zuxml applies at
+its own seam. An internal subset's `&e;` therefore reached a cell as literal
+text. Patch 0010 installs a start-DOCTYPE handler on every parser xlsxio
+creates, and `check_part()` in `src/zuxlsx.c` does the same for the parts
+listing validates (now parsed as well as CRC-checked, so a broken
+`xl/_rels/workbook.xml.rels` is an error naming it rather than worksheets
+that read as empty). Parts xlsxio never reads are not checked: POI's
+`xlsx-corrupted.xlsx` has a root `_rels/.rels` that is the word
+"CORRUPTED", and its data is intact and reads. `encinfo.c` already refused one. Either way a DOCTYPE is
+`zuxlsx_xml_error`, in any part.
 
 No configurable limits exist yet. Nothing in the reader caps a part size, a
 string length or a sheet count; the defenses that hold today come from Expat's
@@ -1318,6 +1345,24 @@ as rows 1, 2, 4, 5. `read_xlsx()` now spans the range of row numbers the cells
 themselves carry, which is independent of that padding. The quirk is pinned by
 a characterisation test rather than patched in xlsxio, since nothing above the
 cell layer needs the padding to be right.
+
+**Correction, 2026-10-28 (#40).** That last clause was wrong. The padding
+also emits one blank cell above a table that starts at row 3 or below, and
+`read_xlsx()` took the extent from every cell, blanks included, so such a
+table read with that padding row as its header. Without `range`, the
+extent now comes from non-blank cells only, as in readxl: empty rows above
+and below the table and empty columns either side are not part of it, and a
+sheet whose styled empty cells run far past its data reads as its data.
+`xlsx_cells()` still reports padding blanks, and its documentation says so.
+`xlsx_rows()` runs from row 1, so `rows[[n]]` is row n.
+
+**Interrupts (#42).** Every row loop checks for an interrupt every thousand
+rows, under `R_UnwindProtect`: the cleanup closes the reader and worksheet,
+wipes the plaintext and frees the cells as the interrupt -- or a
+`setTimeLimit()` limit, which is signalled at the same check -- unwinds. The
+continuation is made before any reader opens and kept in the cell bag's
+protected slot, so the check never allocates while the C stack owns an open
+handle.
 
 ### 17.4d Strict OOXML, 2026-09-20: found by looking, not by erroring
 

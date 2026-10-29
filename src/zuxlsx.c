@@ -4,9 +4,9 @@
  *   C_xlsx_cells      a whole worksheet as parallel cell vectors
  *   C_xlsx_read_cells a worksheet a chunk at a time, calling back into R
  *   C_read_xlsx       a worksheet as typed columns (design section 14)
- *   C_zuxlsx_native   the versions linked in; it calls Expat and zucrypt
- *                     directly, so a header on the path without its archive
- *                     fails at link time
+ *   C_zuxlsx_native   the versions linked in; it calls Expat, miniz and
+ *                     zucrypt directly, so a header on the path without its
+ *                     archive fails at link time
  *
  * plus the internal entry points the decryption tests use. A password-
  * protected workbook is classified and decrypted by resolve_source() before
@@ -55,6 +55,7 @@ static const char *const STATUS_SHEET_XML = "sheet_xml";
 static const char *const STATUS_SHEET_RANGE = "sheet_range";
 static const char *const STATUS_SHEET_SHARED = "sheet_shared_string";
 static const char *const STATUS_SHEET_ZIP = "sheet_zip";
+static const char *const STATUS_PART_ZIP = "part_zip";
 static const char *const STATUS_AGILE_PASSWORD = "agile_password";
 static const char *const STATUS_AGILE_INTEGRITY = "agile_integrity";
 static const char *const STATUS_AGILE_MALFORMED = "agile_malformed";
@@ -495,6 +496,74 @@ static int file_is_xlsb(const char *file, const uint8_t *buf, size_t len) {
  * Only the two parts that must be well-formed for a workbook to be found are
  * checked. A malformed worksheet is a different failure, reached later, and
  * is not what this path is explaining. */
+static void XMLCALL refuse_doctype(void *data, const XML_Char *name,
+                                   const XML_Char *sysid,
+                                   const XML_Char *pubid,
+                                   int has_internal_subset) {
+  (void) name; (void) sysid; (void) pubid; (void) has_internal_subset;
+  XML_StopParser((XML_Parser) data, XML_FALSE);
+}
+
+/* Streams one member through Expat: 0 if it is well-formed XML and passes
+   its ZIP size and CRC-32 checks, 1 if it is not well formed -- and a
+   DOCTYPE counts, since no part of a workbook has one (#47) -- with the line
+   in *line, 2 if the ZIP checks fail, -1 if it cannot be read at all.
+   Streamed rather than extracted whole: a member's declared size is the
+   archive's word, not a bound. */
+static int check_part(mz_zip_archive *zip, mz_uint32 index, int *line) {
+  mz_zip_reader_extract_iter_state *it;
+  XML_Parser parser;
+  int bad = 0;
+
+  it = mz_zip_reader_extract_iter_new(zip, index, 0);
+  if (it == NULL) {
+    return -1;
+  }
+  parser = XML_ParserCreate(NULL);
+  if (parser == NULL) {
+    mz_zip_reader_extract_iter_free(it);
+    return -1;
+  }
+  XML_SetUserData(parser, parser);
+  XML_SetStartDoctypeDeclHandler(parser, refuse_doctype);
+  for (;;) {
+    void *chunk = XML_GetBuffer(parser, 65536);
+    size_t got;
+    if (chunk == NULL) {
+      bad = -1;
+      break;
+    }
+    got = mz_zip_reader_extract_iter_read(it, chunk, 65536);
+    if (XML_ParseBuffer(parser, (int)got, got == 0) == XML_STATUS_ERROR) {
+      *line = (int)XML_GetCurrentLineNumber(parser);
+      bad = 1;
+      break;
+    }
+    if (got == 0) {
+      break;
+    }
+  }
+  XML_ParserFree(parser);
+  if (!mz_zip_reader_extract_iter_free(it) && bad == 0) {
+    bad = 2;
+  }
+  return bad;
+}
+
+static void copy_name(char *out, size_t outlen, const char *name) {
+  size_t n = strlen(name);
+  if (n >= outlen) n = outlen - 1;
+  memcpy(out, name, n);
+  out[n] = '\0';
+}
+
+/* Which part, if any, is not well-formed XML.
+ *
+ * Asked only once a workbook has already failed to declare a worksheet, so
+ * the cost is irrelevant and the answer is the difference between "this file
+ * is not a workbook" and "xl/workbook.xml is broken at line 4". xlsxio does
+ * not report why its parse produced nothing, but Expat and miniz are both
+ * linked here directly, so the question can be asked without it. */
 static int first_malformed_part(const char *file, const uint8_t *zbuf,
                                 size_t zlen, char *out, size_t outlen,
                                 int *line) {
@@ -506,59 +575,58 @@ static int first_malformed_part(const char *file, const uint8_t *zbuf,
   if (!zip_open(&zip, file, zbuf, zlen)) {
     return 0;
   }
-  for (i = 0; i < sizeof(PARTS) / sizeof(PARTS[0]); i++) {
+  for (i = 0; i < sizeof(PARTS) / sizeof(PARTS[0]) && !found; i++) {
     mz_uint32 index;
-    mz_zip_reader_extract_iter_state *it;
-    XML_Parser parser;
-    int bad = 0;
-
-    if (!locate_part(&zip, PARTS[i], &index)) {
-      continue;
-    }
-    /* Streamed, as the reader streams it, rather than extracted whole: a
-       member's declared size is the archive's word, not a bound. */
-    it = mz_zip_reader_extract_iter_new(&zip, index, 0);
-    if (it == NULL) {
-      continue;
-    }
-    parser = XML_ParserCreate(NULL);
-    if (parser == NULL) {
-      mz_zip_reader_extract_iter_free(it);
-      continue;
-    }
-    for (;;) {
-      void *chunk = XML_GetBuffer(parser, 65536);
-      size_t got;
-      if (chunk == NULL) {
-        break;
-      }
-      got = mz_zip_reader_extract_iter_read(it, chunk, 65536);
-      if (XML_ParseBuffer(parser, (int)got, got == 0) == XML_STATUS_ERROR) {
-        bad = 1;
-        break;
-      }
-      if (got == 0) {
-        break;
-      }
-    }
-    mz_zip_reader_extract_iter_free(it);
-    if (bad) {
-      size_t n = strlen(PARTS[i]);
-      if (n >= outlen) {
-        n = outlen - 1;
-      }
-      memcpy(out, PARTS[i], n);
-      out[n] = '\0';
-      *line = (int)XML_GetCurrentLineNumber(parser);
+    if (locate_part(&zip, PARTS[i], &index) && check_part(&zip, index, line) == 1) {
+      copy_name(out, outlen, PARTS[i]);
       found = 1;
-    }
-    XML_ParserFree(parser);
-    if (found) {
-      break;
     }
   }
   mz_zip_reader_end(&zip);
   return found;
+}
+
+/* The first damaged part among those xlsxio reads to find the worksheets:
+   the content types, the workbook part and its relationships. Only those:
+   a part xlsxio never reads -- the package's root _rels/.rels, a drawing's
+   relationships -- cannot change what is read, and refusing a workbook
+   over one would make intact data unreadable. Patches
+   0008 to 0010 check the worksheet, shared-string and styles parts as they
+   are read; these go through xlsxio paths that report nothing -- a damaged
+   relationship part just leaves a worksheet unfound, which reads as empty
+   -- so they are checked here, once, while listing, which every reader does
+   first. All are small, so this does not cost what reading a worksheet
+   would. Returns STATUS_XML (with the line) or STATUS_PART_ZIP, naming the
+   part in `out`, or NULL. */
+static const char *damaged_listing_part(const char *file, const uint8_t *buf,
+                                        size_t len, char *out, size_t outlen,
+                                        int *line) {
+  mz_zip_archive zip;
+  mz_uint count, i;
+  const char *why = NULL;
+
+  if (!zip_open(&zip, file, buf, len)) {
+    return NULL;
+  }
+  count = mz_zip_reader_get_num_files(&zip);
+  for (i = 0; i < count && why == NULL; i++) {
+    char name[MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE];
+    mz_uint got = mz_zip_reader_get_filename(&zip, i, name, sizeof(name));
+    int st;
+    if (got == 0 || got > sizeof(name)) continue;
+    if (!(strcmp(name, "[Content_Types].xml") == 0 ||
+          strcmp(name, "xl/workbook.xml") == 0 ||
+          strcmp(name, "xl/_rels/workbook.xml.rels") == 0)) {
+      continue;
+    }
+    st = check_part(&zip, i, line);
+    if (st == 1 || st == 2) {
+      copy_name(out, outlen, name);
+      why = st == 1 ? STATUS_XML : STATUS_PART_ZIP;
+    }
+  }
+  mz_zip_reader_end(&zip);
+  return why;
 }
 
 SEXP C_xlsx_sheets(SEXP path, SEXP password) {
@@ -656,6 +724,23 @@ SEXP C_xlsx_sheets(SEXP path, SEXP password) {
     }
     UNPROTECT(2);
     return result(why, R_NilValue);
+  }
+  {
+    char part[MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE];
+    int line = 0;
+    const char *why = damaged_listing_part(file, plain->data, plain->len,
+                                           part, sizeof(part), &line);
+    if (why != NULL) {
+      const char *fields[] = {"part", "line", ""};
+      sheet_list_finalizer(bag);
+      plain_buf_finalizer(holder);
+      detail = PROTECT(Rf_mkNamed(VECSXP, fields));
+      SET_VECTOR_ELT(detail, 0, Rf_mkString(part));
+      SET_VECTOR_ELT(detail, 1, Rf_ScalarInteger(why == STATUS_XML ? line : 0));
+      res = PROTECT(result(why, detail));
+      UNPROTECT(4);
+      return res;
+    }
   }
   plain_buf_finalizer(holder);
 
@@ -993,10 +1078,19 @@ static void reader_handle_finalizer(SEXP ptr) {
    NULL if the worksheet was read in full, otherwise the status to report,
    with the XML line in *line. A worksheet that ends early looks exactly like
    one that ends, so without this a damaged one reads as a short one. */
-static const char *sheet_end_status(xlsxioreadersheet worksheet, int *line) {
+static const char *sheet_end_status(xlsxioreadersheet worksheet, int *line,
+                                    char *part, size_t partlen) {
   unsigned long at = 0;
   int why = xlsxioread_sheet_finish(worksheet, &at);
+  const char *name = xlsxioread_sheet_error_part(worksheet);
+  size_t n = strlen(name);
+
   *line = at > (unsigned long)INT_MAX ? 0 : (int)at;
+  /* Copied out: the name lives in the sheet handle, which is closed before
+     the failure is reported. */
+  if (n >= partlen) n = partlen - 1;
+  memcpy(part, name, n);
+  part[n] = '\0';
   switch (why) {
     case XLSXIOREAD_SHEET_ERROR_NONE:
       return NULL;
@@ -1006,23 +1100,87 @@ static const char *sheet_end_status(xlsxioreadersheet worksheet, int *line) {
       return STATUS_SHEET_SHARED;
     case XLSXIOREAD_SHEET_ERROR_ZIP:
       return STATUS_SHEET_ZIP;
+    /* The shared-string table or the styles part, read before the worksheet
+       and damaged: reported by its own name, which is what is broken. */
+    case XLSXIOREAD_SHEET_ERROR_PART_XML:
+      return STATUS_XML;
+    case XLSXIOREAD_SHEET_ERROR_PART_ZIP:
+      return STATUS_PART_ZIP;
     default:
       return STATUS_SHEET_XML;
   }
 }
 
 /* The result for a worksheet that could not be read in full. Allocates, so it
-   is only called once nothing but R-owned memory is held. */
-static SEXP sheet_failure(const char *status, const char *sheetname, int line) {
-  const char *fields[] = {"sheet", "line", ""};
-  SEXP detail = PROTECT(Rf_mkNamed(VECSXP, fields));
-  SEXP name = PROTECT(Rf_mkCharCE(sheetname, CE_UTF8));
+   is only called once nothing but R-owned memory is held. A failure in a
+   part read first names that part; one in the worksheet names the sheet. */
+static SEXP sheet_failure(const char *status, const char *sheetname,
+                          const char *part, int line) {
+  int about_part = (status == STATUS_XML || status == STATUS_PART_ZIP);
+  const char *sheet_fields[] = {"sheet", "line", ""};
+  const char *part_fields[] = {"part", "line", ""};
+  SEXP detail = PROTECT(Rf_mkNamed(VECSXP, about_part ? part_fields : sheet_fields));
+  SEXP name = PROTECT(Rf_mkCharCE(about_part ? part : sheetname, CE_UTF8));
   SEXP res;
   SET_VECTOR_ELT(detail, 0, Rf_ScalarString(name));
   SET_VECTOR_ELT(detail, 1, Rf_ScalarInteger(line));
   res = result(status, detail);
   UNPROTECT(2);
   return res;
+}
+
+/* Interrupts while a reader is open (#42).
+ *
+ * A whole-sheet read is one .Call, so without a check it cannot be stopped.
+ * R_CheckUserInterrupt() longjmps, though, and the reader, the worksheet,
+ * the plaintext and the cells gathered so far would be left for the garbage
+ * collector -- or, for the two xlsxio handles on the C stack, leaked. So the
+ * check runs under R_UnwindProtect, whose cleanup closes them all at the
+ * point the interrupt (or a setTimeLimit() limit) unwinds.
+ *
+ * The continuation is made when the cell bag is, before any reader opens,
+ * and kept in the bag's protected slot: so a check never allocates while
+ * something only the C stack owns is open. */
+#define INTERRUPT_ROWS 1000
+
+typedef struct {
+  xlsxioreader *reader;      /* on the C stack, or NULL */
+  xlsxioreadersheet *sheet;  /* on the C stack, or NULL */
+  SEXP plain;                /* a plain_buf holder, or R_NilValue */
+  SEXP handle;               /* a reader_handle holder, or R_NilValue */
+  SEXP bag;                  /* the cell bag, which holds the continuation */
+} read_owner;
+
+static SEXP interrupt_body(void *unused) {
+  (void) unused;
+  R_CheckUserInterrupt();
+  return R_NilValue;
+}
+
+static void read_owner_cleanup(void *data, Rboolean jump) {
+  read_owner *o = (read_owner *) data;
+  if (!jump) return;
+  if (o->sheet != NULL && *o->sheet != NULL) {
+    xlsxioread_sheet_close(*o->sheet);
+    *o->sheet = NULL;
+  }
+  if (o->reader != NULL && *o->reader != NULL) {
+    xlsxioread_close(*o->reader);
+    *o->reader = NULL;
+  }
+  if (o->handle != R_NilValue) reader_handle_finalizer(o->handle);
+  if (o->plain != R_NilValue) plain_buf_finalizer(o->plain);
+  cell_list_finalizer(o->bag);
+}
+
+/* Gives the bag its continuation. Allocates: called before a reader opens. */
+static void read_owner_prepare(SEXP bag) {
+  R_SetExternalPtrProtected(bag, R_MakeUnwindCont());
+}
+
+static void check_interrupt(read_owner *o) {
+  R_UnwindProtect(interrupt_body, NULL, read_owner_cleanup, o,
+                  R_ExternalPtrProtected(o->bag));
 }
 
 SEXP C_xlsx_cells(SEXP path, SEXP sheet, SEXP password) {
@@ -1040,6 +1198,7 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet, SEXP password) {
   int date1904 = 0;
   const char *end = NULL;
   int line = 0;
+  char part[128];
 
   if (TYPEOF(path) != STRSXP || XLENGTH(path) < 1 ||
       STRING_ELT(path, 0) == NA_STRING ||
@@ -1056,6 +1215,7 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet, SEXP password) {
   }
   bag = PROTECT(R_MakeExternalPtr(cells, R_NilValue, R_NilValue));
   R_RegisterCFinalizerEx(bag, cell_list_finalizer, TRUE);
+  read_owner_prepare(bag);
   holder = PROTECT(make_plain_holder());
   if (holder == R_NilValue) {
     cell_list_finalizer(bag);
@@ -1092,10 +1252,14 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet, SEXP password) {
   }
   date1904 = xlsxioread_sheet_date1904(worksheet);
 
+  read_owner owner = {&reader, &worksheet, holder, R_NilValue, bag};
   while (xlsxioread_sheet_next_row(worksheet)) {
     size_t colnr = 0;
     char *value;
     rownr++;
+    if (rownr % INTERRUPT_ROWS == 0) {
+      check_interrupt(&owner);
+    }
     /* NULL means end of row, not a blank cell: a blank arrives as a
        non-NULL empty string. Treating NULL as a value would never
        terminate the row. */
@@ -1119,7 +1283,7 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet, SEXP password) {
     }
   }
   if (!cells->oom) {
-    end = sheet_end_status(worksheet, &line);
+    end = sheet_end_status(worksheet, &line, part, sizeof(part));
   }
   xlsxioread_sheet_close(worksheet);
   xlsxioread_close(reader);
@@ -1132,7 +1296,7 @@ SEXP C_xlsx_cells(SEXP path, SEXP sheet, SEXP password) {
   }
   if (end != NULL) {
     cell_list_finalizer(bag);
-    res = sheet_failure(end, sheetname, line);
+    res = sheet_failure(end, sheetname, part, line);
     UNPROTECT(2);
     return res;
   }
@@ -1223,6 +1387,7 @@ SEXP C_xlsx_read_cells(SEXP path, SEXP sheet, SEXP callback, SEXP env,
   int stopped = 0;
   const char *end = NULL;
   int line = 0;
+  char part[128];
 
   if (TYPEOF(path) != STRSXP || XLENGTH(path) < 1 ||
       STRING_ELT(path, 0) == NA_STRING ||
@@ -1261,6 +1426,7 @@ SEXP C_xlsx_read_cells(SEXP path, SEXP sheet, SEXP callback, SEXP env,
   }
   bag = PROTECT(R_MakeExternalPtr(cells, R_NilValue, R_NilValue));
   R_RegisterCFinalizerEx(bag, cell_list_finalizer, TRUE);
+  read_owner_prepare(bag);
 
   handle = (reader_handle *)calloc(1, sizeof(reader_handle));
   if (handle == NULL) {
@@ -1295,10 +1461,14 @@ SEXP C_xlsx_read_cells(SEXP path, SEXP sheet, SEXP callback, SEXP env,
   }
   date1904 = xlsxioread_sheet_date1904(handle->sheet);
 
+  read_owner owner = {NULL, NULL, R_NilValue, holder, bag};
   while (!stopped && xlsxioread_sheet_next_row(handle->sheet)) {
     size_t colnr = 0;
     char *value;
     rownr++;
+    if (rownr % INTERRUPT_ROWS == 0) {
+      check_interrupt(&owner);
+    }
     while ((value = xlsxioread_sheet_next_cell(handle->sheet)) != NULL) {
       double num;
       int type = classify_cell(xlsxioread_sheet_last_cell_type(handle->sheet),
@@ -1330,10 +1500,10 @@ SEXP C_xlsx_read_cells(SEXP path, SEXP sheet, SEXP callback, SEXP env,
   }
   /* Chunks already delivered stay delivered, but a worksheet that turns out
      to be damaged is still reported rather than ending quietly. */
-  if (!stopped && (end = sheet_end_status(handle->sheet, &line)) != NULL) {
+  if (!stopped && (end = sheet_end_status(handle->sheet, &line, part, sizeof(part))) != NULL) {
     reader_handle_finalizer(holder);
     cell_list_finalizer(bag);
-    res = sheet_failure(end, sheetname, line);
+    res = sheet_failure(end, sheetname, part, line);
     UNPROTECT(3);
     return res;
   }
@@ -1363,8 +1533,8 @@ SEXP C_xlsx_read_cells(SEXP path, SEXP sheet, SEXP callback, SEXP env,
  * each cell as it was written, because the text is still here in C when the
  * decision is made.
  *
- * The type rules mirror R's build_column() exactly, and the two are held
- * together by the same tests rather than by inspection. */
+ * The rules are the ones ?read_xlsx documents, and the tests in
+ * test-read.R hold them. */
 
 #define TYPEMASK(t) (1u << (t))
 
@@ -1410,6 +1580,7 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
   int *kind = NULL;
   const char *end = NULL;
   int line = 0;
+  char part[128];
 
   if (TYPEOF(path) != STRSXP || XLENGTH(path) < 1 ||
       STRING_ELT(path, 0) == NA_STRING ||
@@ -1463,6 +1634,7 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
   }
   bag = PROTECT(R_MakeExternalPtr(cells, R_NilValue, R_NilValue));
   R_RegisterCFinalizerEx(bag, cell_list_finalizer, TRUE);
+  read_owner_prepare(bag);
 
   /* No R allocation until xlsxioread_close(). */
   reader = open_reader(file, plain);
@@ -1482,10 +1654,14 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
   }
   date1904 = xlsxioread_sheet_date1904(worksheet);
 
+  read_owner owner = {&reader, &worksheet, holder, R_NilValue, bag};
   while (xlsxioread_sheet_next_row(worksheet)) {
     size_t colnr = 0;
     char *value;
     rownr++;
+    if (rownr % INTERRUPT_ROWS == 0) {
+      check_interrupt(&owner);
+    }
     while ((value = xlsxioread_sheet_next_cell(worksheet)) != NULL) {
       double num;
       int type = classify_cell(xlsxioread_sheet_last_cell_type(worksheet),
@@ -1513,7 +1689,7 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
     }
   }
   if (!cells->oom) {
-    end = sheet_end_status(worksheet, &line);
+    end = sheet_end_status(worksheet, &line, part, sizeof(part));
   }
   xlsxioread_sheet_close(worksheet);
   xlsxioread_close(reader);
@@ -1526,7 +1702,7 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
   }
   if (end != NULL) {
     cell_list_finalizer(bag);
-    res = sheet_failure(end, sheetname, line);
+    res = sheet_failure(end, sheetname, part, line);
     UNPROTECT(2);
     return res;
   }
@@ -1544,16 +1720,46 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
     }
   }
 
-  /* A range asks for its own rectangle whether or not cells fill it; without
-     one the extent is whatever the worksheet used. Rows are spanned rather
-     than taken from the rows that carry a cell, so an omitted row stays a
-     row -- see R's build_column() for why that matters. */
-  first_row = (double)cells->row[0];
-  last_row = first_row;
-  for (i = 0; i < cells->n; i++) {
-    if ((double)cells->row[i] < first_row) first_row = (double)cells->row[i];
-    if ((double)cells->row[i] > last_row) last_row = (double)cells->row[i];
-    if (cells->col[i] > ncol) ncol = cells->col[i];
+  /* A range asks for its own rectangle whether or not cells fill it.
+     Without one the table is the rectangle its non-blank cells span, as in
+     readxl: blank cells do not count, because xlsxio pads blanks the file
+     never wrote -- one cell above a table that starts at row 3 or below,
+     which used to become the header row (#40) -- and a sheet styled far
+     past its data has blank cells there. Leading and trailing empty rows,
+     and leading empty columns, are therefore dropped. Inside the span rows
+     are spanned rather than taken from the rows that carry a cell, so an
+     omitted row stays a row. */
+  if (ISNA(min_row) && ISNA(min_col)) {
+    size_t lo_col = 0, hi_col = 0;
+    int any = 0;
+    for (i = 0; i < cells->n; i++) {
+      double r = (double)cells->row[i];
+      if (cells->type[i] == ZU_CELL_BLANK) continue;
+      if (!any || r < first_row) first_row = r;
+      if (!any || r > last_row) last_row = r;
+      if (!any || cells->col[i] < lo_col) lo_col = cells->col[i];
+      if (!any || cells->col[i] > hi_col) hi_col = cells->col[i];
+      any = 1;
+    }
+    if (!any) {
+      cell_list_finalizer(bag);
+      UNPROTECT(2);
+      return result(STATUS_OK, R_NilValue);
+    }
+    /* Columns are renumbered from the first non-blank one; a cell left of
+       it gets column 0, which every loop below skips. */
+    for (i = 0; i < cells->n; i++) {
+      cells->col[i] = cells->col[i] < lo_col ? 0 : cells->col[i] - (lo_col - 1);
+    }
+    ncol = hi_col - lo_col + 1;
+  } else {
+    first_row = (double)cells->row[0];
+    last_row = first_row;
+    for (i = 0; i < cells->n; i++) {
+      if ((double)cells->row[i] < first_row) first_row = (double)cells->row[i];
+      if ((double)cells->row[i] > last_row) last_row = (double)cells->row[i];
+      if (cells->col[i] > ncol) ncol = cells->col[i];
+    }
   }
   if (!ISNA(min_row)) {
     first_row = 1;
@@ -1571,7 +1777,9 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
   kind = (int *)R_alloc(ncol, sizeof(int));
   memset(mask, 0, ncol * sizeof(unsigned int));
   for (i = 0; i < cells->n; i++) {
-    if (cells->row[i] < body_first || cells->type[i] == ZU_CELL_BLANK) {
+    if (cells->row[i] < body_first || cells->row[i] > (size_t)last_row ||
+        cells->type[i] == ZU_CELL_BLANK || cells->col[i] == 0 ||
+        cells->col[i] > ncol) {
       continue;
     }
     mask[cells->col[i] - 1] |= TYPEMASK(cells->type[i]);
@@ -1610,7 +1818,7 @@ SEXP C_read_xlsx(SEXP path, SEXP sheet, SEXP col_names, SEXP bounds,
     size_t c = cells->col[i] - 1;
     SEXP col;
     R_xlen_t at;
-    if (c >= ncol) {
+    if (cells->col[i] == 0 || c >= ncol) {
       continue;
     }
     if (header && cells->row[i] == (size_t)first_row) {
@@ -1672,7 +1880,9 @@ SEXP C_zuxlsx_native(void) {
      while the archive is not would still compile, and this is what makes
      that fail at link time instead. */
   SET_VECTOR_ELT(out, 1, Rf_mkString(XML_ExpatVersion()));
-  SET_VECTOR_ELT(out, 2, Rf_mkString(MZ_VERSION));
+  /* And into libzukomp.a, for the same reason; MZ_VERSION is only what the
+     header says. */
+  SET_VECTOR_ELT(out, 2, Rf_mkString(mz_version()));
   /* The same for libzucrypt.a: zucrypt.h carries no backend version at all,
      so this can only come from the archive. NA if zuc_init() failed when the
      DLL loaded, which is then also what every decryption reports. */

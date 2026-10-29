@@ -14,6 +14,7 @@ STATUS_CLASSES <- list(
   sheet_range = "zuxlsx_ooxml_error",
   sheet_shared_string = "zuxlsx_ooxml_error",
   sheet_zip = "zuxlsx_zip_error",
+  part_zip = "zuxlsx_zip_error",
   format_encrypted = c("zuxlsx_encrypted_error", "zuxlsx_unsupported_format_error"),
   format_xls = "zuxlsx_unsupported_format_error",
   format_ole2 = "zuxlsx_unsupported_format_error",
@@ -41,6 +42,7 @@ STATUS_CLASSES <- list(
 status_value <- function(status) {
   switch(status,
     xml_malformed = list(part = "xl/workbook.xml", line = 4L),
+    part_zip = list(part = "xl/sharedStrings.xml", line = 0L),
     sheet_xml = ,
     sheet_range = ,
     sheet_shared_string = ,

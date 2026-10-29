@@ -1,6 +1,5 @@
-# The cell type codes C_xlsx_cells returns, in the order design section 13
-# lists them. Kept in one place; must match the ZU_CELL_* enum in
-# src/zuxlsx.c, which test-cells.R checks.
+# The cell type codes C_xlsx_cells returns, indexed by the ZU_CELL_* enum in
+# src/zuxlsx.c. Kept in one place; test-cells.R checks the two agree.
 CELL_TYPES <- c("blank", "number", "string", "boolean", "error", "date")
 
 #' Read the cells of a worksheet
@@ -12,6 +11,11 @@ CELL_TYPES <- c("blank", "number", "string", "boolean", "error", "date")
 #'
 #' @param sheet The worksheet to read: either its name, or its position in the
 #'   workbook.
+#'
+#' Cells the worksheet leaves out between the ones it writes come back as
+#' `"blank"`, and so may a few the file never names: the reader pads to keep
+#' positions aligned. [read_xlsx()] ignores blank cells when it decides where
+#' a table starts and ends.
 #'
 #' @return A data frame with one row per cell and the columns:
 #'   \describe{

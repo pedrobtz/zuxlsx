@@ -268,3 +268,87 @@ test_that("a worksheet that breaks off is reported after the chunks before it", 
   )
   expect_gte(seen, 2L)
 })
+
+test_that("a damaged shared-string table or styles part is an error naming it", {
+  # Both are read before the worksheet. Damaged, they used to load as far as
+  # the damage and no further: strings went missing or wrong, and a styles
+  # part cut short turned dates into plain numbers.
+  with_part <- function(name, contents, declared_crc = NULL) {
+    path <- withr::local_tempfile(fileext = ".xlsx", .local_envir = parent.frame())
+    parts <- styled_workbook_parts(
+      c('<c r="A1" t="s"><v>0</v></c>', num("B1", 45324, s = 1)),
+      formats = c(0L, 14L)
+    )
+    parts[["xl/sharedStrings.xml"]] <- paste0(
+      '<?xml version="1.0"?>',
+      '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
+      "<si><t>zero</t></si></sst>"
+    )
+    parts[["xl/_rels/workbook.xml.rels"]] <- sub(
+      "</Relationships>",
+      paste0(
+        '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/',
+        'officeDocument/2006/relationships/sharedStrings" ',
+        'Target="sharedStrings.xml"/></Relationships>'
+      ),
+      parts[["xl/_rels/workbook.xml.rels"]],
+      fixed = TRUE
+    )
+    if (!is.null(contents)) parts[[name]] <- contents
+    entries <- lapply(names(parts), function(n) {
+      zip_entry(n, parts[[n]], declared_crc = if (n == name) declared_crc)
+    })
+    write_zip(path, entries)
+    path
+  }
+
+  intact <- with_part("xl/sharedStrings.xml", NULL)
+  cells <- xlsx_cells(intact)
+  expect_identical(cells$value[1], "zero")
+  expect_identical(as.character(cells$type[2]), "date")
+
+  truncated_strings <- with_part(
+    "xl/sharedStrings.xml",
+    '<?xml version="1.0"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>zero</t></si><si><t>on'
+  )
+  broken_styles <- with_part(
+    "xl/styles.xml",
+    '<?xml version="1.0"?><styleSheet><cellXfs count="2"><xf numFmtId="0"/><xf numFmtId="14"'
+  )
+  for (path in c(truncated_strings, broken_styles)) {
+    cond <- tryCatch(xlsx_cells(path), error = identity)
+    expect_s3_class(cond, "zuxlsx_xml_error")
+    expect_error(read_xlsx(path), class = "zuxlsx_xml_error")
+  }
+  expect_identical(
+    .Call(C_xlsx_cells, normalizePath(truncated_strings), "Sheet1", NULL)$value$part,
+    "xl/sharedStrings.xml"
+  )
+  expect_identical(
+    .Call(C_xlsx_cells, normalizePath(broken_styles), "Sheet1", NULL)$value$part,
+    "xl/styles.xml"
+  )
+
+  bad_crc <- with_part("xl/sharedStrings.xml", NULL, declared_crc = as.raw(c(0, 0, 0, 0)))
+  expect_error(xlsx_cells(bad_crc), class = "zuxlsx_zip_error")
+  expect_identical(
+    .Call(C_xlsx_cells, normalizePath(bad_crc), "Sheet1", NULL)$status, "part_zip"
+  )
+})
+
+test_that("a flipped byte in a deflated worksheet is an error", {
+  # The third damage #38 reproduced: bytes changed inside the DEFLATE stream
+  # used to end the worksheet early, as if it were complete.
+  path <- withr::local_tempfile(fileext = ".xlsx")
+  parts <- grid_workbook(200L, 5L)
+  entries <- lapply(names(parts), function(n) zip_entry(n, parts[[n]], deflate = TRUE))
+  sheet <- which(names(parts) == "xl/worksheets/sheet1.xml")
+  data <- entries[[sheet]]$data
+  mid <- length(data) %/% 2L
+  data[mid + 0:7] <- xor(data[mid + 0:7], as.raw(0xFF))
+  entries[[sheet]]$data <- data
+  write_zip(path, entries)
+
+  cond <- tryCatch(read_xlsx(path, col_names = FALSE), error = identity)
+  expect_true(inherits(cond, "zuxlsx_zip_error") || inherits(cond, "zuxlsx_xml_error"))
+})

@@ -1,14 +1,15 @@
 #' Read a worksheet into a data frame
 #'
 #' Reads a worksheet and assembles its cells into columns, giving each column
-#' the type its cells support. This is the high-level reader; [xlsx_cells()] is
-#' the cell-by-cell view underneath it.
+#' the type its cells support. This is the high-level reader; [xlsx_cells()]
+#' gives the same worksheet cell by cell.
 #'
-#' A worksheet may leave a row out of its XML rather than write an empty one.
-#' Such a row is kept, as a row of `NA`, wherever it falls -- including
-#' directly beneath the header. Keeping every blank row is easier to predict
-#' than keeping only the interior ones, and `range` is the way to begin
-#' further down the sheet.
+#' Without `range`, the table is the rectangle its non-blank cells span:
+#' empty rows above and below it, and empty columns either side, are not
+#' part of it, so a table that starts at `B3` reads with its header from row
+#' 3. Inside that rectangle a worksheet may leave a row out of its XML rather
+#' than write an empty one; such a row is kept, as a row of `NA`, wherever it
+#' falls -- including directly beneath the header.
 #'
 #' Column types are inferred by promotion. A column of blanks is logical, one
 #' of booleans stays logical, numbers give a double, and anything that mixes

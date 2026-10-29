@@ -26,9 +26,10 @@ test_that("internal entities are not expanded", {
   )
   write_workbook(path, parts)
 
-  sheets <- xlsx_sheets(path)
-  # The reference survives verbatim rather than becoming 10000 characters.
-  expect_identical(sheets, "&d;")
+  # Not expanded, and not read either: no part of a workbook carries a
+  # DOCTYPE, so one is refused outright (#47). It used to come back as the
+  # literal reference "&d;".
+  expect_error(xlsx_sheets(path), class = "zuxlsx_xml_error")
 })
 
 test_that("external entities are not resolved off disk", {
@@ -47,9 +48,43 @@ test_that("external entities are not resolved off disk", {
   )
   write_workbook(path, parts)
 
-  sheets <- xlsx_sheets(path)
-  expect_false(any(grepl("CANARY", sheets, fixed = TRUE)))
-  expect_identical(sheets, "&x;")
+  cond <- tryCatch(xlsx_sheets(path), error = identity)
+  expect_s3_class(cond, "zuxlsx_xml_error")
+  expect_false(grepl("CANARY", conditionMessage(cond), fixed = TRUE))
+})
+
+test_that("a DOCTYPE is refused in every part, not only the workbook", {
+  # An internal subset declaring an entity, then a reference to it. Under
+  # zuxml's XML_GE 0 the entity is not expanded, so before #47 the reference
+  # reached the cell as the literal text "&e;".
+  doctype <- '<!DOCTYPE x [<!ENTITY e "expanded">]>'
+  ns <- 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+  part_with_doctype <- function(name, body) {
+    path <- withr::local_tempfile(fileext = ".xlsx", .local_envir = parent.frame())
+    parts <- styled_workbook_parts(c('<c r="A1" t="s"><v>0</v></c>', txt("B1", "&e;")))
+    parts[["xl/sharedStrings.xml"]] <- paste0(
+      '<?xml version="1.0"?><sst ', ns, "><si><t>zero</t></si></sst>"
+    )
+    parts[["xl/_rels/workbook.xml.rels"]] <- sub(
+      "</Relationships>",
+      paste0(
+        '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/',
+        'officeDocument/2006/relationships/sharedStrings" ',
+        'Target="sharedStrings.xml"/></Relationships>'
+      ),
+      parts[["xl/_rels/workbook.xml.rels"]],
+      fixed = TRUE
+    )
+    parts[[name]] <- sub("?>", paste0("?>", doctype), parts[[name]], fixed = TRUE)
+    write_workbook(path, parts)
+    path
+  }
+  for (name in c("xl/worksheets/sheet1.xml", "xl/sharedStrings.xml",
+                 "xl/styles.xml", "xl/_rels/workbook.xml.rels",
+                 "[Content_Types].xml")) {
+    path <- part_with_doctype(name)
+    expect_error(xlsx_cells(path), class = "zuxlsx_xml_error", info = name)
+  }
 })
 
 test_that("a duplicated archive member resolves to the first one, always", {
@@ -117,14 +152,10 @@ test_that("a sheet whose relationship is dangling is still named", {
   expect_identical(xlsx_sheets(path), "Orphan")
 })
 
-test_that("KNOWN GAP: a corrupt CRC-32 is not detected", {
-  # Characterization, not endorsement. miniz's extract-iter path does not
-  # verify the checksum, so a member whose bytes were corrupted in transit is
-  # parsed as if intact. Design section 16 lists corrupt archives among the
-  # things to defend against; nothing does so yet.
-  #
-  # When CRC validation is added this test SHOULD fail. Replace it with an
-  # expect_error(class = "zuxlsx_zip_error") at that point.
+test_that("a corrupt CRC-32 on the workbook part is a ZIP error", {
+  # Was a pinned KNOWN GAP: miniz's extract-iterator path does not check the
+  # checksum, so a member corrupted in transit parsed as if intact. Listing
+  # now validates the parts it reads, and every reader lists first.
   path <- withr::local_tempfile(fileext = ".xlsx")
   parts <- workbook_parts()
   entries <- lapply(names(parts), function(n) zip_entry(n, parts[[n]]))
@@ -135,7 +166,10 @@ test_that("KNOWN GAP: a corrupt CRC-32 is not detected", {
   )
   write_zip(path, entries)
 
-  expect_identical(xlsx_sheets(path), "CRCBAD")
+  expect_error(xlsx_sheets(path), class = "zuxlsx_zip_error")
+  expect_error(read_xlsx(path), class = "zuxlsx_zip_error")
+  expect_identical(.Call(C_xlsx_sheets, normalizePath(path), NULL)$value$part,
+                   "xl/workbook.xml")
 })
 
 test_that("members differing only in case or separator still resolve first-first", {
@@ -290,8 +324,7 @@ test_that("a shared-string index that does not resolve is an error, not a blank"
 })
 
 test_that("a worksheet whose CRC-32 does not match is a ZIP error", {
-  # The workbook part's checksum is the KNOWN GAP above; a worksheet's is
-  # checked when the worksheet has been read to its end.
+  # A worksheet's checksum is checked when it has been read to its end.
   path <- withr::local_tempfile(fileext = ".xlsx")
   parts <- workbook_parts()
   entries <- lapply(names(parts), function(n) zip_entry(n, parts[[n]]))
@@ -367,4 +400,49 @@ test_that("a deflated worksheet reads like a stored one", {
   write_workbook(stored, parts)
   expect_identical(read_xlsx(path, col_names = FALSE),
                    read_xlsx(stored, col_names = FALSE))
+})
+
+test_that("a long read can be interrupted, and leaves nothing open", {
+  # The reader checks for an interrupt every thousand rows. An elapsed-time
+  # limit is signalled at the same check, so it stands in for Ctrl-C here
+  # (#42). The cleanup closes the reader as the error unwinds; that nothing
+  # leaked is for valgrind and ASan to show, and a clean read afterwards is
+  # what R can see.
+  skip_on_cran()
+  skip_if_light()
+  n <- 600000L
+  sheet <- charToRaw(paste0(
+    '<?xml version="1.0"?>',
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
+    "<sheetData>",
+    paste0('<row r="', seq_len(n), '"><c r="A', seq_len(n), '"><v>',
+           seq_len(n), "</v></c></row>", collapse = ""),
+    "</sheetData></worksheet>"
+  ))
+  path <- withr::local_tempfile(fileext = ".xlsx")
+  parts <- workbook_parts()
+  entries <- lapply(names(parts), function(nm) zip_entry(nm, parts[[nm]]))
+  at <- which(names(parts) == "xl/worksheets/sheet1.xml")
+  # CRC left wrong (computing it in R is slow): the read is stopped long
+  # before the end, where the checksum would be compared.
+  entries[[at]] <- zip_entry("xl/worksheets/sheet1.xml", sheet,
+                             declared_crc = as.raw(c(0, 0, 0, 0)), deflate = TRUE)
+  write_zip(path, entries)
+
+  for (reader in list(
+    function() read_xlsx(path),
+    function() xlsx_cells(path),
+    function() xlsx_read_cells(path, 1, function(cells) NULL)
+  )) {
+    elapsed <- system.time(expect_error(local({
+      setTimeLimit(elapsed = 0.1, transient = TRUE)
+      on.exit(setTimeLimit(elapsed = Inf))
+      reader()
+    }), "time limit"))[["elapsed"]]
+    expect_lt(elapsed, 5)
+  }
+
+  small <- withr::local_tempfile(fileext = ".xlsx")
+  write_workbook(small, grid_workbook(3L, 3L))
+  expect_identical(dim(read_xlsx(small, col_names = FALSE)), c(3L, 3L))
 })

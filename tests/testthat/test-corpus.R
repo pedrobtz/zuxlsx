@@ -61,7 +61,9 @@ test_that("a worksheet with only a header row keeps its names and no rows", {
 test_that("inline strings are read without a shared string table", {
   # inlineStr.xlsx has no xl/sharedStrings.xml part at all.
   out <- read_xlsx(path_to("inlineStr.xlsx"))
-  expect_identical(dim(out), c(1L, 9L))
+  # Nine columns in the XML; the ninth is blank in every row, header
+  # included, so it is not part of the table (#40).
+  expect_identical(dim(out), c(1L, 8L))
   expect_identical(out$ID, "RQ11610")
   expect_identical(out$Name, "requirement")
   expect_identical(out$Type, "Textual Requirement")
