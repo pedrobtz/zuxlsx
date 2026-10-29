@@ -1,7 +1,11 @@
 # zuxlsx
 
 <!-- badges: start -->
+[![CRAN status](https://www.r-pkg.org/badges/version/zuxlsx)](https://CRAN.R-project.org/package=zuxlsx)
+[![Lifecycle: experimental](https://img.shields.io/badge/lifecycle-experimental-orange.svg)](https://lifecycle.r-lib.org/articles/stages.html#experimental)
 [![R-CMD-check](https://github.com/pedrobtz/zuxlsx/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/pedrobtz/zuxlsx/actions/workflows/R-CMD-check.yaml)
+[![native-checks](https://github.com/pedrobtz/zuxlsx/actions/workflows/native-checks.yaml/badge.svg)](https://github.com/pedrobtz/zuxlsx/actions/workflows/native-checks.yaml)
+[![coverage](https://raw.githubusercontent.com/pedrobtz/zuxlsx/main/.github/badges/coverage.svg)](https://github.com/pedrobtz/zuxlsx/actions/workflows/coverage.yaml)
 <!-- badges: end -->
 
 Read `.xlsx` workbooks from R, password-protected ones included, with no
