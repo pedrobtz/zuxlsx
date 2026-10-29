@@ -1,0 +1,105 @@
+# Read a worksheet in chunks
+
+Reads a worksheet a piece at a time, passing each piece to a function
+rather than returning the whole thing. This is the low-level streaming
+reader: use it when a worksheet is too large to hold, or when the answer
+can be found without reading all of it.
+
+## Usage
+
+``` r
+xlsx_stream_cells(
+  path,
+  sheet = 1,
+  callback,
+  chunk_size = 10000L,
+  password = NULL
+)
+```
+
+## Arguments
+
+- path:
+
+  Path to an `.xlsx` file.
+
+- sheet:
+
+  The worksheet to read: either its name, or its position in the
+  workbook.
+
+  Cells the worksheet leaves out between the ones it writes come back as
+  `"blank"`, and so may a few the file never names: the reader pads to
+  keep positions aligned.
+  [`xlsx_read()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_read.md)
+  ignores blank cells when it decides where a table starts and ends.
+
+- callback:
+
+  A function of one argument, called with each chunk of cells. Return
+  `FALSE` to stop reading.
+
+- chunk_size:
+
+  The least number of cells to gather before calling `callback`.
+
+- password:
+
+  The password of a password-protected workbook, or `NULL` (the default)
+  for one without. The workbook is decrypted in memory and never written
+  to disk. Agile encryption – what Excel has written since 2013 – is
+  supported; the older standard encryption is not, and is reported as
+  such. Ignored for a workbook that is not encrypted. R cannot erase a
+  string, so the password may stay in memory after the call.
+
+## Value
+
+`TRUE` if `callback` stopped the read, `FALSE` if the worksheet was read
+to the end. Returned invisibly.
+
+## Details
+
+`callback` is called with a data frame of cells in the shape
+[`xlsx_cells()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_cells.md)
+returns. Returning `FALSE` from it stops the read, leaving the rest of
+the worksheet unparsed; any other value continues.
+
+A chunk never splits a row, so a callback can rely on seeing every cell
+of a row together. `chunk_size` is therefore a lower bound rather than
+an exact count: a chunk ends at the first row boundary at or after it.
+
+## See also
+
+[`xlsx_cells()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_cells.md),
+which reads a whole worksheet at once, and
+[`xlsx_read()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_read.md),
+which builds columns from it.
+
+## Examples
+
+``` r
+path <- system.file("extdata", "two-sheets.xlsx", package = "zuxlsx")
+
+# Count the cells of each type without holding the worksheet.
+totals <- 0
+xlsx_stream_cells(path, 1, function(cells) {
+  totals <<- totals + table(cells$type)
+})
+totals
+#> 
+#>   blank  number  string boolean   error    date 
+#>       0       3       7       3       0       3 
+
+# Stop as soon as something is found. The rest of the sheet is not parsed.
+first <- NULL
+xlsx_stream_cells(path, 1, function(cells) {
+  hit <- cells[cells$type == "date", ]
+  if (nrow(hit) > 0) {
+    first <<- hit[1, ]
+    FALSE
+  }
+})
+first
+#>   row col type value number
+#> 8   2   4 date 45324  45324
+```

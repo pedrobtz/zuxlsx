@@ -10,7 +10,17 @@ of them.
 
 ### Reading
 
-- [`read_xlsx()`](https://pedrobtz.github.io/zuxlsx/reference/read_xlsx.md)
+- Every export is named `xlsx_*`:
+  [`xlsx_read()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_read.md),
+  [`xlsx_cells()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_cells.md),
+  [`xlsx_rows()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_rows.md),
+  [`xlsx_stream_cells()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_stream_cells.md),
+  [`xlsx_sheets()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_sheets.md)
+  and
+  [`xlsx_info()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_info.md).
+  No name masks a function of `readxl` or `openxlsx2`.
+
+- [`xlsx_read()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_read.md)
   reads a worksheet into a data frame, giving each column the type its
   cells support: logical, double, character, `Date` or `POSIXct`.
   `range` takes A1 notation and either corner may name a cell, a column
@@ -19,14 +29,14 @@ of them.
 - [`xlsx_cells()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_cells.md)
   returns one row per cell with its position, type, text and numeric
   value – the view underneath
-  [`read_xlsx()`](https://pedrobtz.github.io/zuxlsx/reference/read_xlsx.md),
+  [`xlsx_read()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_read.md),
   for worksheets that are not rectangular enough for a data frame.
 
 - [`xlsx_rows()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_rows.md)
   returns a worksheet row by row as text, from row 1, padded so that the
   nth element of each row is the nth column.
 
-- [`xlsx_read_cells()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_read_cells.md)
+- [`xlsx_stream_cells()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_stream_cells.md)
   reads a worksheet a chunk at a time, passing each chunk to a function.
   Returning `FALSE` stops the read, which is how a caller finds
   something near the top of a large worksheet without paying for the
@@ -34,7 +44,7 @@ of them.
 
 - [`xlsx_sheets()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_sheets.md)
   lists worksheets, and
-  [`zuxlsx_native()`](https://pedrobtz.github.io/zuxlsx/reference/zuxlsx_native.md)
+  [`xlsx_info()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_info.md)
   reports the ‘xlsxio’, ‘Expat’, ‘miniz’ and ‘TF-PSA-Crypto’ versions
   actually linked in.
 
@@ -96,7 +106,7 @@ of them.
   exist, its or its compressed data fails its checksum – is an error,
   never a shorter sheet.
 
-- A part carrying a DOCTYPE is an XML error: no workbook part has one,
+- A part carrying a `DOCTYPE` is an XML error: no workbook part has one,
   and an internal subset is how entities are declared.
 
 - A file that is a spreadsheet zuxlsx cannot read is reported as such

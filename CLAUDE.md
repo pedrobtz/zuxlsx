@@ -23,7 +23,7 @@ is filed as issues labelled `review`.
 
 What is exported:
 
-- `read_xlsx(path, sheet = 1, col_names = TRUE, range = NULL, password = NULL)`
+- `xlsx_read(path, sheet = 1, col_names = TRUE, range = NULL, password = NULL)`
   — a worksheet as a data frame. Column types are inferred by promotion:
   blanks are logical, booleans stay logical, numbers give a double,
   anything mixed or holding a string or a cell error becomes character,
@@ -32,18 +32,18 @@ What is exported:
   `"B2:D10"`, `"A:C"` and `"2:10"` all work.
 - `xlsx_cells(path, sheet = 1, password = NULL)` — one row per cell:
   position, type, text, numeric value. The view underneath
-  [`read_xlsx()`](https://pedrobtz.github.io/zuxlsx/reference/read_xlsx.md),
+  [`xlsx_read()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_read.md),
   for sheets that are not rectangular.
 - `xlsx_rows(path, sheet = 1, password = NULL)` — a worksheet row by row
   as text, padded so the nth element of each row is the nth column.
-- `xlsx_read_cells(path, sheet = 1, callback, chunk_size = 10000L, password = NULL)`
+- `xlsx_stream_cells(path, sheet = 1, callback, chunk_size = 10000L, password = NULL)`
   — chunked streaming read; returning `FALSE` stops it. **The only entry
   point that calls R while the archive and the parser are open**, which
   is why both are owned by external pointers with registered finalizers
   rather than by the C stack.
 - `xlsx_sheets(path, password = NULL)` — worksheet names, in workbook
   order.
-- [`zuxlsx_native()`](https://pedrobtz.github.io/zuxlsx/reference/zuxlsx_native.md)
+- [`xlsx_info()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_info.md)
   — reports `xlsxio` 0.2.36, `expat_2.8.4`, miniz `11.3.2`,
   TF-PSA-Crypto `1.1.1`. It calls `XML_ExpatVersion()`, `mz_version()`
   and `zuc_get_info()` rather than reading macros, so a header on the

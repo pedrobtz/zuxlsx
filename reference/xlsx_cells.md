@@ -3,7 +3,7 @@
 Reads a worksheet one cell at a time and returns them in a data frame,
 one row per cell. This is the low-level reader: it reports what is in
 each cell without assembling columns or guessing a type for them;
-[`read_xlsx()`](https://pedrobtz.github.io/zuxlsx/reference/read_xlsx.md)
+[`xlsx_read()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_read.md)
 does that.
 
 ## Usage
@@ -26,7 +26,7 @@ xlsx_cells(path, sheet = 1, password = NULL)
   Cells the worksheet leaves out between the ones it writes come back as
   `"blank"`, and so may a few the file never names: the reader pads to
   keep positions aligned.
-  [`read_xlsx()`](https://pedrobtz.github.io/zuxlsx/reference/read_xlsx.md)
+  [`xlsx_read()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_read.md)
   ignores blank cells when it decides where a table starts and ends.
 
 - password:

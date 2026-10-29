@@ -1,0 +1,120 @@
+# Read a worksheet into a data frame
+
+Reads a worksheet and assembles its cells into columns, giving each
+column the type its cells support. This is the high-level reader;
+[`xlsx_cells()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_cells.md)
+gives the same worksheet cell by cell.
+
+## Usage
+
+``` r
+xlsx_read(path, sheet = 1, col_names = TRUE, range = NULL, password = NULL)
+```
+
+## Arguments
+
+- path:
+
+  Path to an `.xlsx` file.
+
+- sheet:
+
+  The worksheet to read: either its name, or its position in the
+  workbook.
+
+  Cells the worksheet leaves out between the ones it writes come back as
+  `"blank"`, and so may a few the file never names: the reader pads to
+  keep positions aligned. `xlsx_read()` ignores blank cells when it
+  decides where a table starts and ends.
+
+- col_names:
+
+  Whether the first row holds column names. When `FALSE`, columns are
+  named `X1`, `X2` and so on. When `TRUE`, a column whose header cell is
+  blank is named `X` and its position, and repeated names are made
+  unique with [`make.unique()`](https://rdrr.io/r/base/make.unique.html)
+  and an underscore, so a second `id` becomes `id_1`.
+
+- range:
+
+  An A1-style cell range limiting what is read, or `NULL` for the whole
+  worksheet. Either corner may name a cell, a column or a row, so
+  `"B2:D10"` takes a rectangle, `"A:C"` takes three columns in full, and
+  `"2:10"` takes nine rows in full. The corners may be given in either
+  order. A range is read as its own rectangle: cells outside it are
+  ignored, the top-left becomes the first row and column, and columns
+  the range covers appear even where the worksheet left them empty. When
+  `col_names` is `TRUE` the first row of the range supplies the names. A
+  range may not reach past `XFD1048576`, the last cell a worksheet can
+  have.
+
+- password:
+
+  The password of a password-protected workbook, or `NULL` (the default)
+  for one without. The workbook is decrypted in memory and never written
+  to disk. Agile encryption – what Excel has written since 2013 – is
+  supported; the older standard encryption is not, and is reported as
+  such. Ignored for a workbook that is not encrypted. R cannot erase a
+  string, so the password may stay in memory after the call.
+
+## Value
+
+A data frame with one column per worksheet column, typed as described
+above. A worksheet, or a range, with no cells in it gives a data frame
+with no columns and no rows.
+
+## Details
+
+Without `range`, the table is the rectangle its non-blank cells span:
+empty rows above and below it, and empty columns either side, are not
+part of it, so a table that starts at `B3` reads with its header from
+row 3. Inside that rectangle a worksheet may leave a row out of its XML
+rather than write an empty one; such a row is kept, as a row of `NA`,
+wherever it falls – including directly beneath the header.
+
+Column types are inferred by promotion. A column of blanks is logical,
+one of booleans stays logical, numbers give a double, and anything that
+mixes types, or that holds a string or a cell error, becomes character.
+A column whose cells are all dates becomes a `Date`, or a `POSIXct` when
+any of them carries a time of day.
+
+## See also
+
+[`xlsx_cells()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_cells.md)
+for the cells themselves, and
+[`xlsx_sheets()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_sheets.md)
+to list the worksheets.
+
+## Examples
+
+``` r
+path <- system.file("extdata", "two-sheets.xlsx", package = "zuxlsx")
+
+# Each column takes the type its cells support.
+readings <- xlsx_read(path)
+readings
+#>   station reading checked      taken
+#> 1   north   12.50    TRUE 2024-02-02
+#> 2   south    9.75   FALSE 2024-02-03
+#> 3    east   14.25    TRUE 2024-02-04
+vapply(readings, function(x) class(x)[1], character(1))
+#>     station     reading     checked       taken 
+#> "character"   "numeric"   "logical"      "Date" 
+
+# A worksheet by name, and part of one by range.
+xlsx_read(path, "notes")
+#>                    note
+#> 1 calibrated in January
+#> 2                 µg/m³
+xlsx_read(path, range = "B1:C3")
+#>   reading checked
+#> 1   12.50    TRUE
+#> 2    9.75   FALSE
+
+# Without a header row, columns are named by position.
+xlsx_read(path, range = "A2:B4", col_names = FALSE)
+#>      X1    X2
+#> 1 north 12.50
+#> 2 south  9.75
+#> 3  east 14.25
+```

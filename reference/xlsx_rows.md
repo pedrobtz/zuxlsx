@@ -5,7 +5,7 @@ inferring a type for any column. This is the row-oriented counterpart to
 [`xlsx_cells()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_cells.md),
 and is the shape to reach for when a worksheet is not rectangular enough
 for
-[`read_xlsx()`](https://pedrobtz.github.io/zuxlsx/reference/read_xlsx.md)
+[`xlsx_read()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_read.md)
 – a report with stacked blocks, or a file whose header is several rows
 deep.
 
@@ -29,7 +29,7 @@ xlsx_rows(path, sheet = 1, password = NULL)
   Cells the worksheet leaves out between the ones it writes come back as
   `"blank"`, and so may a few the file never names: the reader pads to
   keep positions aligned.
-  [`read_xlsx()`](https://pedrobtz.github.io/zuxlsx/reference/read_xlsx.md)
+  [`xlsx_read()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_read.md)
   ignores blank cells when it decides where a table starts and ends.
 
 - password:
@@ -52,7 +52,7 @@ Blank cells, and rows with none, are `NA`.
 
 [`xlsx_cells()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_cells.md)
 for typed cells,
-[`read_xlsx()`](https://pedrobtz.github.io/zuxlsx/reference/read_xlsx.md)
+[`xlsx_read()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_read.md)
 for a data frame.
 
 ## Examples

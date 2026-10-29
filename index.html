@@ -31,6 +31,7 @@
 
     <div id="navbar" class="collapse navbar-collapse ms-3">
       <ul class="navbar-nav me-auto">
+<li class="nav-item"><a class="nav-link" href="articles/zuxlsx.html">Get started</a></li>
 <li class="nav-item"><a class="nav-link" href="reference/index.html">Reference</a></li>
 <li class="nav-item"><a class="nav-link" href="news/index.html">Changelog</a></li>
       </ul>
@@ -63,13 +64,13 @@
 <span><span class="va">path</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"two-sheets.xlsx"</span>, package <span class="op">=</span> <span class="st">"zuxlsx"</span><span class="op">)</span></span>
 <span></span>
 <span><span class="fu"><a href="reference/xlsx_sheets.html">xlsx_sheets</a></span><span class="op">(</span><span class="va">path</span><span class="op">)</span>                      <span class="co"># "readings" "notes"</span></span>
-<span><span class="fu"><a href="reference/read_xlsx.html">read_xlsx</a></span><span class="op">(</span><span class="va">path</span><span class="op">)</span>                        <span class="co"># first worksheet as a data frame</span></span>
-<span><span class="fu"><a href="reference/read_xlsx.html">read_xlsx</a></span><span class="op">(</span><span class="va">path</span>, sheet <span class="op">=</span> <span class="st">"readings"</span>, range <span class="op">=</span> <span class="st">"A1:B3"</span><span class="op">)</span></span></code></pre></div>
-<p><code><a href="reference/read_xlsx.html">read_xlsx()</a></code> gives each column the type its cells support: logical, double, character, <code>Date</code> or <code>POSIXct</code>. A column that cannot hold its cells becomes character rather than failing. <code>range</code> takes A1 notation, and either corner may name a cell, a column or a row, so <code>"B2:D10"</code>, <code>"A:C"</code> and <code>"2:10"</code> are all accepted.</p>
+<span><span class="fu"><a href="reference/xlsx_read.html">xlsx_read</a></span><span class="op">(</span><span class="va">path</span><span class="op">)</span>                        <span class="co"># first worksheet as a data frame</span></span>
+<span><span class="fu"><a href="reference/xlsx_read.html">xlsx_read</a></span><span class="op">(</span><span class="va">path</span>, sheet <span class="op">=</span> <span class="st">"readings"</span>, range <span class="op">=</span> <span class="st">"A1:B3"</span><span class="op">)</span></span></code></pre></div>
+<p><code><a href="reference/xlsx_read.html">xlsx_read()</a></code> gives each column the type its cells support: logical, double, character, <code>Date</code> or <code>POSIXct</code>. A column that cannot hold its cells becomes character rather than failing. <code>range</code> takes A1 notation, and either corner may name a cell, a column or a row, so <code>"B2:D10"</code>, <code>"A:C"</code> and <code>"2:10"</code> are all accepted.</p>
 <p>Both Excel date systems are handled. The workbook’s own <code>date1904</code> setting decides which is used, and the 1900 system’s phantom 29 February 1900 is accounted for, so dates before March 1900 are not a day early.</p>
 <p>A password-protected workbook is read by passing its password, to any of the readers:</p>
 <div class="sourceCode" id="cb2"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="fu"><a href="reference/read_xlsx.html">read_xlsx</a></span><span class="op">(</span><span class="st">"protected.xlsx"</span>, password <span class="op">=</span> <span class="st">"s3cret"</span><span class="op">)</span></span></code></pre></div>
+<code class="sourceCode R"><span><span class="fu"><a href="reference/xlsx_read.html">xlsx_read</a></span><span class="op">(</span><span class="st">"protected.xlsx"</span>, password <span class="op">=</span> <span class="st">"s3cret"</span><span class="op">)</span></span></code></pre></div>
 <p>It is decrypted in memory and never written to disk. zuxlsx decrypts agile encryption, which Excel has written since 2013, and checks the integrity code stored with the file before decrypting anything. Office 2007’s older standard encryption is recognised and refused by name.</p>
 <p>Underneath, for worksheets that are not rectangular enough for a data frame:</p>
 <div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
@@ -78,7 +79,7 @@
 <span></span>
 <span><span class="co"># A chunk at a time; returning FALSE stops the read, so finding something</span></span>
 <span><span class="co"># near the top of a large worksheet does not pay for the rest.</span></span>
-<span><span class="fu"><a href="reference/xlsx_read_cells.html">xlsx_read_cells</a></span><span class="op">(</span><span class="va">path</span>, callback <span class="op">=</span> <span class="kw">function</span><span class="op">(</span><span class="va">cells</span><span class="op">)</span> <span class="op">{</span> <span class="fu"><a href="https://rdrr.io/r/utils/str.html" class="external-link">str</a></span><span class="op">(</span><span class="va">cells</span><span class="op">)</span>; <span class="cn">FALSE</span> <span class="op">}</span><span class="op">)</span></span></code></pre></div>
+<span><span class="fu"><a href="reference/xlsx_stream_cells.html">xlsx_stream_cells</a></span><span class="op">(</span><span class="va">path</span>, callback <span class="op">=</span> <span class="kw">function</span><span class="op">(</span><span class="va">cells</span><span class="op">)</span> <span class="op">{</span> <span class="fu"><a href="https://rdrr.io/r/utils/str.html" class="external-link">str</a></span><span class="op">(</span><span class="va">cells</span><span class="op">)</span>; <span class="cn">FALSE</span> <span class="op">}</span><span class="op">)</span></span></code></pre></div>
 </div>
 <div class="section level2">
 <h2 id="installation">Installation<a class="anchor" aria-label="anchor" href="#installation"></a>
