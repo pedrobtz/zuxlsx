@@ -38,6 +38,16 @@ of them.
   reports the ‘xlsxio’, ‘Expat’, ‘miniz’ and ‘TF-PSA-Crypto’ versions
   actually linked in.
 
+### Workbooks as they are written
+
+- Strict OOXML (“Strict Open XML Spreadsheet”) reads as transitional
+  OOXML does, part names are matched as OOXML consumers match them –
+  ignoring case and backslashes – and ZIP64 archives open.
+
+- A shared-string table written with a namespace prefix (`<x:sst>`) is
+  read, an empty string in it no longer shifts every later string by
+  one, and an index written with whitespace around it resolves.
+
 ### Password-protected workbooks
 
 - Every reader takes `password =`, and reads a workbook protected with
@@ -85,6 +95,9 @@ of them.
   refers to a cell past `XFD1048576` or to a shared string that does not
   exist, its or its compressed data fails its checksum – is an error,
   never a shorter sheet.
+
+- A part carrying a DOCTYPE is an XML error: no workbook part has one,
+  and an internal subset is how entities are declared.
 
 - A file that is a spreadsheet zuxlsx cannot read is reported as such
   rather than as damage. A legacy `.xls` is an OLE2 container, not a

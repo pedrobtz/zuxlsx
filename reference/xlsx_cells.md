@@ -23,6 +23,12 @@ xlsx_cells(path, sheet = 1, password = NULL)
   The worksheet to read: either its name, or its position in the
   workbook.
 
+  Cells the worksheet leaves out between the ones it writes come back as
+  `"blank"`, and so may a few the file never names: the reader pads to
+  keep positions aligned.
+  [`read_xlsx()`](https://pedrobtz.github.io/zuxlsx/reference/read_xlsx.md)
+  ignores blank cells when it decides where a table starts and ends.
+
 - password:
 
   The password of a password-protected workbook, or `NULL` (the default)

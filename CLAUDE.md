@@ -45,8 +45,8 @@ What is exported:
   order.
 - [`zuxlsx_native()`](https://pedrobtz.github.io/zuxlsx/reference/zuxlsx_native.md)
   — reports `xlsxio` 0.2.36, `expat_2.8.4`, miniz `11.3.2`,
-  TF-PSA-Crypto `1.1.1`. It calls `XML_ExpatVersion()` and
-  `zuc_get_info()` rather than reading macros, so a header on the
+  TF-PSA-Crypto `1.1.1`. It calls `XML_ExpatVersion()`, `mz_version()`
+  and `zuc_get_info()` rather than reading macros, so a header on the
   include path without the archive behind it fails at link time.
 
 Both Excel epochs are handled, chosen per workbook by `date1904`, and
@@ -131,7 +131,7 @@ Vendored, and the corpora:
   are kept deliberately.
 
 - [tools/patches/xlsxio/](https://pedrobtz.github.io/zuxlsx/tools/patches/xlsxio/)
-  — **eight patches**, applied in order, reproducing the committed copy
+  — **ten patches**, applied in order, reproducing the committed copy
   byte for byte from the pristine 0.2.36 tarball:
 
   | Patch | What it does |
@@ -144,6 +144,8 @@ Vendored, and the corpora:
   | `0006-strict-ooxml-relationship-types` | accepts strict OOXML relationship namespaces as well as transitional ones |
   | `0007-null-relationship-id-crash` | a missing relationship `Id` reached `strcasecmp` as `NULL`; found by the fuzzer, reported upstream |
   | `0008-report-why-a-worksheet-ended` | `xlsxioread_sheet_finish()`: a worksheet that ends on a parse error, a reference past `XFD1048576`, a dangling shared-string index or a bad CRC is reported rather than read short; also corrects 0003’s bracket and built-in date rules |
+  | `0009-report-damaged-shared-strings-and-styles` | a shared-string table or styles part that is broken XML or fails its CRC is reported by name, rather than loaded as far as the damage |
+  | `0010-refuse-doctype` | every parser xlsxio creates refuses a DOCTYPE, which no workbook part carries |
 
   Provenance is in
   [tools/vendor/manifest.tsv](https://pedrobtz.github.io/zuxlsx/tools/vendor/manifest.tsv),

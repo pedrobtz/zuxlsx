@@ -3,7 +3,7 @@
 Reads a worksheet and assembles its cells into columns, giving each
 column the type its cells support. This is the high-level reader;
 [`xlsx_cells()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_cells.md)
-is the cell-by-cell view underneath it.
+gives the same worksheet cell by cell.
 
 ## Usage
 
@@ -21,6 +21,11 @@ read_xlsx(path, sheet = 1, col_names = TRUE, range = NULL, password = NULL)
 
   The worksheet to read: either its name, or its position in the
   workbook.
+
+  Cells the worksheet leaves out between the ones it writes come back as
+  `"blank"`, and so may a few the file never names: the reader pads to
+  keep positions aligned. `read_xlsx()` ignores blank cells when it
+  decides where a table starts and ends.
 
 - col_names:
 
@@ -60,11 +65,12 @@ with no columns and no rows.
 
 ## Details
 
-A worksheet may leave a row out of its XML rather than write an empty
-one. Such a row is kept, as a row of `NA`, wherever it falls – including
-directly beneath the header. Keeping every blank row is easier to
-predict than keeping only the interior ones, and `range` is the way to
-begin further down the sheet.
+Without `range`, the table is the rectangle its non-blank cells span:
+empty rows above and below it, and empty columns either side, are not
+part of it, so a table that starts at `B3` reads with its header from
+row 3. Inside that rectangle a worksheet may leave a row out of its XML
+rather than write an empty one; such a row is kept, as a row of `NA`,
+wherever it falls – including directly beneath the header.
 
 Column types are inferred by promotion. A column of blanks is logical,
 one of booleans stays logical, numbers give a double, and anything that

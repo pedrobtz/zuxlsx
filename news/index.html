@@ -44,6 +44,11 @@
 <li><p><code><a href="../reference/xlsx_sheets.html">xlsx_sheets()</a></code> lists worksheets, and <code><a href="../reference/zuxlsx_native.html">zuxlsx_native()</a></code> reports the ‘xlsxio’, ‘Expat’, ‘miniz’ and ‘TF-PSA-Crypto’ versions actually linked in.</p></li>
 </ul></div>
 <div class="section level3">
+<h3 id="workbooks-as-they-are-written-0-1-0">Workbooks as they are written<a class="anchor" aria-label="anchor" href="#workbooks-as-they-are-written-0-1-0"></a></h3>
+<ul><li><p>Strict OOXML (“Strict Open XML Spreadsheet”) reads as transitional OOXML does, part names are matched as OOXML consumers match them – ignoring case and backslashes – and ZIP64 archives open.</p></li>
+<li><p>A shared-string table written with a namespace prefix (<code>&lt;x:sst&gt;</code>) is read, an empty string in it no longer shifts every later string by one, and an index written with whitespace around it resolves.</p></li>
+</ul></div>
+<div class="section level3">
 <h3 id="password-protected-workbooks-0-1-0">Password-protected workbooks<a class="anchor" aria-label="anchor" href="#password-protected-workbooks-0-1-0"></a></h3>
 <ul><li><p>Every reader takes <code>password =</code>, and reads a workbook protected with agile encryption – what Excel has written since 2013. The workbook is decrypted in memory; neither it nor its plaintext is written to disk, and the plaintext is wiped when the read ends.</p></li>
 <li><p>The integrity code the file carries is checked before anything is decrypted, so a workbook altered after it was encrypted is refused with <code>zuxlsx_integrity_error</code> rather than read as garbage.</p></li>
@@ -59,6 +64,7 @@
 <h3 id="errors-0-1-0">Errors<a class="anchor" aria-label="anchor" href="#errors-0-1-0"></a></h3>
 <ul><li><p>Every error is a classed condition under <code>zuxlsx_error</code>: <code>zuxlsx_input_error</code>, <code>zuxlsx_zip_error</code>, <code>zuxlsx_xml_error</code>, <code>zuxlsx_ooxml_error</code>, <code>zuxlsx_sheet_error</code>, <code>zuxlsx_unsupported_format_error</code>, <code>zuxlsx_encrypted_error</code>, <code>zuxlsx_password_error</code>, <code>zuxlsx_integrity_error</code> and <code>zuxlsx_memory_error</code>. See <code><a href="../reference/zuxlsx-conditions.html">?"zuxlsx-conditions"</a></code>.</p></li>
 <li><p>A worksheet that cannot be read in full – its XML breaks off, it refers to a cell past <code>XFD1048576</code> or to a shared string that does not exist, its or its compressed data fails its checksum – is an error, never a shorter sheet.</p></li>
+<li><p>A part carrying a DOCTYPE is an XML error: no workbook part has one, and an internal subset is how entities are declared.</p></li>
 <li><p>A file that is a spreadsheet zuxlsx cannot read is reported as such rather than as damage. A legacy <code>.xls</code> is an OLE2 container, not a ZIP, and an <code>.xlsb</code> stores its worksheets as binary records; both raise <code>zuxlsx_unsupported_format_error</code> instead of looking corrupt.</p></li>
 <li><p>XML that will not parse is distinguished from XML that parses but declares no worksheet, and the message names the part and line.</p></li>
 </ul></div>

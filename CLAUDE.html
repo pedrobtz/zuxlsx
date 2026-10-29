@@ -54,7 +54,7 @@
 <li>
 <code>xlsx_sheets(path, password = NULL)</code> — worksheet names, in workbook order.</li>
 <li>
-<code><a href="reference/zuxlsx_native.html">zuxlsx_native()</a></code> — reports <code>xlsxio</code> 0.2.36, <code>expat_2.8.4</code>, miniz <code>11.3.2</code>, TF-PSA-Crypto <code>1.1.1</code>. It calls <code>XML_ExpatVersion()</code> and <code>zuc_get_info()</code> rather than reading macros, so a header on the include path without the archive behind it fails at link time.</li>
+<code><a href="reference/zuxlsx_native.html">zuxlsx_native()</a></code> — reports <code>xlsxio</code> 0.2.36, <code>expat_2.8.4</code>, miniz <code>11.3.2</code>, TF-PSA-Crypto <code>1.1.1</code>. It calls <code>XML_ExpatVersion()</code>, <code>mz_version()</code> and <code>zuc_get_info()</code> rather than reading macros, so a header on the include path without the archive behind it fails at link time.</li>
 </ul><p>Both Excel epochs are handled, chosen per workbook by <code>date1904</code>, and the 1900 system’s phantom 29 February is accounted for: serial 60 is <code>NA</code>, serial 61 is 1 March 1900. Errors are ten classed conditions under <code>zuxlsx_error</code> — see <code><a href="reference/zuxlsx-conditions.html">?"zuxlsx-conditions"</a></code> and design §15. A legacy <code>.xls</code> (OLE2, not ZIP), an <code>.xlsb</code> and a non-agile encrypted workbook are reported as <code>zuxlsx_unsupported_format_error</code> rather than as damage; an encrypted workbook read without a password is <code>zuxlsx_encrypted_error</code>.</p>
 <p><strong>Password-protected workbooks are read (#22, design §21c–§21g).</strong> Every reader takes <code>password =</code>. The file’s CFB container is read in C (<a href="src/cfb.c">src/cfb.c</a>, §21e), <code>EncryptionInfo</code> is parsed with Expat and anything but agile encryption is refused by name (<a href="src/encinfo.c">src/encinfo.c</a>, §21f), the package is decrypted over <code>libzucrypt.a</code> after its HMAC is checked (<a href="src/agile.c">src/agile.c</a>, §21d), and xlsxio reads the plaintext from memory (§21g). The plaintext is never an R object and never on disk, and is wiped when the read ends. Known cost: <code>resolve_sheet()</code> makes every read decrypt twice. <code>decrypt_ole2()</code>, <code>agile_decrypt()</code>, <code>cfb_streams()</code> and <code>encryption_info()</code> are internal, for the tests. zucrypt freezes its ABI 1 on this code; findings go on pedrobtz/zucrypt#43.</p>
 <p>Out of scope or not done: writing workbooks, <code>.xlsb</code>, standard (Office 2007) and extensible encryption, evaluating formulas (the cached value is returned), and configurable limits on part size or sheet count — today’s defenses are Expat’s and miniz’s own. Column building is a post-pass rather than streaming; design §14’s status note says why.</p>
@@ -71,7 +71,7 @@
 <p>Vendored, and the corpora:</p>
 <ul><li><p><a href="src/vendor/xlsxio/">src/vendor/xlsxio/</a> — xlsxio 0.2.36, <strong>reader only</strong> (<code>xlsxio_read.c</code>, <code>xlsxio_read_sharedstrings.c</code>, headers, <code>LICENSE.txt</code>). The writer is not bundled; writing is out of scope (§21). Upstream CRLF line endings are kept deliberately.</p></li>
 <li>
-<p><a href="tools/patches/xlsxio/">tools/patches/xlsxio/</a> — <strong>eight patches</strong>, applied in order, reproducing the committed copy byte for byte from the pristine 0.2.36 tarball:</p>
+<p><a href="tools/patches/xlsxio/">tools/patches/xlsxio/</a> — <strong>ten patches</strong>, applied in order, reproducing the committed copy byte for byte from the pristine 0.2.36 tarball:</p>
 <table class="table"><colgroup><col width="50%"><col width="50%"></colgroup><thead><tr><th>Patch</th>
 <th>What it does</th>
 </tr></thead><tbody><tr><td><code>0001-miniz-zip-backend</code></td>
@@ -92,6 +92,10 @@
 </tr><tr><td><code>0008-report-why-a-worksheet-ended</code></td>
 <td>
 <code>xlsxioread_sheet_finish()</code>: a worksheet that ends on a parse error, a reference past <code>XFD1048576</code>, a dangling shared-string index or a bad CRC is reported rather than read short; also corrects 0003’s bracket and built-in date rules</td>
+</tr><tr><td><code>0009-report-damaged-shared-strings-and-styles</code></td>
+<td>a shared-string table or styles part that is broken XML or fails its CRC is reported by name, rather than loaded as far as the damage</td>
+</tr><tr><td><code>0010-refuse-doctype</code></td>
+<td>every parser xlsxio creates refuses a DOCTYPE, which no workbook part carries</td>
 </tr></tbody></table><p>Provenance is in <a href="tools/vendor/manifest.tsv">tools/vendor/manifest.tsv</a>, <a href="tools/vendor/checksums.sha256">tools/vendor/checksums.sha256</a> and <a href="inst/COPYRIGHTS">inst/COPYRIGHTS</a>; <strong><code>tools/vendor/verify</code> checks all of it offline and is the thing to run after touching anything under <code>src/vendor/</code>.</strong></p>
 </li>
 <li><p><a href="tests/testthat/sheets/">tests/testthat/sheets/</a> — seven readxl interoperability workbooks (inline strings, missing parts, nonstandard namespace prefix, UTF-8 sheet names, blanks), MIT, with provenance and checksums in <code>MANIFEST.tsv</code> there, all verified byte for byte against readxl at commit <code>47f8aeac</code>. <code>test-corpus.R</code> asserts their content, not just that they open.</p></li>
