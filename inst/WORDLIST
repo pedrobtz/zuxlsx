@@ -3,8 +3,10 @@ CMD
 Expat
 miniz
 OOXML
+openxlsx
 PSA
 TF
+writexl
 xlsxio
 zucrypt
 zukomp

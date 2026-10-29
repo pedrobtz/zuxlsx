@@ -40,6 +40,13 @@ c("zuxml", "zukomp", "zucrypt") %in% p
 What is left is the submission itself: a green full-profile run on the
 commit being submitted, then `devtools::submit_cran()`.
 
+**Status, 2026-10-29.** Stages 8 and 9 are closed (#110 to #114). The
+exports are `xlsx_*` (#46); `col_types`, `na`, `skip` and `n_max` are
+deferred to v0.2.0 (#27). Local checks on the submission branch: `verify`,
+both fixture generators' `--check`, the layering check, spelling and
+`urlchecker` are clean, and `--as-cran` against the CRAN siblings in the C
+locale gives only the "New submission" NOTE.
+
 ## Already done
 
 - `inst/COPYRIGHTS` covers every copyright holder, including Expat and miniz,
