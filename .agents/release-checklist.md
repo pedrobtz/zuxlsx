@@ -47,10 +47,13 @@ both fixture generators' `--check`, the layering check, spelling and
 `urlchecker` are clean, and `--as-cran` against the CRAN siblings in the C
 locale gives only the "New submission" NOTE.
 
+This file is Stage 10 of [roadmap.md](roadmap.md). Stages 8 (hardening) and 9
+(API freeze and docs) are the ones it waited on, and both are closed.
+
 ## Already done
 
-- `inst/COPYRIGHTS` covers every copyright holder, including Expat and miniz,
-  which are linked statically and so redistributed in the built package even
+- `inst/COPYRIGHTS` covers every copyright holder, including Expat, miniz and
+  TF-PSA-Crypto, which are linked statically and so redistributed in the built package even
   though their source is not here. Full texts are installed under
   `inst/licenses/`.
 - `cran-comments.md` explains the `LinkingTo`-without-`Imports:` arrangement,
@@ -87,6 +90,16 @@ The review of 6327d52 was filed as issues labelled `review` and fixed in
   once failed only there (#72).
 - `tools/vendor/verify` and `tools/fixtures/make-extdata.R --check`, so the
   vendored tree and the generated fixture still match what is recorded.
-- That the minimum sibling version named in `configure` is still right. It
-  says `0.1.0`, which is what shipped the archives; a later release that
-  changed their location would need it revisited.
+- That the siblings' *CRAN* builds install the archives where `configure`
+  looks: `lib/libzuxml.a` for zuxml, `lib${R_ARCH}/libzukomp.a` for zukomp,
+  `lib/libzucrypt.a` for zucrypt.
+  `configure` names no sibling version and must not -- zuxml 0.1.0 exists both
+  with and without the archive, so it checks for the file -- and it asks for
+  `lib/<r_arch>` before plain `lib/`, which is right for either convention.
+  Check the files in a CRAN-installed copy, not the version number. Whether to
+  add `LinkingTo:` version floors naming those CRAN releases is a decision to
+  make at the same time.
+- That `inst/COPYRIGHTS` still describes the patch set in
+  `tools/patches/xlsxio/`. `tools/vendor/verify` checks the patch names but not
+  the prose around them, which is how it came to say "two local patches"
+  above a list of seven (#48).
