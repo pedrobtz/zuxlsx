@@ -445,7 +445,8 @@ and [inst/COPYRIGHTS](https://pedrobtz.github.io/zuxlsx/inst/COPYRIGHTS)
 (design §20). `DESCRIPTION` carries Pedro Baltazar as `aut`/`cre`/`cph`
 and Brecht Sanders as `cph` for xlsxio. Expat, miniz and TF-PSA-Crypto
 are *linked*, not vendored here, but static linking still redistributes
-them, so their licences are installed in `inst/licenses/` and described
-in `inst/COPYRIGHTS`. TF-PSA-Crypto is Apache-2.0 (dual with
+them, so their licences are installed in `inst/licenses/` – as is
+xlsxio’s, since R installs nothing outside `inst/` – and described in
+`inst/COPYRIGHTS`. TF-PSA-Crypto is Apache-2.0 (dual with
 GPL-2.0-or-later upstream; taken under Apache-2.0). Design §20 asks for
 this to be reviewed again before a CRAN submission.
