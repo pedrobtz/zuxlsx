@@ -1,14 +1,20 @@
 # zuxlsx
 
 <!-- badges: start -->
+[![CRAN status](https://www.r-pkg.org/badges/version/zuxlsx)](https://CRAN.R-project.org/package=zuxlsx)
+[![Lifecycle: experimental](https://img.shields.io/badge/lifecycle-experimental-orange.svg)](https://lifecycle.r-lib.org/articles/stages.html#experimental)
 [![R-CMD-check](https://github.com/pedrobtz/zuxlsx/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/pedrobtz/zuxlsx/actions/workflows/R-CMD-check.yaml)
+[![native-checks](https://github.com/pedrobtz/zuxlsx/actions/workflows/native-checks.yaml/badge.svg)](https://github.com/pedrobtz/zuxlsx/actions/workflows/native-checks.yaml)
+[![coverage](https://raw.githubusercontent.com/pedrobtz/zuxlsx/main/.github/badges/coverage.svg)](https://github.com/pedrobtz/zuxlsx/actions/workflows/coverage.yaml)
 <!-- badges: end -->
 
 Read `.xlsx` workbooks from R, password-protected ones included, with no
 system XML, ZIP or cryptography library required.
 
 zuxlsx bundles the [xlsxio](https://github.com/brechtsanders/xlsxio) reader and
-links the Expat parser, the miniz ZIP reader and TF-PSA-Crypto statically at
+links the [Expat](https://libexpat.github.io/) parser, the
+[miniz](https://github.com/richgel999/miniz) ZIP reader and
+[TF-PSA-Crypto](https://github.com/Mbed-TLS/TF-PSA-Crypto) statically at
 install time, out of the sibling packages
 [zuxml](https://github.com/pedrobtz/zuxml),
 [zukomp](https://github.com/pedrobtz/zukomp) and

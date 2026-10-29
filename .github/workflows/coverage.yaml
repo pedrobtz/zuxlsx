@@ -1,0 +1,46 @@
+# Test coverage, from the shared reusable workflow in pedrobtz/r-actions, as
+# zucrypt and zuxml run it. On a push it commits the rendered badge to
+# .github/badges/coverage.svg, which the README shows.
+#
+# coverage.yml is the one r-actions call holding a write token, so it is
+# pinned to a commit with the tag in a comment rather than following @v1.
+on:
+  push:
+    branches: [main, master]
+    # The badge path prevents a push loop when this workflow commits an
+    # updated badge; the rest are prose.
+    paths-ignore:
+      - ".github/badges/coverage.svg"
+      - '**.md'
+      - 'vignettes/**'
+      - '_pkgdown.yml'
+      - '.agents/**'
+      - 'docs/**'
+  pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'vignettes/**'
+      - '_pkgdown.yml'
+      - '.agents/**'
+      - 'docs/**'
+  workflow_dispatch:
+
+name: coverage.yaml
+
+permissions:
+  contents: write
+
+jobs:
+  coverage:
+    uses: pedrobtz/r-actions/.github/workflows/coverage.yml@59c917ddee2cd0191f8f015016c4c76c4f2a8c87 # v1.18.0
+    permissions:
+      contents: write
+    with:
+      # Most of this package is C: the reader, the column builders and the
+      # decryption. covr's R figure alone would read close to complete while
+      # saying nothing about them.
+      native: true
+      # The vendored xlsxio is measured too. A low figure there can be right
+      # -- it carries paths this package never calls -- but which of its
+      # paths the tests reach is worth seeing.
+      native-exclude: ""
