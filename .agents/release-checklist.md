@@ -61,7 +61,7 @@ commit being submitted, then `devtools::submit_cran()`.
 The review of 6327d52 was filed as issues labelled `review` and fixed in
 #110. Three of its points were decisions rather than defects:
 
-- **`xlsx_read_cells(path, sheet = 1, callback, ...)` keeps its argument
+- **`xlsx_stream_cells(path, sheet = 1, callback, ...)` keeps its argument
   order** (#109). Every reader takes `(path, sheet = 1, ...)`, and
   `callback = f` reads better named. Reordering after CRAN would need a
   deprecation cycle, so this is final.

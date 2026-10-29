@@ -14,7 +14,7 @@ workbook.
 
 Cells the worksheet leaves out between the ones it writes come back as
 \code{"blank"}, and so may a few the file never names: the reader pads to keep
-positions aligned. \code{\link[=read_xlsx]{read_xlsx()}} ignores blank cells when it decides where
+positions aligned. \code{\link[=xlsx_read]{xlsx_read()}} ignores blank cells when it decides where
 a table starts and ends.}
 
 \item{password}{The password of a password-protected workbook, or \code{NULL}
@@ -42,7 +42,7 @@ cannot be read as a date is a \code{"string"}.}
 \description{
 Reads a worksheet one cell at a time and returns them in a data frame, one
 row per cell. This is the low-level reader: it reports what is in each cell
-without assembling columns or guessing a type for them; \code{\link[=read_xlsx]{read_xlsx()}} does
+without assembling columns or guessing a type for them; \code{\link[=xlsx_read]{xlsx_read()}} does
 that.
 }
 \examples{

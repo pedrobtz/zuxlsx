@@ -23,8 +23,8 @@ test_that("the decrypted package reads as the workbook it came from", {
   out <- withr::local_tempfile(fileext = ".xlsx")
   writeBin(agile_decrypt(fx$package, "zuxlsx", fx$params, fx$path), out)
   expect_identical(
-    read_xlsx(out, sheet = 2),
-    read_xlsx(ole2_fixture("two-sheets-stored.xlsx"), sheet = 2)
+    xlsx_read(out, sheet = 2),
+    xlsx_read(ole2_fixture("two-sheets-stored.xlsx"), sheet = 2)
   )
 })
 

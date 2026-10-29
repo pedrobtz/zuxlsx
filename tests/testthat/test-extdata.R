@@ -18,11 +18,11 @@ test_that("the example workbook ships and has both worksheets", {
 })
 
 test_that("the example workbook demonstrates every inferred column type", {
-  # read_xlsx()'s documentation describes character, numeric, logical and
+  # xlsx_read()'s documentation describes character, numeric, logical and
   # Date. If the fixture stops covering one of them, the example stops
   # showing what the text promises.
   path <- system.file("extdata", "two-sheets.xlsx", package = "zuxlsx")
-  out <- read_xlsx(path)
+  out <- xlsx_read(path)
 
   expect_named(out, c("station", "reading", "checked", "taken"))
   expect_identical(out$station, c("north", "south", "east"))
@@ -42,7 +42,7 @@ test_that("the example workbook uses the 1900 epoch", {
 
 test_that("the second worksheet carries non-ASCII text", {
   path <- system.file("extdata", "two-sheets.xlsx", package = "zuxlsx")
-  notes <- read_xlsx(path, "notes")
+  notes <- xlsx_read(path, "notes")
 
   expect_identical(notes$note[2], "µg/m³")
   expect_identical(Encoding(notes$note[2]), "UTF-8")
@@ -51,7 +51,7 @@ test_that("the second worksheet carries non-ASCII text", {
 test_that("the range shown in the examples selects what it claims", {
   path <- system.file("extdata", "two-sheets.xlsx", package = "zuxlsx")
 
-  expect_named(read_xlsx(path, range = "B1:C3"), c("reading", "checked"))
-  expect_identical(nrow(read_xlsx(path, range = "B1:C3")), 2L)
-  expect_named(read_xlsx(path, range = "A2:B4", col_names = FALSE), c("X1", "X2"))
+  expect_named(xlsx_read(path, range = "B1:C3"), c("reading", "checked"))
+  expect_identical(nrow(xlsx_read(path, range = "B1:C3")), 2L)
+  expect_named(xlsx_read(path, range = "A2:B4", col_names = FALSE), c("X1", "X2"))
 })

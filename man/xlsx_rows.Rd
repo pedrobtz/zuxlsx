@@ -14,7 +14,7 @@ workbook.
 
 Cells the worksheet leaves out between the ones it writes come back as
 \code{"blank"}, and so may a few the file never names: the reader pads to keep
-positions aligned. \code{\link[=read_xlsx]{read_xlsx()}} ignores blank cells when it decides where
+positions aligned. \code{\link[=xlsx_read]{xlsx_read()}} ignores blank cells when it decides where
 a table starts and ends.}
 
 \item{password}{The password of a password-protected workbook, or \code{NULL}
@@ -34,7 +34,7 @@ column n. Blank cells, and rows with none, are \code{NA}.
 Returns a worksheet row by row, as the text of each cell, without inferring
 a type for any column. This is the row-oriented counterpart to
 \code{\link[=xlsx_cells]{xlsx_cells()}}, and is the shape to reach for when a worksheet is not
-rectangular enough for \code{\link[=read_xlsx]{read_xlsx()}} -- a report with stacked blocks, or a
+rectangular enough for \code{\link[=xlsx_read]{xlsx_read()}} -- a report with stacked blocks, or a
 file whose header is several rows deep.
 }
 \examples{
@@ -47,5 +47,5 @@ rows[[1]]
 rows[[2]]
 }
 \seealso{
-\code{\link[=xlsx_cells]{xlsx_cells()}} for typed cells, \code{\link[=read_xlsx]{read_xlsx()}} for a data frame.
+\code{\link[=xlsx_cells]{xlsx_cells()}} for typed cells, \code{\link[=xlsx_read]{xlsx_read()}} for a data frame.
 }

@@ -167,7 +167,7 @@ test_that("a corrupt CRC-32 on the workbook part is a ZIP error", {
   write_zip(path, entries)
 
   expect_error(xlsx_sheets(path), class = "zuxlsx_zip_error")
-  expect_error(read_xlsx(path), class = "zuxlsx_zip_error")
+  expect_error(xlsx_read(path), class = "zuxlsx_zip_error")
   expect_identical(.Call(C_xlsx_sheets, normalizePath(path), NULL)$value$part,
                    "xl/workbook.xml")
 })
@@ -218,11 +218,11 @@ test_that("a cell reference past XFD1048576 is refused before it is padded to", 
     path <- withr::local_tempfile(fileext = ".xlsx")
     write_workbook(path, styled_workbook_parts(c(num("A1", 1), num(ref, 5))))
     elapsed <- system.time({
-      expect_error(read_xlsx(path), class = "zuxlsx_ooxml_error", info = ref)
+      expect_error(xlsx_read(path), class = "zuxlsx_ooxml_error", info = ref)
       expect_error(xlsx_cells(path), class = "zuxlsx_ooxml_error", info = ref)
       expect_error(xlsx_rows(path), class = "zuxlsx_ooxml_error", info = ref)
       expect_error(
-        xlsx_read_cells(path, 1, function(cells) NULL),
+        xlsx_stream_cells(path, 1, function(cells) NULL),
         class = "zuxlsx_ooxml_error", info = ref
       )
     })[["elapsed"]]
@@ -338,7 +338,7 @@ test_that("a worksheet whose CRC-32 does not match is a ZIP error", {
 
   expect_identical(xlsx_sheets(path), "Sheet1")
   expect_error(xlsx_cells(path), class = "zuxlsx_zip_error")
-  expect_error(read_xlsx(path), class = "zuxlsx_zip_error")
+  expect_error(xlsx_read(path), class = "zuxlsx_zip_error")
 })
 
 test_that("a compression bomb is streamed or refused, never inflated whole", {
@@ -398,8 +398,8 @@ test_that("a deflated worksheet reads like a stored one", {
   }))
   stored <- withr::local_tempfile(fileext = ".xlsx")
   write_workbook(stored, parts)
-  expect_identical(read_xlsx(path, col_names = FALSE),
-                   read_xlsx(stored, col_names = FALSE))
+  expect_identical(xlsx_read(path, col_names = FALSE),
+                   xlsx_read(stored, col_names = FALSE))
 })
 
 test_that("a long read can be interrupted, and leaves nothing open", {
@@ -430,9 +430,9 @@ test_that("a long read can be interrupted, and leaves nothing open", {
   write_zip(path, entries)
 
   for (reader in list(
-    function() read_xlsx(path),
+    function() xlsx_read(path),
     function() xlsx_cells(path),
-    function() xlsx_read_cells(path, 1, function(cells) NULL)
+    function() xlsx_stream_cells(path, 1, function(cells) NULL)
   )) {
     elapsed <- system.time(expect_error(local({
       setTimeLimit(elapsed = 0.1, transient = TRUE)
@@ -444,5 +444,5 @@ test_that("a long read can be interrupted, and leaves nothing open", {
 
   small <- withr::local_tempfile(fileext = ".xlsx")
   write_workbook(small, grid_workbook(3L, 3L))
-  expect_identical(dim(read_xlsx(small, col_names = FALSE)), c(3L, 3L))
+  expect_identical(dim(xlsx_read(small, col_names = FALSE)), c(3L, 3L))
 })

@@ -175,7 +175,9 @@ zuxlsx_unwrap <- function(res, path = NULL, call = sys.call(-1L)) {
     part_zip = list(
       class = "zuxlsx_zip_error",
       message = paste0(
-        "'", path, "' is damaged.\n",
+        "'",
+        path,
+        "' is damaged.\n",
         "The compressed data of ",
         encodeString(res$value$part, quote = "'"),
         " does not match its recorded size or checksum."

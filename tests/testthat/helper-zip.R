@@ -319,7 +319,7 @@ read_literals <- function(literals) {
     list(txt("A1", "v")),
     lapply(seq_along(literals), function(i) num(paste0("A", i + 1L), literals[i]))
   )))
-  read_xlsx(path)$v
+  xlsx_read(path)$v
 }
 
 

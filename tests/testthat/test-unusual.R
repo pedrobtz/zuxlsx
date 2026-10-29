@@ -91,7 +91,7 @@ test_that("part names may use backslashes and any case", {
   write_workbook(path, parts)
 
   expect_identical(xlsx_sheets(path), "Sheet1")
-  expect_s3_class(read_xlsx(path, 1), "data.frame")
+  expect_s3_class(xlsx_read(path, 1), "data.frame")
 })
 
 test_that("a conforming workbook is unaffected by that tolerance", {
@@ -144,8 +144,8 @@ test_that("a ZIP64 workbook gives the same answer as a plain one", {
     readBin(plain, "raw", file.size(plain)),
     readBin(zip64, "raw", file.size(zip64))
   ))
-  expect_identical(read_xlsx(zip64), read_xlsx(plain))
-  expect_identical(read_xlsx(zip64)$n, c(42.5, -1))
+  expect_identical(xlsx_read(zip64), xlsx_read(plain))
+  expect_identical(xlsx_read(zip64)$n, c(42.5, -1))
 })
 
 test_that("the ZIP64 end of central directory record is actually used", {

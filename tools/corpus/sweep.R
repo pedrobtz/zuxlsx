@@ -45,7 +45,7 @@ outcome_of <- function(path) {
     cells <- cells + got
     read <- tryCatch(
       {
-        zuxlsx::read_xlsx(path, i)
+        zuxlsx::xlsx_read(path, i)
         NULL
       },
       condition = function(e) structure(list(cls = class(e)[1]), class = "zfail")

@@ -1,4 +1,4 @@
-# xlsx_read_cells(): the callback reader of design section 12.
+# xlsx_stream_cells(): the callback reader of design section 12.
 #
 # This is the one entry that calls R while the archive and the parser are
 # open, so several of these tests are about what happens when that call does
@@ -10,7 +10,7 @@ test_that("the chunks together are the whole worksheet", {
   write_workbook(path, grid_workbook(12L, 4L))
 
   seen <- list()
-  xlsx_read_cells(path, 1, function(cells) {
+  xlsx_stream_cells(path, 1, function(cells) {
     seen[[length(seen) + 1L]] <<- cells
   }, chunk_size = 7L)
 
@@ -32,7 +32,7 @@ test_that("a chunk never splits a row", {
   # Collected, then asserted outside the callback: an expectation inside it
   # would vanish, silently, if the callback were never called.
   chunks <- list()
-  xlsx_read_cells(path, 1, function(cells) {
+  xlsx_stream_cells(path, 1, function(cells) {
     chunks[[length(chunks) + 1L]] <<- as.vector(table(cells$row))
   }, chunk_size = 3L)
 
@@ -50,7 +50,7 @@ test_that("returning FALSE stops the read", {
 
   seen <- 0L
   calls <- 0L
-  stopped <- xlsx_read_cells(path, 1, function(cells) {
+  stopped <- xlsx_stream_cells(path, 1, function(cells) {
     calls <<- calls + 1L
     seen <<- seen + nrow(cells)
     FALSE
@@ -66,9 +66,9 @@ test_that("reading to the end reports that it was not stopped", {
   path <- withr::local_tempfile(fileext = ".xlsx")
   write_workbook(path, grid_workbook(4L, 2L))
 
-  expect_false(xlsx_read_cells(path, 1, function(cells) NULL))
+  expect_false(xlsx_stream_cells(path, 1, function(cells) NULL))
   # Any value other than FALSE continues, including TRUE.
-  expect_false(xlsx_read_cells(path, 1, function(cells) TRUE))
+  expect_false(xlsx_stream_cells(path, 1, function(cells) TRUE))
 })
 
 test_that("an error in the callback propagates and leaves nothing open", {
@@ -81,14 +81,14 @@ test_that("an error in the callback propagates and leaves nothing open", {
   write_workbook(path, grid_workbook(40L, 4L))
 
   expect_error(
-    xlsx_read_cells(path, 1, function(cells) stop("from the callback"),
+    xlsx_stream_cells(path, 1, function(cells) stop("from the callback"),
                     chunk_size = 8L),
     "from the callback"
   )
 
   # The proof that nothing was left open: the same file reads normally.
   seen <- 0L
-  xlsx_read_cells(path, 1, function(cells) seen <<- seen + nrow(cells))
+  xlsx_stream_cells(path, 1, function(cells) seen <<- seen + nrow(cells))
   expect_identical(seen, 160L)
 })
 
@@ -98,20 +98,20 @@ test_that("repeated aborted reads do not accumulate", {
 
   for (i in 1:25) {
     expect_error(
-      xlsx_read_cells(path, 1, function(cells) stop("x"), chunk_size = 4L),
+      xlsx_stream_cells(path, 1, function(cells) stop("x"), chunk_size = 4L),
       "x"
     )
   }
-  expect_false(xlsx_read_cells(path, 1, function(cells) NULL))
+  expect_false(xlsx_stream_cells(path, 1, function(cells) NULL))
 })
 
 test_that("each chunk carries the workbook epoch", {
-  # read_xlsx() needs it to convert a date, and a caller assembling columns
+  # xlsx_read() needs it to convert a date, and a caller assembling columns
   # from chunks needs it for the same reason.
   expect_true(
     local({
       got <- NULL
-      xlsx_read_cells(path_to("blanks.xlsx"), 1, function(cells) {
+      xlsx_stream_cells(path_to("blanks.xlsx"), 1, function(cells) {
         got <<- attr(cells, "date1904")
       })
       got
@@ -124,7 +124,7 @@ test_that("a worksheet can be chosen by name", {
   write_workbook(path, workbook_parts(c("one", "two")))
 
   seen <- 0L
-  xlsx_read_cells(path, "two", function(cells) seen <<- seen + nrow(cells))
+  xlsx_stream_cells(path, "two", function(cells) seen <<- seen + nrow(cells))
   expect_gt(seen, 0L)
 })
 
@@ -132,19 +132,19 @@ test_that("bad arguments are input errors", {
   path <- withr::local_tempfile(fileext = ".xlsx")
   write_workbook(path)
 
-  expect_error(xlsx_read_cells(path, 1, "not a function"),
+  expect_error(xlsx_stream_cells(path, 1, "not a function"),
                class = "zuxlsx_input_error")
-  expect_error(xlsx_read_cells(path, 1, function(x) NULL, chunk_size = 0),
+  expect_error(xlsx_stream_cells(path, 1, function(x) NULL, chunk_size = 0),
                class = "zuxlsx_input_error")
-  expect_error(xlsx_read_cells(path, 1, function(x) NULL, chunk_size = NA),
+  expect_error(xlsx_stream_cells(path, 1, function(x) NULL, chunk_size = NA),
                class = "zuxlsx_input_error")
   # Past the integer range, not whole, or not finite: each used to become an
   # NA with a coercion warning, and then a misleading `path` error.
   for (bad in list(3e9, Inf, 2.5, -Inf)) {
-    expect_error(xlsx_read_cells(path, 1, function(x) NULL, chunk_size = bad),
+    expect_error(xlsx_stream_cells(path, 1, function(x) NULL, chunk_size = bad),
                  class = "zuxlsx_input_error", info = format(bad))
   }
-  expect_error(xlsx_read_cells(path, 99, function(x) NULL),
+  expect_error(xlsx_stream_cells(path, 99, function(x) NULL),
                class = "zuxlsx_sheet_error")
 })
 
@@ -154,7 +154,7 @@ test_that("an unreadable file fails before the callback is ever called", {
 
   called <- FALSE
   expect_error(
-    xlsx_read_cells(path, "Sheet1", function(cells) called <<- TRUE),
+    xlsx_stream_cells(path, "Sheet1", function(cells) called <<- TRUE),
     class = "zuxlsx_error"
   )
   expect_false(called)
@@ -166,8 +166,8 @@ test_that("callback and chunk_size are checked before the workbook is opened", {
   # not exist would be a sheet error if the workbook had been opened first.
   path <- withr::local_tempfile(fileext = ".xlsx")
   write_workbook(path)
-  expect_error(xlsx_read_cells(path, "Nope", "not a function"),
+  expect_error(xlsx_stream_cells(path, "Nope", "not a function"),
                class = "zuxlsx_input_error")
-  expect_error(xlsx_read_cells(path, "Nope", function(x) NULL, chunk_size = 0),
+  expect_error(xlsx_stream_cells(path, "Nope", function(x) NULL, chunk_size = 0),
                class = "zuxlsx_input_error")
 })

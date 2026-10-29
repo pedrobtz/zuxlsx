@@ -49,7 +49,7 @@ test_that("every OLE2 container is reported as unsupported, not corrupt", {
   # The distinction that matters to a user: nothing here is damaged, and no
   # amount of retrying or re-downloading will help.
   for (name in c("encrypted-agile.xlsx", "legacy.xls", "unknown-ole2.bin")) {
-    expect_error(read_xlsx(ole2_fixture(name)),
+    expect_error(xlsx_read(ole2_fixture(name)),
                  class = "zuxlsx_unsupported_format_error", info = name)
   }
 })
@@ -60,9 +60,9 @@ test_that("an encrypted workbook and a legacy .xls get different answers", {
   # same message -- which told someone with a password-protected file that it
   # might be a legacy .xls, and someone with a legacy .xls that it might need
   # a password.
-  encrypted <- tryCatch(read_xlsx(ole2_fixture("encrypted-agile.xlsx")),
+  encrypted <- tryCatch(xlsx_read(ole2_fixture("encrypted-agile.xlsx")),
                         condition = function(e) e)
-  legacy <- tryCatch(read_xlsx(ole2_fixture("legacy.xls")),
+  legacy <- tryCatch(xlsx_read(ole2_fixture("legacy.xls")),
                      condition = function(e) e)
 
   expect_s3_class(encrypted, "zuxlsx_encrypted_error")
@@ -77,7 +77,7 @@ test_that("the encrypted condition is a subclass, so old handlers still work", {
   # Code written before this distinction existed catches
   # zuxlsx_unsupported_format_error. Narrowing the class without keeping that
   # would be a silent break for every such caller.
-  cond <- tryCatch(read_xlsx(ole2_fixture("encrypted-agile.xlsx")),
+  cond <- tryCatch(xlsx_read(ole2_fixture("encrypted-agile.xlsx")),
                    condition = function(e) e)
   expect_s3_class(cond, "zuxlsx_encrypted_error")
   expect_s3_class(cond, "zuxlsx_unsupported_format_error")
@@ -86,7 +86,7 @@ test_that("the encrypted condition is a subclass, so old handlers still work", {
 
 test_that("an OLE2 container that is neither is still reported honestly", {
   # The reader must not reach for the better message when it does not know.
-  cond <- tryCatch(read_xlsx(ole2_fixture("unknown-ole2.bin")),
+  cond <- tryCatch(xlsx_read(ole2_fixture("unknown-ole2.bin")),
                    condition = function(e) e)
   expect_s3_class(cond, "zuxlsx_unsupported_format_error")
   expect_false(inherits(cond, "zuxlsx_encrypted_error"))
@@ -118,8 +118,8 @@ test_that("the encrypted fixture's plaintext reads like the workbook it came fro
   # Asserting the repack changed nothing is what makes it usable as the
   # expected result of decrypting the two encrypted fixtures.
   expect_identical(
-    read_xlsx(ole2_fixture("two-sheets-stored.xlsx")),
-    read_xlsx(system.file("extdata", "two-sheets.xlsx", package = "zuxlsx"))
+    xlsx_read(ole2_fixture("two-sheets-stored.xlsx")),
+    xlsx_read(system.file("extdata", "two-sheets.xlsx", package = "zuxlsx"))
   )
 })
 
@@ -137,17 +137,17 @@ test_that("a real encrypted workbook is recognised as encrypted", {
   # The synthetic fixture proves the classifier reads a directory this
   # package wrote. This proves it reads one msoffcrypto-tool wrote, which is
   # the only one of the two that resembles what users will hand it.
-  expect_error(read_xlsx(ole2_fixture("two-sheets-encrypted.xlsx")),
+  expect_error(xlsx_read(ole2_fixture("two-sheets-encrypted.xlsx")),
                class = "zuxlsx_encrypted_error")
   expect_identical(native_status(ole2_fixture("two-sheets-encrypted.xlsx")),
                    "format_encrypted")
 })
 
 test_that("every entry point reports an OLE2 container the same way", {
-  # read_xlsx() is not the only door in. A user calling xlsx_sheets() on an
+  # xlsx_read() is not the only door in. A user calling xlsx_sheets() on an
   # encrypted workbook should not get a different story.
   path <- ole2_fixture("encrypted-agile.xlsx")
-  for (fn in list(read_xlsx, xlsx_sheets, xlsx_cells)) {
+  for (fn in list(xlsx_read, xlsx_sheets, xlsx_cells)) {
     expect_error(fn(path), class = "zuxlsx_unsupported_format_error")
   }
 })
@@ -175,7 +175,7 @@ test_that("a truncated container produces a condition, never a crash", {
   if (light_tests()) lengths <- lengths[seq(1L, length(lengths), by = 7L)]
   for (n in lengths) {
     writeBin(src[seq_len(n)], tmp)
-    result <- tryCatch(read_xlsx(tmp), zuxlsx_error = function(e) class(e)[1])
+    result <- tryCatch(xlsx_read(tmp), zuxlsx_error = function(e) class(e)[1])
     expect_true(is.character(result), info = paste("truncated to", n))
   }
 })
@@ -195,7 +195,7 @@ test_that("a corrupted directory or FAT produces a condition", {
     pos <- sample(c(seq_len(600L), seq_along(x)), size = sample.int(6L, 1L))
     x[pos] <- as.raw(sample.int(256L, length(pos), replace = TRUE) - 1L)
     writeBin(x, tmp)
-    result <- tryCatch(read_xlsx(tmp), zuxlsx_error = function(e) class(e)[1])
+    result <- tryCatch(xlsx_read(tmp), zuxlsx_error = function(e) class(e)[1])
     expect_true(is.character(result), info = paste("corruption", i))
   }
 })
@@ -218,7 +218,7 @@ test_that("a self-referential FAT chain terminates", {
     x[512L + i * 4L + 4L] <- as.raw(0L)
   }
   writeBin(x, tmp)
-  result <- tryCatch(read_xlsx(tmp), zuxlsx_error = function(e) class(e)[1])
+  result <- tryCatch(xlsx_read(tmp), zuxlsx_error = function(e) class(e)[1])
   expect_true(is.character(result))
 })
 
@@ -232,11 +232,11 @@ test_that("the classifier reads what the decryptor reads: v4, BIFF5 and storages
 
   v4 <- local_workbook_bytes(agile_encrypt(plain, "pw", spin_count = 10,
                                            version = 4L))
-  expect_error(read_xlsx(v4), class = "zuxlsx_encrypted_error")
+  expect_error(xlsx_read(v4), class = "zuxlsx_encrypted_error")
   expect_identical(xlsx_sheets(v4, password = "pw"), "Sheet1")
 
   book <- local_workbook_bytes(cfb_build(list(Book = as.raw(1:100))))
-  expect_error(read_xlsx(book), class = "zuxlsx_unsupported_format_error")
+  expect_error(xlsx_read(book), class = "zuxlsx_unsupported_format_error")
   expect_identical(native_status(book), "format_xls")
 
   # Both streams, but under a storage rather than at the root.
@@ -254,7 +254,7 @@ test_that("the classifier reads what the decryptor reads: v4, BIFF5 and storages
   expect_null(cfb_streams(stored, "EncryptionInfo")$EncryptionInfo)
   in_storage <- local_workbook_bytes(stored)
   for (pw in list(NULL, "pw")) {
-    cond <- tryCatch(read_xlsx(in_storage, password = pw), error = identity)
+    cond <- tryCatch(xlsx_read(in_storage, password = pw), error = identity)
     expect_s3_class(cond, "zuxlsx_unsupported_format_error")
     expect_false(inherits(cond, "zuxlsx_encrypted_error"))
   }

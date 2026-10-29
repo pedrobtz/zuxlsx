@@ -60,7 +60,7 @@ print(bench::mark(
 # the values is the corpus sweep's job, not this script's.
 cat("\n-- read one sheet\n")
 print(bench::mark(
-  zuxlsx = zuxlsx::read_xlsx(path, sheet = sheet),
+  zuxlsx = zuxlsx::xlsx_read(path, sheet = sheet),
   readxl = readxl::read_xlsx(path, sheet = sheet, .name_repair = "minimal"),
   openxlsx2 = openxlsx2::read_xlsx(path, sheet = sheet),
   check = FALSE, iterations = 1L, filter_gc = FALSE

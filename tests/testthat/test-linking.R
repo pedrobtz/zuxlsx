@@ -4,7 +4,7 @@
 # visible from R except by calling something that cannot work without it.
 
 test_that("the native libraries are the ones we linked", {
-  native <- zuxlsx_native()
+  native <- xlsx_info()
   expect_named(native, c("xlsxio", "expat", "miniz", "tf_psa_crypto"))
 
   # xlsxio is vendored here, so its version is pinned by

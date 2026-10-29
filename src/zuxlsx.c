@@ -1521,7 +1521,7 @@ SEXP C_xlsx_read_cells(SEXP path, SEXP sheet, SEXP callback, SEXP env,
 /* ------------------------------------------------------------------------ */
 /* Column building (design section 14).
  *
- * read_xlsx() used to receive the cells as R vectors and pivot them in R,
+ * xlsx_read() used to receive the cells as R vectors and pivot them in R,
  * which meant the text of every cell crossed into R whether or not any column
  * needed it. On a 20000 by 10 sheet that text was 7.5 MB of a 12.8 MB
  * intermediate, and seven of the ten columns were numeric and threw it away.
@@ -1533,7 +1533,7 @@ SEXP C_xlsx_read_cells(SEXP path, SEXP sheet, SEXP callback, SEXP env,
  * each cell as it was written, because the text is still here in C when the
  * decision is made.
  *
- * The rules are the ones ?read_xlsx documents, and the tests in
+ * The rules are the ones ?xlsx_read documents, and the tests in
  * test-read.R hold them. */
 
 #define TYPEMASK(t) (1u << (t))

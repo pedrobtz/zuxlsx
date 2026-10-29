@@ -6,7 +6,7 @@ CELL_TYPES <- c("blank", "number", "string", "boolean", "error", "date")
 #'
 #' Reads a worksheet one cell at a time and returns them in a data frame, one
 #' row per cell. This is the low-level reader: it reports what is in each cell
-#' without assembling columns or guessing a type for them; [read_xlsx()] does
+#' without assembling columns or guessing a type for them; [xlsx_read()] does
 #' that.
 #'
 #' @param sheet The worksheet to read: either its name, or its position in the
@@ -14,7 +14,7 @@ CELL_TYPES <- c("blank", "number", "string", "boolean", "error", "date")
 #'
 #' Cells the worksheet leaves out between the ones it writes come back as
 #' `"blank"`, and so may a few the file never names: the reader pads to keep
-#' positions aligned. [read_xlsx()] ignores blank cells when it decides where
+#' positions aligned. [xlsx_read()] ignores blank cells when it decides where
 #' a table starts and ends.
 #'
 #' @return A data frame with one row per cell and the columns:
@@ -61,7 +61,7 @@ xlsx_cells <- function(path, sheet = 1, password = NULL) {
   cells_frame(parts)
 }
 
-# The data frame xlsx_cells() returns and xlsx_read_cells() hands to its
+# The data frame xlsx_cells() returns and xlsx_stream_cells() hands to its
 # callback, from the six vectors the native layer builds.
 cells_frame <- function(parts) {
   out <- data.frame(
@@ -73,7 +73,7 @@ cells_frame <- function(parts) {
     stringsAsFactors = FALSE
   )
   # The date epoch is a property of the workbook, not of any cell, so it rides
-  # along as an attribute rather than as a column. read_xlsx() needs it to turn
+  # along as an attribute rather than as a column. xlsx_read() needs it to turn
   # a serial number into a date; a caller working with cells directly needs it
   # for the same reason.
   attr(out, "date1904") <- parts[[6L]]

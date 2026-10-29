@@ -33,7 +33,7 @@ xlsx_sheets <- function(path, password = NULL) {
 #'   start when the package loaded.
 #' @export
 #' @examples
-#' zuxlsx_native()
-zuxlsx_native <- function() {
+#' xlsx_info()
+xlsx_info <- function() {
   zuxlsx_unwrap(.Call(C_zuxlsx_native))
 }

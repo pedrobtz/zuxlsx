@@ -33,7 +33,7 @@ files this package will actually meet, not more.
 
 `two-sheets-stored.xlsx` is `inst/extdata/two-sheets.xlsx` repacked with its
 parts *stored* rather than deflated. Same parts, same bytes, same reading —
-`test-ole2.R` asserts `read_xlsx()` gives an identical result for both. The
+`test-ole2.R` asserts `xlsx_read()` gives an identical result for both. The
 repack exists only to push the file over 4081 bytes, for the reason below.
 
 ### Reproducing them
