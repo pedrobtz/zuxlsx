@@ -53,7 +53,7 @@
 <!-- badges: start -->
 
 <p>Read <code>.xlsx</code> workbooks from R, password-protected ones included, with no system XML, ZIP or cryptography library required.</p>
-<p>zuxlsx bundles the <a href="https://github.com/brechtsanders/xlsxio" class="external-link">xlsxio</a> reader and links the Expat parser, the miniz ZIP reader and TF-PSA-Crypto statically at install time, out of the sibling packages <a href="https://github.com/pedrobtz/zuxml" class="external-link">zuxml</a>, <a href="https://github.com/pedrobtz/zukomp" class="external-link">zukomp</a> and <a href="https://github.com/pedrobtz/zucrypt" class="external-link">zucrypt</a>. Those are <code>LinkingTo</code> dependencies only: the archives end up inside <code>zuxlsx.so</code>, so none of the three has to be installed or loadable once zuxlsx is built.</p>
+<p>zuxlsx bundles the <a href="https://github.com/brechtsanders/xlsxio" class="external-link">xlsxio</a> reader and links the <a href="https://libexpat.github.io/" class="external-link">Expat</a> parser, the <a href="https://github.com/richgel999/miniz" class="external-link">miniz</a> ZIP reader and <a href="https://github.com/Mbed-TLS/TF-PSA-Crypto" class="external-link">TF-PSA-Crypto</a> statically at install time, out of the sibling packages <a href="https://github.com/pedrobtz/zuxml" class="external-link">zuxml</a>, <a href="https://github.com/pedrobtz/zukomp" class="external-link">zukomp</a> and <a href="https://github.com/pedrobtz/zucrypt" class="external-link">zucrypt</a>. Those are <code>LinkingTo</code> dependencies only: the archives end up inside <code>zuxlsx.so</code>, so none of the three has to be installed or loadable once zuxlsx is built.</p>
 <p>Writing workbooks is out of scope.</p>
 <div class="section level2">
 <h2 id="usage">Usage<a class="anchor" aria-label="anchor" href="#usage"></a>
@@ -146,7 +146,11 @@
 <div class="dev-status">
 <h2 data-toc-skip>Dev status</h2>
 <ul class="list-unstyled">
+<li><a href="https://CRAN.R-project.org/package=zuxlsx" class="external-link"><img src="https://www.r-pkg.org/badges/version/zuxlsx" alt="CRAN status"></a></li>
+<li><a href="https://lifecycle.r-lib.org/articles/stages.html#experimental" class="external-link"><img src="https://img.shields.io/badge/lifecycle-experimental-orange.svg" alt="Lifecycle: experimental"></a></li>
 <li><a href="https://github.com/pedrobtz/zuxlsx/actions/workflows/R-CMD-check.yaml" class="external-link"><img src="https://github.com/pedrobtz/zuxlsx/actions/workflows/R-CMD-check.yaml/badge.svg" alt="R-CMD-check"></a></li>
+<li><a href="https://github.com/pedrobtz/zuxlsx/actions/workflows/native-checks.yaml" class="external-link"><img src="https://github.com/pedrobtz/zuxlsx/actions/workflows/native-checks.yaml/badge.svg" alt="native-checks"></a></li>
+<li><a href="https://github.com/pedrobtz/zuxlsx/actions/workflows/coverage.yaml" class="external-link"><img src="https://raw.githubusercontent.com/pedrobtz/zuxlsx/main/.github/badges/coverage.svg" alt="coverage"></a></li>
 </ul>
 </div>
 

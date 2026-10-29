@@ -4,8 +4,10 @@ Read `.xlsx` workbooks from R, password-protected ones included, with no
 system XML, ZIP or cryptography library required.
 
 zuxlsx bundles the [xlsxio](https://github.com/brechtsanders/xlsxio)
-reader and links the Expat parser, the miniz ZIP reader and
-TF-PSA-Crypto statically at install time, out of the sibling packages
+reader and links the [Expat](https://libexpat.github.io/) parser, the
+[miniz](https://github.com/richgel999/miniz) ZIP reader and
+[TF-PSA-Crypto](https://github.com/Mbed-TLS/TF-PSA-Crypto) statically at
+install time, out of the sibling packages
 [zuxml](https://github.com/pedrobtz/zuxml),
 [zukomp](https://github.com/pedrobtz/zukomp) and
 [zucrypt](https://github.com/pedrobtz/zucrypt). Those are `LinkingTo`
