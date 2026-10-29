@@ -584,6 +584,13 @@ different data frame without any sign of it. The exports are now
 older status notes are the ones used at the time; the native entry points
 (`C_read_xlsx` and so on) are internal and keep theirs.
 
+**Deferred, 2026-10-29: `col_types`, `na`, `skip`, `n_max` (#27).** Each is a
+new argument whose default keeps today's behaviour, so adding one after
+0.1.0 breaks no caller, and none of them has to be settled before CRAN
+fixes the names. Until then `range` covers `skip` and `n_max`, and
+`xlsx_cells()` is the way to read a column as other than its inferred type.
+Milestone v0.2.0.
+
 Initial high-level API:
 
 ```r
