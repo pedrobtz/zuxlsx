@@ -11,6 +11,8 @@ xlsxio (src/vendor/xlsxio/)
 Upstream:  https://github.com/brechtsanders/xlsxio
 Release:   0.2.36 (commit a9016eb2eb46dcd613a68fcfcd1002b5adf64ae9)
 License:   MIT, reproduced verbatim in src/vendor/xlsxio/LICENSE.txt
+Full text: inst/licenses/xlsxio-LICENSE, byte-identical to it, so the
+           licence is installed with the object code it covers
 
   Copyright (c) 2016 Brecht Sanders
 

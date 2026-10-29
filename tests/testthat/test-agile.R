@@ -245,6 +245,7 @@ test_that("encrypted fields too short or not whole blocks are malformed", {
 })
 
 test_that("a declared length the ciphertext cannot back is refused before allocating", {
+  withr::local_options(warn = 2)
   # The status, not only the class: "agile_malformed" is decided from the
   # length prefix alone, before the password, the HMAC or any allocation --
   # where "agile_integrity", the same class, would mean it got as far as the
