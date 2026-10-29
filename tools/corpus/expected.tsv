@@ -72,8 +72,8 @@ poi/54399.xlsx	ok	1	3
 poi/54436.xlsx	ok	1	29
 poi/54524.xlsx	ok	1	15
 poi/54607.xlsx	ok	3	3
-poi/54764-2.xlsx	ok	3	6
-poi/54764.xlsx	ok	3	6
+poi/54764-2.xlsx	zuxlsx_xml_error	0	0
+poi/54764.xlsx	zuxlsx_xml_error	3	0
 poi/55406_Conditional_formatting_sample.xlsx	ok	1	39
 poi/55640.xlsx	ok	3	4
 poi/55745.xlsx	ok	2	46
@@ -202,7 +202,7 @@ poi/clusterfuzz-testcase-minimized-POIXSSFFuzzer-4828727001088000.xlsx	zuxlsx_zi
 poi/clusterfuzz-testcase-minimized-POIXSSFFuzzer-5089447305609216.xlsx	zuxlsx_zip_error	0	0
 poi/clusterfuzz-testcase-minimized-POIXSSFFuzzer-5185049589579776.xlsx	zuxlsx_zip_error	0	0
 poi/clusterfuzz-testcase-minimized-POIXSSFFuzzer-5265527465181184.xlsx	ok	2	0
-poi/clusterfuzz-testcase-minimized-POIXSSFFuzzer-5937385319563264.xlsx	ok	12	3677
+poi/clusterfuzz-testcase-minimized-POIXSSFFuzzer-5937385319563264.xlsx	zuxlsx_zip_error	12	2395
 poi/clusterfuzz-testcase-minimized-POIXSSFFuzzer-6123461607817216.xlsx	zuxlsx_zip_error	0	0
 poi/clusterfuzz-testcase-minimized-POIXSSFFuzzer-6419366255919104.xlsx	zuxlsx_zip_error	0	0
 poi/clusterfuzz-testcase-minimized-POIXSSFFuzzer-6448258963341312.xlsx	zuxlsx_zip_error	0	0
@@ -280,8 +280,8 @@ poi/NumberFormatTests.xlsx	ok	2	1328
 poi/picture-and-shape-same-size.xlsx	ok	1	1
 poi/picture.xlsx	ok	3	20
 poi/poc-shared-strings.xlsx	ok	1	12000
-poi/poc-xmlbomb-empty.xlsx	ok	1	1
-poi/poc-xmlbomb.xlsx	ok	1	1
+poi/poc-xmlbomb-empty.xlsx	zuxlsx_xml_error	1	0
+poi/poc-xmlbomb.xlsx	zuxlsx_xml_error	1	0
 poi/protected_passtika.xlsb	zuxlsx_encrypted_error	0	0
 poi/protected_passtika.xlsx	zuxlsx_encrypted_error	0	0
 poi/ref-56737.xlsx	ok	3	21
@@ -290,7 +290,7 @@ poi/reordered_sheets.xlsx	ok	4	2
 poi/RepeatingRowsCols.xlsx	ok	4	40
 poi/resize_compare.xlsx	ok	1	2
 poi/right-to-left.xlsx	ok	2	8
-poi/sample-beta.xlsx	ok	3	20
+poi/sample-beta.xlsx	zuxlsx_ooxml_error	3	0
 poi/sample.strict.xlsx	ok	3	37
 poi/sample.xlsb	zuxlsx_unsupported_format_error	0	0
 poi/sample.xlsx	ok	3	37

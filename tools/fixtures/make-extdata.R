@@ -10,7 +10,7 @@
 #
 # The workbook is deliberately small and deliberately varied: it has two
 # worksheets so that `sheet =` means something in an example, and its first
-# sheet holds one column of each type read_xlsx() infers, so the examples show
+# sheet holds one column of each type xlsx_read() infers, so the examples show
 # the type inference rather than a block of numbers.
 
 args <- commandArgs(trailingOnly = TRUE)

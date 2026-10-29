@@ -87,9 +87,13 @@ cfb_stream_names <- function(path) {
   vapply(cfb_read(path), function(e) e$name, character(1))
 }
 
+# Committed fixtures, so a missing one is a bug to fail on, not a reason to
+# skip: a skip here would turn most of the decryption suite into skips.
 ole2_fixture <- function(name) {
   path <- test_path("fixtures", "ole2", name)
-  skip_if(!file.exists(path), paste0(name, " fixture is missing"))
+  if (!file.exists(path)) {
+    stop("committed fixture missing: ", path, call. = FALSE)
+  }
   path
 }
 
@@ -256,7 +260,12 @@ flip <- function(x, at) {
 # An EncryptedPackage stream with its eight-byte length prefix rewritten. The
 # length is a double so that values past 2^31 can be written.
 with_length <- function(package, n) {
-  package[1:8] <- as.raw(floor(n / 256^(0:7)) %% 256)
+  # As two 32-bit halves: %% on a double above 2^53 warns of lost accuracy,
+  # and the tests ask for lengths up to 2^64 (#70). Each half is exact.
+  hi <- floor(n / 2^32)
+  lo <- n - hi * 2^32
+  le4 <- function(x) as.raw(floor(x / 256^(0:3)) %% 256)
+  package[1:8] <- c(le4(lo), le4(hi %% 2^32))
   package
 }
 
@@ -305,4 +314,11 @@ base64_encode <- function(bytes) {
   pad <- (-n) %% 3
   if (pad > 0) substr(out, nchar(out) - pad + 1, nchar(out)) <- strrep("=", pad)
   out
+}
+
+# The status the native layer reports for a file: what tells two failures of
+# the same class apart (a legacy .xls from another OLE2 file, say) without
+# reading the message, whose wording the snapshots in test-conditions.R own.
+native_status <- function(path, password = NULL) {
+  .Call(C_xlsx_sheets, normalizePath(path), password)$status
 }

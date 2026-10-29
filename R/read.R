@@ -1,14 +1,15 @@
 #' Read a worksheet into a data frame
 #'
 #' Reads a worksheet and assembles its cells into columns, giving each column
-#' the type its cells support. This is the high-level reader; [xlsx_cells()] is
-#' the cell-by-cell view underneath it.
+#' the type its cells support. This is the high-level reader; [xlsx_cells()]
+#' gives the same worksheet cell by cell.
 #'
-#' A worksheet may leave a row out of its XML rather than write an empty one.
-#' Such a row is kept, as a row of `NA`, wherever it falls -- including
-#' directly beneath the header. Keeping every blank row is easier to predict
-#' than keeping only the interior ones, and `range` is the way to begin
-#' further down the sheet.
+#' Without `range`, the table is the rectangle its non-blank cells span:
+#' empty rows above and below it, and empty columns either side, are not
+#' part of it, so a table that starts at `B3` reads with its header from row
+#' 3. Inside that rectangle a worksheet may leave a row out of its XML rather
+#' than write an empty one; such a row is kept, as a row of `NA`, wherever it
+#' falls -- including directly beneath the header.
 #'
 #' Column types are inferred by promotion. A column of blanks is logical, one
 #' of booleans stays logical, numbers give a double, and anything that mixes
@@ -16,11 +17,11 @@
 #' whose cells are all dates becomes a `Date`, or a `POSIXct` when any of them
 #' carries a time of day.
 #'
-#' @param path Path to an `.xlsx` file.
-#' @param sheet The worksheet to read: either its name, or its position in the
-#'   workbook.
 #' @param col_names Whether the first row holds column names. When `FALSE`,
-#'   columns are named `X1`, `X2` and so on.
+#'   columns are named `X1`, `X2` and so on. When `TRUE`, a column whose
+#'   header cell is blank is named `X` and its position, and repeated names
+#'   are made unique with [make.unique()] and an underscore, so a second `id`
+#'   becomes `id_1`.
 #' @param range An A1-style cell range limiting what is read, or `NULL` for the
 #'   whole worksheet. Either corner may name a cell, a column or a row, so
 #'   `"B2:D10"` takes a rectangle, `"A:C"` takes three columns in full, and
@@ -28,10 +29,13 @@
 #'   order. A range is read as its own rectangle: cells outside it are ignored,
 #'   the top-left becomes the first row and column, and columns the range
 #'   covers appear even where the worksheet left them empty. When `col_names`
-#'   is `TRUE` the first row of the range supplies the names.
+#'   is `TRUE` the first row of the range supplies the names. A range may not
+#'   reach past `XFD1048576`, the last cell a worksheet can have.
 #'
-#' @return A data frame.
-#' @inheritParams xlsx_sheets
+#' @return A data frame with one column per worksheet column, typed as
+#'   described above. A worksheet, or a range, with no cells in it gives a
+#'   data frame with no columns and no rows.
+#' @inheritParams xlsx_cells
 #' @export
 #' @seealso [xlsx_cells()] for the cells themselves, and [xlsx_sheets()] to
 #'   list the worksheets.
@@ -39,25 +43,30 @@
 #' path <- system.file("extdata", "two-sheets.xlsx", package = "zuxlsx")
 #'
 #' # Each column takes the type its cells support.
-#' readings <- read_xlsx(path)
+#' readings <- xlsx_read(path)
 #' readings
 #' vapply(readings, function(x) class(x)[1], character(1))
 #'
 #' # A worksheet by name, and part of one by range.
-#' read_xlsx(path, "notes")
-#' read_xlsx(path, range = "B1:C3")
+#' xlsx_read(path, "notes")
+#' xlsx_read(path, range = "B1:C3")
 #'
 #' # Without a header row, columns are named by position.
-#' read_xlsx(path, range = "A2:B4", col_names = FALSE)
-read_xlsx <- function(path, sheet = 1, col_names = TRUE, range = NULL,
-                      password = NULL) {
+#' xlsx_read(path, range = "A2:B4", col_names = FALSE)
+xlsx_read <- function(
+  path,
+  sheet = 1,
+  col_names = TRUE,
+  range = NULL,
+  password = NULL
+) {
   if (!is.logical(col_names) || length(col_names) != 1L || is.na(col_names)) {
     zuxlsx_stop(
       "zuxlsx_input_error",
       "`col_names` must be TRUE or FALSE."
     )
   }
-  bounds <- if (is.null(range)) NULL else parse_range(range)
+  bounds <- if (!is.null(range)) parse_range(range)
   path <- check_path(path)
   password <- check_optional_password(password)
   sheet <- resolve_sheet(path, sheet, password)
@@ -67,15 +76,7 @@ read_xlsx <- function(path, sheet = 1, col_names = TRUE, range = NULL,
   # column turns out to be character: on a wide numeric sheet most of the
   # worksheet never crosses the boundary at all.
   got <- zuxlsx_unwrap(
-    .Call(
-      C_read_xlsx, path, sheet, col_names,
-      if (is.null(bounds)) {
-        NULL
-      } else {
-        as.numeric(c(bounds$min_row, bounds$max_row, bounds$min_col, bounds$max_col))
-      },
-      password
-    ),
+    .Call(C_read_xlsx, path, sheet, col_names, bounds, password),
     path = path
   )
   if (is.null(got)) {
@@ -108,8 +109,10 @@ header_names <- function(header, n_col) {
 # chooses. Neither epoch is the obvious one, and the 1900 system is not even
 # internally consistent -- see shift_1900() below.
 to_datetime <- function(serial, date1904) {
-  origin <- if (date1904) "1904-01-01" else "1899-12-30"
-  if (!date1904) {
+  if (date1904) {
+    origin <- "1904-01-01"
+  } else {
+    origin <- "1899-12-30"
     serial <- shift_1900(serial)
   }
 
@@ -131,11 +134,11 @@ to_datetime <- function(serial, date1904) {
 # is common, puts every date before March 1900 one day early.
 #
 # Serial 60 itself denotes no real date and becomes NA rather than being bent
-# onto one of its neighbours.
+# onto one of its neighbours -- and so does any time on that day, 60 to 61.
 shift_1900 <- function(serial) {
   out <- serial
   below <- !is.na(serial) & serial < 60
   out[below] <- serial[below] + 1
-  out[!is.na(serial) & serial == 60] <- NA_real_
+  out[!is.na(serial) & floor(serial) == 60] <- NA_real_
   out
 }

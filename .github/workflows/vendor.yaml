@@ -1,0 +1,43 @@
+# The vendored xlsxio tree matches its manifest, from pedrobtz/r-actions.
+# tools/vendor/verify checks the tree is internally consistent; the
+# pull-request half checks that a change under src/vendor/ came with a
+# manifest change, the only way the tree stays reproducible from upstream.
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'src/vendor/**'
+      - 'src/Makevars.in'
+      - 'tools/vendor/**'
+      - 'tools/patches/**'
+      - 'inst/COPYRIGHTS'
+      - 'tests/testthat/fixtures/**'
+      - 'inst/extdata/**'
+      - 'tools/make-ole2.R'
+      - 'tools/fixtures/**'
+      - 'tools/check-layering.sh'
+      - 'src/*.c'
+      - 'src/*.h'
+      - '.github/workflows/vendor.yaml'
+  pull_request:
+  workflow_dispatch:
+
+name: vendor.yaml
+
+permissions: read-all
+
+jobs:
+  vendor:
+    uses: pedrobtz/r-actions/.github/workflows/vendor.yml@v1
+
+  # The two committed-fixture generators reproduce what is committed, and the
+  # R-free C stays R-free (#44, #45).
+  fixtures:
+    runs-on: ubuntu-latest
+    name: generated fixtures match, and the R-free C includes no R
+    steps:
+      - uses: actions/checkout@v6
+      - run: sh tools/check-layering.sh
+      - uses: r-lib/actions/setup-r@v2
+      - run: Rscript tools/make-ole2.R --check
+      - run: Rscript tools/fixtures/make-extdata.R --check

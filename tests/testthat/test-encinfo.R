@@ -17,7 +17,7 @@ test_that("the C parser reads the fixtures exactly as the R parser does", {
 test_that("a password-protected workbook decrypts from its bytes alone", {
   cases <- list(
     "two-sheets-encrypted.xlsx" = "zuxlsx",
-    "two-sheets-encrypted-utf16.xlsx" = "zü✓\U0001F511"
+    "two-sheets-encrypted-utf16.xlsx" = utf16_password()
   )
   for (fixture in names(cases)) {
     path <- ole2_fixture(fixture)
@@ -210,7 +210,7 @@ test_that("base64 is decoded exactly, and strictly", {
     doc <- sub('saltValue="[^"]*"', paste0('saltValue="', text, '"'), xml)
     encryption_info(encryption_info_stream(doc))$key_data$salt
   }
-  set.seed(9)
+  withr::local_seed(9)
   for (n in c(1:40, 255)) {
     bytes <- as.raw(sample(0:255, n, TRUE))
     expect_identical(with_salt(base64_encode(bytes)), bytes, info = n)

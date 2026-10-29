@@ -10,7 +10,7 @@
 # thing, and asserts on the class. Which class matters: a wrong password, a
 # damaged file and an algorithm this does not implement need three different
 # responses from the caller. The builders it uses -- agile_fixture(),
-# agile_agile_plaintext(), flip(), with_length() -- are in helper-ole2.R.
+# agile_plaintext(), flip(), with_length() -- are in helper-ole2.R.
 
 test_that("the fixture decrypts to exactly the bytes msoffcrypto-tool was given", {
   fx <- agile_fixture("two-sheets-encrypted.xlsx")
@@ -23,8 +23,8 @@ test_that("the decrypted package reads as the workbook it came from", {
   out <- withr::local_tempfile(fileext = ".xlsx")
   writeBin(agile_decrypt(fx$package, "zuxlsx", fx$params, fx$path), out)
   expect_identical(
-    read_xlsx(out, sheet = 2),
-    read_xlsx(ole2_fixture("two-sheets-stored.xlsx"), sheet = 2)
+    xlsx_read(out, sheet = 2),
+    xlsx_read(ole2_fixture("two-sheets-stored.xlsx"), sheet = 2)
   )
 })
 
@@ -32,12 +32,12 @@ test_that("a non-ASCII password is hashed as UTF-16LE, surrogate pairs included"
   # "zü✓🔑": one-, two-, three- and four-byte UTF-8. The last is outside the
   # BMP, so it only matches if it becomes a surrogate pair.
   fx <- agile_fixture("two-sheets-encrypted-utf16.xlsx")
-  password <- "zü✓\U0001F511"
+  password <- utf16_password()
   expect_identical(agile_decrypt(fx$package, password, fx$params, fx$path),
                    agile_plaintext())
 
   # Each character is load-bearing: dropping the pair is a different password.
-  expect_error(agile_decrypt(fx$package, "zü✓", fx$params, fx$path),
+  expect_error(agile_decrypt(fx$package, utf16_password(3), fx$params, fx$path),
                class = "zuxlsx_password_error")
 })
 
@@ -245,6 +245,7 @@ test_that("encrypted fields too short or not whole blocks are malformed", {
 })
 
 test_that("a declared length the ciphertext cannot back is refused before allocating", {
+  withr::local_options(warn = 2)
   # The status, not only the class: "agile_malformed" is decided from the
   # length prefix alone, before the password, the HMAC or any allocation --
   # where "agile_integrity", the same class, would mean it got as far as the
@@ -295,9 +296,11 @@ test_that("decrypting twice gives the same bytes, and needs no state between cal
 
 test_that("zucrypt's own namespace can be loaded alongside, and both work", {
   # zuxlsx holds a private copy of the backend, linked from libzucrypt.a;
-  # zucrypt.so holds another. They must not interfere.
-  skip_if_not_installed("zucrypt")
-  loadNamespace("zucrypt")
+  # zucrypt.so holds another. They must not interfere -- and failing to load
+  # is exactly how they would, so only absence skips: skip_if_not_installed()
+  # would turn a load failure into a skip too.
+  skip_if(!nzchar(system.file(package = "zucrypt")), "zucrypt is not installed")
+  expect_true(requireNamespace("zucrypt", quietly = TRUE))
   fx <- agile_fixture("two-sheets-encrypted.xlsx")
   expect_identical(agile_decrypt(fx$package, "zuxlsx", fx$params, fx$path),
                    agile_plaintext())
@@ -307,4 +310,29 @@ test_that("zucrypt's own namespace can be loaded alongside, and both work", {
              0xde, 0x5d, 0xae, 0x22, 0x23, 0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17,
              0x7a, 0x9c, 0xb4, 0x10, 0xff, 0x61, 0xf2, 0x00, 0x15, 0xad))
   )
+})
+
+test_that("every hash and key size the decryptor accepts decrypts", {
+  skip_if_light()
+  # Excel writes SHA-512 with AES-256, which is all the committed fixtures
+  # cover. Office 2010 wrote SHA-1 with AES-128, and where the hash is
+  # shorter than the key the derived key is padded with 0x36 rather than
+  # truncated -- a branch nothing else reaches.
+  skip_if_not_installed("zucrypt")
+  plain <- workbook_bytes()
+  for (hash in c("SHA1", "SHA256", "SHA384", "SHA512")) {
+    for (key_bits in c(128, 192, 256)) {
+      file <- local_workbook_bytes(agile_encrypt(
+        plain, "pw", spin_count = 10, hash = hash, key_bits = key_bits
+      ))
+      expect_identical(
+        xlsx_sheets(file, password = "pw"), "Sheet1",
+        info = paste(hash, key_bits)
+      )
+      expect_error(
+        xlsx_sheets(file, password = "wrong"),
+        class = "zuxlsx_password_error", info = paste(hash, key_bits)
+      )
+    }
+  }
 })

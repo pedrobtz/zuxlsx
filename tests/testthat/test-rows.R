@@ -55,3 +55,34 @@ test_that("rows and cells agree about a fixture", {
   expect_length(rows, max(cells$row))
   expect_true(all(lengths(rows) == max(cells$col)))
 })
+
+test_that("rows count from row 1, as columns count from column 1", {
+  # rows[[n]][m] is the cell in row n, column m, so leading empty rows are
+  # kept as well as interior ones.
+  path <- withr::local_tempfile(fileext = ".xlsx")
+  parts <- workbook_parts()
+  parts[["xl/worksheets/sheet1.xml"]] <- paste0(
+    '<?xml version="1.0"?>',
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
+    '<sheetData><row r="3">', txt("B3", "x"), "</row></sheetData></worksheet>"
+  )
+  write_workbook(path, parts)
+
+  rows <- xlsx_rows(path)
+  expect_length(rows, 3L)
+  expect_identical(rows[[3L]], c(NA, "x"))
+  expect_identical(rows[[1L]], c(NA_character_, NA_character_))
+})
+
+test_that("xlsx_rows() is linear in the number of cells", {
+  # It used to compare every cell against every row, O(rows x cells): on
+  # 100k rows, 10^10 comparisons.
+  skip_on_cran()
+  skip_if_light()
+  path <- withr::local_tempfile(fileext = ".xlsx")
+  write_workbook(path, grid_workbook(20000L, 2L))
+  elapsed <- system.time(rows <- xlsx_rows(path))[["elapsed"]]
+  expect_length(rows, 20000L)
+  expect_identical(rows[[20000L]], c("39999", "40000"))
+  expect_lt(elapsed, 5)
+})

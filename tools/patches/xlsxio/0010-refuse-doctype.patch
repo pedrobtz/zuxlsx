@@ -1,0 +1,150 @@
+Refuse a DOCTYPE in every part xlsxio parses.
+
+No part of a workbook carries a DOCTYPE, and one is how an internal subset
+declares entities. zuxml builds Expat with XML_GE 0, so an entity is not
+expanded -- but its reference then reaches a cell as literal text ("&e;")
+rather than as an error, and nothing about the part said it was hostile.
+zuxml refuses a DOCTYPE at its own seam; xlsxio creates its parsers
+directly, so it had no such policy.
+
+Both places xlsxio creates a parser now install a start-DOCTYPE handler that
+stops the parse. The handler is handed xlsxio's callback data rather than
+the parser, and those structs differ, so the parser being driven is kept on
+a small stack pushed and popped around every parse call (parses nest, a part
+being parsed from a handler of [Content_Types].xml, but only a few deep).
+A refusal is an XML error, not the XML_ERROR_ABORTED xlsxio's own stops
+produce: expat_process_zip_file_checked() returns 1 with the line, and the
+worksheet reports XLSXIOREAD_SHEET_ERROR_XML.
+
+Written for zuxlsx (#47). None of it is upstream.
+
+--- a/lib/xlsxio_read.c
++++ b/lib/xlsxio_read.c
+@@ -233,6 +233,53 @@
+ ////////////////////////////////////////////////////////////////////////
+ 
+ //process XML file contents
++//zuxlsx: no part of a workbook carries a DOCTYPE, and one is how an
++//internal subset declares entities: under zuxml's XML_GE 0 they are not
++//expanded, so &e; arrives as literal text in a cell rather than as an
++//error. Every parser created here therefore refuses one (#47).
++//
++//A DOCTYPE handler is handed xlsxio's callback data, not the parser, and
++//those structs differ, so the parser that is parsing is kept on a small
++//stack, pushed and popped around every parse call. Parses nest -- a part is
++//parsed from inside a handler of [Content_Types].xml -- but never deeply,
++//and R calls into this from one thread.
++#define ZU_PARSE_DEPTH 16
++static XML_Parser zu_parse_stack[ZU_PARSE_DEPTH];
++static int zu_parse_refused[ZU_PARSE_DEPTH];
++static int zu_parse_top = 0;
++
++static void zu_parse_push (XML_Parser parser)
++{
++  if (zu_parse_top < ZU_PARSE_DEPTH) {
++    zu_parse_stack[zu_parse_top] = parser;
++    zu_parse_refused[zu_parse_top] = 0;
++  }
++  zu_parse_top++;
++}
++
++//whether the parse being popped refused a DOCTYPE
++static int zu_parse_pop (void)
++{
++  zu_parse_top--;
++  return (zu_parse_top >= 0 && zu_parse_top < ZU_PARSE_DEPTH ? zu_parse_refused[zu_parse_top] : 0);
++}
++
++static int zu_parse_was_refused (void)
++{
++  int top = zu_parse_top - 1;
++  return (top >= 0 && top < ZU_PARSE_DEPTH ? zu_parse_refused[top] : 0);
++}
++
++static void XMLCALL zu_refuse_doctype (void* userdata, const XML_Char* name, const XML_Char* sysid, const XML_Char* pubid, int has_internal_subset)
++{
++  int top = zu_parse_top - 1;
++  (void)userdata; (void)name; (void)sysid; (void)pubid; (void)has_internal_subset;
++  if (top >= 0 && top < ZU_PARSE_DEPTH) {
++    zu_parse_refused[top] = 1;
++    XML_StopParser(zu_parse_stack[top], XML_FALSE);
++  }
++}
++
+ //zuxlsx: as expat_process_zip_file(), but says how the part ended: 0 read
+ //in full, -1 not in the archive, 1 not well-formed XML (its line in *line),
+ //2 a ZIP size or CRC-32 mismatch. Upstream's own return of that answer is
+@@ -266,8 +313,10 @@
+   XML_SetUserData(parser, callbackdata);
+   XML_SetElementHandler(parser, start_handler, end_handler);
+   XML_SetCharacterDataHandler(parser, data_handler);
++  XML_SetStartDoctypeDeclHandler(parser, zu_refuse_doctype);
+   if (xmlparser)
+     *xmlparser = parser;
++  zu_parse_push(parser);
+   buf = XML_GetBuffer(parser, PARSE_BUFFER_SIZE);
+ #ifdef USE_MINIZ
+     while (buf) {
+@@ -279,19 +328,22 @@
+ #endif
+       done = buflen < PARSE_BUFFER_SIZE;
+       if ((status = XML_ParseBuffer(parser, (int)buflen, (done ? 1 : 0))) == XML_STATUS_ERROR) {
+-        if (XML_GetErrorCode(parser) != XML_ERROR_ABORTED) {
++        if (XML_GetErrorCode(parser) != XML_ERROR_ABORTED || zu_parse_was_refused()) {
+           checked = 1;
+           if (line)
+             *line = (unsigned long)XML_GetCurrentLineNumber(parser);
+         }
+         break;
+       }
+-      if (xmlparser && status == XML_STATUS_SUSPENDED)
++      if (xmlparser && status == XML_STATUS_SUSPENDED) {
++        zu_parse_pop();
+         return 0;
++      }
+       if (done)
+         break;
+       buf = XML_GetBuffer(parser, PARSE_BUFFER_SIZE);
+     }
++  zu_parse_pop();
+   XML_ParserFree(parser);
+ #ifdef USE_MINIZ
+   if (!mz_zip_reader_extract_iter_free(zipfile) && checked == 0)
+@@ -312,13 +364,28 @@
+     XML_SetUserData(result, callbackdata);
+     XML_SetElementHandler(result, start_handler, end_handler);
+     XML_SetCharacterDataHandler(result, data_handler);
++    XML_SetStartDoctypeDeclHandler(result, zu_refuse_doctype);
+   }
+   return result;
+ }
+ 
++//zuxlsx: whether the last expat_process_zip_file_resume() refused a DOCTYPE
++static int zu_resume_refused = 0;
++
++static enum XML_Status expat_process_zip_file_resume_inner (ZIPFILEENTRYTYPE* zipfile, XML_Parser xmlparser);
++
+ enum XML_Status expat_process_zip_file_resume (ZIPFILEENTRYTYPE* zipfile, XML_Parser xmlparser)
+ {
+   enum XML_Status status;
++  zu_parse_push(xmlparser);
++  status = expat_process_zip_file_resume_inner(zipfile, xmlparser);
++  zu_resume_refused = zu_parse_pop();
++  return status;
++}
++
++static enum XML_Status expat_process_zip_file_resume_inner (ZIPFILEENTRYTYPE* zipfile, XML_Parser xmlparser)
++{
++  enum XML_Status status;
+   status = XML_ResumeParser(xmlparser);
+   if (status == XML_STATUS_SUSPENDED)
+     return status;
+@@ -1765,7 +1832,7 @@
+   enum XML_Status status = expat_process_zip_file_resume(sheethandle->zipfile, sheethandle->processcallbackdata.xmlparser);
+   if (status == XML_STATUS_ERROR) {
+     enum XML_Error code = XML_GetErrorCode(sheethandle->processcallbackdata.xmlparser);
+-    if (code != XML_ERROR_ABORTED && code != XML_ERROR_FINISHED && code != XML_ERROR_NOT_SUSPENDED)
++    if ((code != XML_ERROR_ABORTED && code != XML_ERROR_FINISHED && code != XML_ERROR_NOT_SUSPENDED) || zu_resume_refused)
+       sheet_error(&sheethandle->processcallbackdata, XLSXIOREAD_SHEET_ERROR_XML);
+   }
+   return status;

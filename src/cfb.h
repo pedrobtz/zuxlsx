@@ -2,10 +2,9 @@
  * ([MS-CFB]), over a buffer in memory. Design section 21c, step 1.
  *
  * An encrypted workbook is a CFB container holding two streams,
- * EncryptionInfo and EncryptedPackage. ole2_kind() in zuxlsx.c reads only
- * the directory names, to say which kind of container a file is; this reads
- * what the streams contain, which needs the FAT, the miniFAT and the mini
- * stream as well.
+ * EncryptionInfo and EncryptedPackage. ole2_classify() in zuxlsx.c asks this
+ * which streams a container has, to say which kind of file it is, and the
+ * decryption reads what they contain.
  *
  * Plain C, no R, like agile.c, so tools/fuzz can drive it (#45). Every input
  * is hostile: a sector number is checked against the buffer before it is
@@ -54,6 +53,10 @@ typedef struct {
 cfb_status cfb_open(cfb *c, const uint8_t *buf, size_t len);
 
 void cfb_close(cfb *c);
+
+/* Whether a stream of that name is directly under the root storage: CFB_OK
+ * if so, CFB_NOT_FOUND if not, or why the directory could not be walked. */
+cfb_status cfb_has_stream(const cfb *c, const char *name);
 
 /* A stream directly under the root storage, by ASCII name, compared the way
  * [MS-CFB] 2.6.4 compares names (case-insensitively). On CFB_OK, *out is

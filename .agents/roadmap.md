@@ -4,7 +4,8 @@ Status: retroactive. Written 2026-09-22 from the git history and
 [design-zuxlsx.md](design-zuxlsx.md), after the fact for Stages 0 to 7: those
 stages were done before this file existed, so their exit criteria are the ones
 the merged pull requests actually met, not ones that were set in advance.
-Stages 8 to 10 are the plan from here. Stage 11, password-protected
+Stages 8 to 10 were the plan from there; 8 and 9 closed on 2026-10-29 (see
+their status lines). Stage 11, password-protected
 workbooks, was built between Stage 7 and Stage 8 and is recorded after
 Stage 10, out of order; the closing review says what that cost.
 
@@ -45,9 +46,9 @@ encryption (§21f); formula text (§21). Reading from memory as a public API
 | Stage 5 — Interoperability corpus | complete |
 | Stage 6 — Formats that are not broken files | complete |
 | Stage 7 — Streaming reader and C column builders | complete |
-| Stage 8 — Hardening | open |
-| Stage 9 — API freeze and docs | open |
-| Stage 10 — CRAN release | open, blocked on zuxml, zukomp and zucrypt reaching CRAN |
+| Stage 8 — Hardening | complete, 2026-10-29 (#110, #112, #113); #26 and #68 deferred |
+| Stage 9 — API freeze and docs | complete, 2026-10-29 (#114); #27, #25 deferred to v0.2.0, #69 open in the family |
+| Stage 10 — CRAN release | open: the siblings are on CRAN; what is left is to submit and tag |
 | Stage 11 — Password-protected workbooks | complete, built out of order; three criteria carried to Stage 8 (#26, #45, #68) |
 
 ---
@@ -155,85 +156,94 @@ decided in C), #33 (88fe4d4: benchmarks against readxl and openxlsx2).
 
 ## Stage 8 — Hardening
 
-**Status:** open. Fuzzing has started: #20 (ace9a55) found a process crash,
-fixed by patch 0007 and reported upstream.
+**Status:** complete, 2026-10-29. Fuzzing started with #20 (ace9a55), which
+found a process crash fixed by patch 0007; the whole-package review of
+2026-10-28 (#74 to #109, fixed in #110) found more, and #112 closed the rest.
 
 What this stage is for: a malformed, truncated or hostile workbook must end in
 a classed condition, promptly, and never in plausible partial data.
 
-- [ ] A malformed or truncated worksheet, and a corrupt DEFLATE stream, raise a
-      classed error instead of returning the rows read so far (#38).
-- [ ] The CRC-32 of every extracted part is verified, and `test-hostile.R`'s
-      KNOWN GAP test is turned into an error expectation (#39).
-- [ ] The header and the row extent do not depend on xlsxio's padding: tables
+- [x] A malformed or truncated worksheet, and a corrupt DEFLATE stream, raise a
+      classed error instead of returning the rows read so far (#38; patches
+      0008 and 0009).
+- [x] The CRC-32 of every part a read depends on is verified, and
+      `test-hostile.R`'s KNOWN GAP test is turned into an error expectation
+      (#39). Parts xlsxio never reads are not checked, deliberately.
+- [x] The header and the row extent do not depend on xlsxio's padding: tables
       starting at rows 1, 2, 3 and 10 give the same data frame (#40).
-- [ ] Cell coordinates are capped at the sheet limits in the reader and in
+- [x] Cell coordinates are capped at the sheet limits in the reader and in
       `range`, and the 1.7 KB workbooks that ask for 321 million cells or two
       billion rows fail fast with a classed error (#41).
-- [ ] Whole-sheet reads can be interrupted, and no heap memory is held in a
+- [x] Whole-sheet reads can be interrupted, and no heap memory is held in a
       bare local across an R allocation (#42).
-- [ ] zuxlsx's own C (the OLE2 classifier, the cell classifier, the column
-      builder) runs under the sanitisers through `tools/fuzz/`, and a
-      3000-mutant campaign reports nothing (#45).
-- [ ] xlsxio's parsers install a DOCTYPE handler (#47, companion of
-      pedrobtz/zuxml#41).
-- [ ] CI runs `tools/vendor/verify`, the fixture generators' `--check`,
-      sanitizers and pinned r-actions, and tests or raises the `R (>= 4.1)`
-      floor (#44).
-- [ ] `inst/COPYRIGHTS` describes the seven patches it lists (#48).
+- [x] zuxlsx's own hostile-input C runs under the sanitisers (#45): the OLE2
+      classifier now is `cfb.c`, which `fuzz.yaml` drives with libFuzzer and
+      ASan/UBSan with `encinfo.c`; the cell classifier and column builder run
+      under ASan, UBSan and valgrind through the test suite in
+      `native-checks.yaml`.
+- [x] xlsxio's parsers install a DOCTYPE handler (#47, companion of
+      pedrobtz/zuxml#41; patch 0010).
+- [x] CI runs `tools/vendor/verify`, the fixture generators' `--check`,
+      sanitizers and r-actions, and tests the `R (>= 4.1)` floor on Ubuntu
+      and Windows (#44).
+- [x] `inst/COPYRIGHTS` describes the patches it lists, ten now (#48).
 
 Carried here from Stage 11, since decryption shipped before the hardening it
 depends on (§21c, revised 2026-09-29):
 
-- [ ] Configurable caps on the spin count and on the decrypted package size,
-      with the other limits (#26). The specification's ceiling of 10,000,000
+- [ ] *Deferred.* Configurable caps on the spin count and on the decrypted
+      package size, with the other limits (#26). The specification's ceiling of 10,000,000
       iterations bounds a hostile file at about seven seconds today (§21d).
-- [ ] An encrypted workbook is decrypted once per read, not once to resolve
-      the sheet and again to read it (#68).
-- [ ] `src/cfb.c`, `src/encinfo.c` and `src/agile.c` run under #45's fuzzer.
+- [ ] *Deferred to v0.1.1* (decided 2026-10-28, `release-checklist.md`). An
+      encrypted workbook is decrypted once per read, not once to resolve the
+      sheet and again to read it (#68).
+- [x] `src/cfb.c` and `src/encinfo.c` run under #45's fuzzer. `src/agile.c`
+      needs zucrypt's backend and only sees what those two accepted; it runs
+      under ASan, UBSan and valgrind in the suite instead.
       The ad-hoc campaigns in §21e and §21f (truncations plus 160,000 and
       100,000 damaged copies) are not in `tools/fuzz/` and are not repeatable.
-- [ ] The suite runs with no R warning: `test-agile.R` emits two from a
-      double modulus above 2^53 in `with_length()` (#70).
+- [x] The suite runs with no R warning (#70).
 
 ## Stage 9 — API freeze and docs
 
-**Status:** open. The documentation refreshes in #35, #36 and #37 describe
-the package as it is; what remains is the public surface itself.
+**Status:** complete, 2026-10-29 (#114).
 
-- [ ] The exported names are decided before CRAN makes them permanent, and
-      the decision is recorded in §12 (#46).
-- [ ] `xlsx_rows()` is linear in the size of the sheet, or is cut from 0.1.0
-      (#43).
-- [ ] `col_types` (#27) is either in 0.1.0 or explicitly deferred, with the
-      fate of `zuxlsx_type_error` decided either way.
-- [ ] A decision on `na`, `skip` and `n_max` for `read_xlsx()`, recorded in
-      §12.
-- [ ] Reading a workbook from memory (#25) is either exported or explicitly
-      deferred. The C side already works over a buffer -- decryption needs
+- [x] The exported names are decided before CRAN makes them permanent, and
+      the decision is recorded in §12 (#46): every export is `xlsx_*`.
+- [x] `xlsx_rows()` is linear in the size of the sheet (#43).
+- [x] `col_types` (#27) is explicitly deferred to v0.2.0, recorded in §12.
+      `zuxlsx_type_error` stays unraised: a column that cannot hold its cells
+      becomes character rather than failing (§15).
+- [x] `na`, `skip` and `n_max` are deferred to v0.2.0 with `col_types`,
+      recorded in §12; `range` covers `skip` and `n_max` until then.
+- [x] Reading a workbook from memory (#25) is explicitly deferred to v0.2.0:
+      a new function breaks nothing, so it need not be settled before CRAN. The C side already works over a buffer -- decryption needs
       it (§21e, §21g) -- so what is left is the R surface.
-- [ ] The family table at the end of the design says zucrypt has a consumer
-      and that 0.1.0 links all three archives (#69). It changes in all five
-      repositories together, or not at all.
-- [ ] A getting-started article (#29).
-- [ ] The user-facing docs that describe an older package are corrected (#48).
+- [ ] *Open, outside this repository.* The family table at the end of the
+      design says zucrypt has a consumer and that 0.1.0 links all three
+      archives (#69). It changes in all five repositories together, or not
+      at all, so it does not hold back this release.
+- [x] A getting-started article (#29).
+- [x] The user-facing docs that describe an older package are corrected (#48).
 
 ## Stage 10 — CRAN release
 
-**Status:** open, blocked on zuxml, zukomp and zucrypt reaching CRAN. The
-paperwork that could be done early was: #14 (9f113a2).
+**Status:** open: everything but the submission is done. The paperwork that
+could be done early was: #14 (9f113a2).
 
 The steps, and why their order is fixed, are in
 [release-checklist.md](release-checklist.md). In short:
 
-- [ ] zuxml, zukomp and zucrypt are on CRAN, and their CRAN builds install
-      the static archives. zucrypt's ABI 1 is frozen on this package's
+- [x] zuxml, zukomp and zucrypt are on CRAN (October 2026), and their CRAN
+      builds install the static archives. zucrypt's ABI 1 is frozen on this package's
       `src/agile.c` (pedrobtz/zucrypt#43), so its release is the last of the
       three.
-- [ ] Stages 8 and 9 are closed.
-- [ ] On submission day: `Remotes:` dropped, README install switched,
-      `R CMD check --as-cran` re-run after the edit, plus win-builder and a
-      CRAN-like container, all 0/0/0.
+- [x] Stages 8 and 9 are closed.
+- [x] `Remotes:` dropped, README install switched, `R CMD check --as-cran`
+      re-run after the edit against the CRAN siblings: only the "New
+      submission" NOTE. win-builder and a CRAN-like container are covered by
+      CI: Windows R-devel and the r-devel containers, green on the
+      submission commit with CRAN's extra checks.
 - [ ] Tag v0.1.0 and submit.
 
 ## Stage 11 — Password-protected workbooks

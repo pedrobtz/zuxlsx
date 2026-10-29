@@ -233,8 +233,67 @@ DLL_EXPORT_XLSXIO const XLSXIOCHAR* xlsxioread_get_version_string ()
 ////////////////////////////////////////////////////////////////////////
 
 //process XML file contents
+//zuxlsx: no part of a workbook carries a DOCTYPE, and one is how an
+//internal subset declares entities: under zuxml's XML_GE 0 they are not
+//expanded, so &e; arrives as literal text in a cell rather than as an
+//error. Every parser created here therefore refuses one (#47).
+//
+//A DOCTYPE handler is handed xlsxio's callback data, not the parser, and
+//those structs differ, so the parser that is parsing is kept on a small
+//stack, pushed and popped around every parse call. Parses nest -- a part is
+//parsed from inside a handler of [Content_Types].xml -- but never deeply,
+//and R calls into this from one thread.
+#define ZU_PARSE_DEPTH 16
+static XML_Parser zu_parse_stack[ZU_PARSE_DEPTH];
+static int zu_parse_refused[ZU_PARSE_DEPTH];
+static int zu_parse_top = 0;
+
+static void zu_parse_push (XML_Parser parser)
+{
+  if (zu_parse_top < ZU_PARSE_DEPTH) {
+    zu_parse_stack[zu_parse_top] = parser;
+    zu_parse_refused[zu_parse_top] = 0;
+  }
+  zu_parse_top++;
+}
+
+//whether the parse being popped refused a DOCTYPE
+static int zu_parse_pop (void)
+{
+  zu_parse_top--;
+  return (zu_parse_top >= 0 && zu_parse_top < ZU_PARSE_DEPTH ? zu_parse_refused[zu_parse_top] : 0);
+}
+
+static int zu_parse_was_refused (void)
+{
+  int top = zu_parse_top - 1;
+  return (top >= 0 && top < ZU_PARSE_DEPTH ? zu_parse_refused[top] : 0);
+}
+
+static void XMLCALL zu_refuse_doctype (void* userdata, const XML_Char* name, const XML_Char* sysid, const XML_Char* pubid, int has_internal_subset)
+{
+  int top = zu_parse_top - 1;
+  (void)userdata; (void)name; (void)sysid; (void)pubid; (void)has_internal_subset;
+  if (top >= 0 && top < ZU_PARSE_DEPTH) {
+    zu_parse_refused[top] = 1;
+    XML_StopParser(zu_parse_stack[top], XML_FALSE);
+  }
+}
+
+//zuxlsx: as expat_process_zip_file(), but says how the part ended: 0 read
+//in full, -1 not in the archive, 1 not well-formed XML (its line in *line),
+//2 a ZIP size or CRC-32 mismatch. Upstream's own return of that answer is
+//commented out below, and changing it would change every caller.
+static int expat_process_zip_file_checked (ZIPFILETYPE* zip, const XML_Char* filename, XML_StartElementHandler start_handler, XML_EndElementHandler end_handler, XML_CharacterDataHandler data_handler, void* callbackdata, XML_Parser* xmlparser, unsigned long* line);
+
 int expat_process_zip_file (ZIPFILETYPE* zip, const XML_Char* filename, XML_StartElementHandler start_handler, XML_EndElementHandler end_handler, XML_CharacterDataHandler data_handler, void* callbackdata, XML_Parser* xmlparser)
 {
+  return (expat_process_zip_file_checked(zip, filename, start_handler, end_handler, data_handler, callbackdata, xmlparser, NULL) == -1 ? -1 : 0);
+}
+
+static int expat_process_zip_file_checked (ZIPFILETYPE* zip, const XML_Char* filename, XML_StartElementHandler start_handler, XML_EndElementHandler end_handler, XML_CharacterDataHandler data_handler, void* callbackdata, XML_Parser* xmlparser, unsigned long* line)
+{
+  int checked = 0;
   ZIPFILEENTRYTYPE* zipfile;
   XML_Parser parser;
   void* buf;
@@ -254,8 +313,10 @@ int expat_process_zip_file (ZIPFILETYPE* zip, const XML_Char* filename, XML_Star
   XML_SetUserData(parser, callbackdata);
   XML_SetElementHandler(parser, start_handler, end_handler);
   XML_SetCharacterDataHandler(parser, data_handler);
+  XML_SetStartDoctypeDeclHandler(parser, zu_refuse_doctype);
   if (xmlparser)
     *xmlparser = parser;
+  zu_parse_push(parser);
   buf = XML_GetBuffer(parser, PARSE_BUFFER_SIZE);
 #ifdef USE_MINIZ
     while (buf) {
@@ -267,24 +328,33 @@ int expat_process_zip_file (ZIPFILETYPE* zip, const XML_Char* filename, XML_Star
 #endif
       done = buflen < PARSE_BUFFER_SIZE;
       if ((status = XML_ParseBuffer(parser, (int)buflen, (done ? 1 : 0))) == XML_STATUS_ERROR) {
+        if (XML_GetErrorCode(parser) != XML_ERROR_ABORTED || zu_parse_was_refused()) {
+          checked = 1;
+          if (line)
+            *line = (unsigned long)XML_GetCurrentLineNumber(parser);
+        }
         break;
       }
-      if (xmlparser && status == XML_STATUS_SUSPENDED)
+      if (xmlparser && status == XML_STATUS_SUSPENDED) {
+        zu_parse_pop();
         return 0;
+      }
       if (done)
         break;
       buf = XML_GetBuffer(parser, PARSE_BUFFER_SIZE);
     }
+  zu_parse_pop();
   XML_ParserFree(parser);
 #ifdef USE_MINIZ
-  mz_zip_reader_extract_iter_free(zipfile);
+  if (!mz_zip_reader_extract_iter_free(zipfile) && checked == 0)
+    checked = 2;
 #elif defined(USE_MINIZIP)
   unzCloseCurrentFile(zip);
 #else
   zip_fclose(zipfile);
 #endif
   //return (status == XML_STATUS_ERROR != XML_ERROR_FINISHED ? 1 : 0);
-  return 0;
+  return checked;
 }
 
 XML_Parser expat_process_zip_file_suspendable (ZIPFILEENTRYTYPE* zipfile, XML_StartElementHandler start_handler, XML_EndElementHandler end_handler, XML_CharacterDataHandler data_handler, void* callbackdata)
@@ -294,11 +364,26 @@ XML_Parser expat_process_zip_file_suspendable (ZIPFILEENTRYTYPE* zipfile, XML_St
     XML_SetUserData(result, callbackdata);
     XML_SetElementHandler(result, start_handler, end_handler);
     XML_SetCharacterDataHandler(result, data_handler);
+    XML_SetStartDoctypeDeclHandler(result, zu_refuse_doctype);
   }
   return result;
 }
 
+//zuxlsx: whether the last expat_process_zip_file_resume() refused a DOCTYPE
+static int zu_resume_refused = 0;
+
+static enum XML_Status expat_process_zip_file_resume_inner (ZIPFILEENTRYTYPE* zipfile, XML_Parser xmlparser);
+
 enum XML_Status expat_process_zip_file_resume (ZIPFILEENTRYTYPE* zipfile, XML_Parser xmlparser)
+{
+  enum XML_Status status;
+  zu_parse_push(xmlparser);
+  status = expat_process_zip_file_resume_inner(zipfile, xmlparser);
+  zu_resume_refused = zu_parse_pop();
+  return status;
+}
+
+static enum XML_Status expat_process_zip_file_resume_inner (ZIPFILEENTRYTYPE* zipfile, XML_Parser xmlparser)
 {
   enum XML_Status status;
   status = XML_ResumeParser(xmlparser);
@@ -420,6 +505,12 @@ XML_Char* join_basepath_filename (const XML_Char* basepath, const XML_Char* file
   return result;
 }
 
+//zuxlsx: Excel's grid ends at XFD1048576. The two parsers below saturate one
+//past it, so a reference beyond the grid is recognisable and a long one
+//cannot wrap size_t.
+#define XLSXIO_MAX_ROWS 1048576
+#define XLSXIO_MAX_COLS 16384
+
 //determine column number based on cell coordinate (e.g. "A1"), returns 1-based column number or 0 on error
 size_t get_col_nr (const XML_Char* A1col)
 {
@@ -427,6 +518,8 @@ size_t get_col_nr (const XML_Char* A1col)
   size_t result = 0;
   if (p) {
     while (*p) {
+      if (result > XLSXIO_MAX_COLS)
+        result = XLSXIO_MAX_COLS + 1;
       if (*p >= 'A' && *p <= 'Z')
         result = result * 26 + (*p - 'A') + 1;
       else if (*p >= 'a' && *p <= 'z')
@@ -450,8 +543,11 @@ size_t get_row_nr (const XML_Char* A1col)
     while (*p) {
       if ((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z'))
         ;
-      else if (*p >= '0' && *p <= '9' && p != A1col)
+      else if (*p >= '0' && *p <= '9' && p != A1col) {
+        if (result > XLSXIO_MAX_ROWS)
+          result = XLSXIO_MAX_ROWS + 1;
         result = result * 10 + (*p - '0');
+      }
       else
         return 0;
       p++;
@@ -1152,9 +1248,18 @@ static int numfmt_code_is_date (const XML_Char* code)
     } else if (*p == '[') {
       const XML_Char* q = p + 1;
       int elapsed = 0;
-      for (; *q && *q != ']'; q++)
-        if (*q == 'h' || *q == 'H' || *q == 'm' || *q == 'M' || *q == 's' || *q == 'S')
-          elapsed = 1;
+      //zuxlsx: elapsed time is [h], [mm], [ss] and so on: one letter,
+      //repeated, and nothing else. Locale tags such as [$$-en-US] and
+      //colours such as [Magenta] contain those letters too.
+      XML_Char first = (XML_Char)((*q >= 'A' && *q <= 'Z') ? *q - 'A' + 'a' : *q);
+      if (first == 'h' || first == 'm' || first == 's') {
+        elapsed = 1;
+        for (; *q && *q != ']'; q++)
+          if (((*q >= 'A' && *q <= 'Z') ? *q - 'A' + 'a' : *q) != first)
+            elapsed = 0;
+      } else {
+        for (; *q && *q != ']'; q++) ;
+      }
       if (elapsed)
         return 1;
       p = (*q ? q + 1 : q);
@@ -1175,10 +1280,14 @@ static int numfmt_code_is_date (const XML_Char* code)
   return 0;
 }
 
-/* Built-in ids with date or time semantics, per ECMA-376 part 1, 18.8.30. */
+/* Built-in ids with date or time semantics, per ECMA-376 part 1, 18.8.30.
+   zuxlsx: 27-36 and 50-58 are the East Asian date formats and 71-81 the Thai
+   ones; Excel writes them without declaring them in <numFmts>. */
 static int numfmt_builtin_is_date (int id)
 {
-  return (id >= 14 && id <= 22) || (id >= 45 && id <= 47);
+  return (id >= 14 && id <= 22) || (id >= 27 && id <= 36) ||
+         (id >= 45 && id <= 47) || (id >= 50 && id <= 58) ||
+         (id >= 71 && id <= 81);
 }
 
 static struct numfmt_table* numfmt_table_create (void)
@@ -1279,6 +1388,8 @@ struct data_sheet_callback_data {
   long cell_style;                      //s= attribute, index into cellXfs
   cell_string_type_enum last_cell_type; //zuxlsx: type of the cell being delivered
   long last_cell_style;                 //zuxlsx: its style index
+  int zuxlsx_error;                     //zuxlsx: first XLSXIOREAD_SHEET_ERROR_* seen
+  unsigned long zuxlsx_error_line;      //zuxlsx: the XML line it was seen on
   unsigned int flags;
   XML_Char* skiptag;                    //tag to skip
   size_t skiptagcount;                  //nesting level for current tag to skip
@@ -1305,6 +1416,8 @@ void data_sheet_callback_data_initialize (struct data_sheet_callback_data* data,
   data->cell_style = 0;
   data->last_cell_type = none;
   data->last_cell_style = 0;
+  data->zuxlsx_error = 0;
+  data->zuxlsx_error_line = 0;
   data->flags = flags;
   data->skiptag = NULL;
   data->skiptagcount = 0;
@@ -1322,6 +1435,15 @@ void data_sheet_callback_data_cleanup (struct data_sheet_callback_data* data)
   numfmt_table_destroy(data->numfmts);
   free(data->celldata);
   free(data->skiptag);
+}
+
+//zuxlsx: keeps the first reason the worksheet could not be read in full
+static void sheet_error (struct data_sheet_callback_data* data, int code)
+{
+  if (data->zuxlsx_error == 0) {
+    data->zuxlsx_error = code;
+    data->zuxlsx_error_line = (unsigned long)XML_GetCurrentLineNumber(data->xmlparser);
+  }
 }
 
 void data_sheet_expat_callback_skip_tag_start (void* callbackdata, const XML_Char* name, const XML_Char** atts)
@@ -1461,6 +1583,12 @@ void data_sheet_expat_callback_find_cell_start (void* callbackdata, const XML_Ch
   if (XML_Char_icmp_ins(name, X("c")) == 0) {
     const XML_Char* t = get_expat_attr_by_name(atts, X("r"));
     size_t cellcolnr = get_col_nr(t);
+    //zuxlsx: refuse a reference past XFD1048576 before padding up to it
+    if (cellcolnr > XLSXIO_MAX_COLS || get_row_nr(t) > XLSXIO_MAX_ROWS) {
+      sheet_error(data, XLSXIOREAD_SHEET_ERROR_RANGE);
+      XML_StopParser(data->xmlparser, XML_FALSE);
+      return;
+    }
     //insert empty rows if needed
     if (data->colnr == 0) {
       size_t cellrownr = get_row_nr(t);
@@ -1560,11 +1688,25 @@ void data_sheet_expat_callback_find_cell_end (void* callbackdata, const XML_Char
         //get shared string
         XML_Char* p = NULL;
         long num = XML_Char_strtol(data->celldata, &p, 10);
-        if (!p || (p != data->celldata && *p == 0)) {
-          const XML_Char* s = sharedstringlist_get(data->sharedstrings, num);
-          free(data->celldata);
-          data->celldata = (s ? XML_Char_dup(s) : NULL);
+        const XML_Char* s = NULL;
+        //zuxlsx: an index that is not a number, is negative or is past the
+        //table is a malformed worksheet, not a blank cell. Whitespace around
+        //it is allowed, as XML Schema allows it around an integer: some
+        //writers emit <v>2 </v>, which used to read as the text "2 ".
+        if (p)
+          while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')
+            p++;
+        //An entry may itself be NULL: that is an empty <si/>, a blank cell,
+        //so it is the table's size that says whether the index resolves.
+        if (!((!p || (p != data->celldata && *p == 0)) && num >= 0 &&
+              (size_t)num < sharedstringlist_size(data->sharedstrings))) {
+          sheet_error(data, XLSXIOREAD_SHEET_ERROR_SHAREDSTRING);
+          XML_StopParser(data->xmlparser, XML_FALSE);
+          return;
         }
+        s = sharedstringlist_get(data->sharedstrings, (size_t)num);
+        free(data->celldata);
+        data->celldata = (s ? XML_Char_dup(s) : NULL);
       } else if (data->cell_string_type == none) {
         //unknown value type
         free(data->celldata);
@@ -1678,7 +1820,65 @@ struct xlsxio_read_sheet_struct {
   size_t lastcolnr;
   size_t paddingcol;
   int date1904;                         //zuxlsx: copied from the workbook
+  int part_error;                       //zuxlsx: 1 XML, 2 ZIP, in a part read first
+  unsigned long part_error_line;
+  char part_error_name[128];
 };
+
+//zuxlsx: resumes the worksheet parser and keeps its first genuine error,
+//which Expat would lose: the next XML_ResumeParser() overwrites the code
+static enum XML_Status sheet_resume (xlsxioreadersheet sheethandle)
+{
+  enum XML_Status status = expat_process_zip_file_resume(sheethandle->zipfile, sheethandle->processcallbackdata.xmlparser);
+  if (status == XML_STATUS_ERROR) {
+    enum XML_Error code = XML_GetErrorCode(sheethandle->processcallbackdata.xmlparser);
+    if ((code != XML_ERROR_ABORTED && code != XML_ERROR_FINISHED && code != XML_ERROR_NOT_SUSPENDED) || zu_resume_refused)
+      sheet_error(&sheethandle->processcallbackdata, XLSXIOREAD_SHEET_ERROR_XML);
+  }
+  return status;
+}
+
+/* zuxlsx: once xlsxioread_sheet_next_row() has returned 0, says whether the
+   worksheet ended because it was read in full or because something was wrong
+   with it. Under USE_MINIZ it also closes the archive member, which is where
+   miniz checks the uncompressed size and the CRC-32. */
+DLL_EXPORT_XLSXIO int xlsxioread_sheet_finish (xlsxioreadersheet sheethandle, unsigned long* line)
+{
+  int result;
+  if (line)
+    *line = 0;
+  if (!sheethandle)
+    return XLSXIOREAD_SHEET_ERROR_XML;
+  //a damaged part read before the worksheet is the first thing wrong
+  if (sheethandle->part_error) {
+    if (line)
+      *line = sheethandle->part_error_line;
+    return (sheethandle->part_error == 1 ? XLSXIOREAD_SHEET_ERROR_PART_XML : XLSXIOREAD_SHEET_ERROR_PART_ZIP);
+  }
+  //No part was opened: a chartsheet or dialogsheet, which the workbook lists
+  //among its sheets but which has no worksheet part, or a relationship that
+  //leads nowhere. Both read as no rows, as they always have.
+  if (!sheethandle->zipfile)
+    return XLSXIOREAD_SHEET_ERROR_NONE;
+  result = sheethandle->processcallbackdata.zuxlsx_error;
+  if (line)
+    *line = sheethandle->processcallbackdata.zuxlsx_error_line;
+#ifdef USE_MINIZ
+  if (sheethandle->zipfile) {
+    if (!mz_zip_reader_extract_iter_free(sheethandle->zipfile) && result == XLSXIOREAD_SHEET_ERROR_NONE)
+      result = XLSXIOREAD_SHEET_ERROR_ZIP;
+    sheethandle->zipfile = NULL;
+  }
+#endif
+  return result;
+}
+
+/* zuxlsx: the part that XLSXIOREAD_SHEET_ERROR_PART_* is about, as the
+   workbook's relationships name it, or "" */
+DLL_EXPORT_XLSXIO const char* xlsxioread_sheet_error_part (xlsxioreadersheet sheethandle)
+{
+  return (sheethandle ? sheethandle->part_error_name : "");
+}
 
 DLL_EXPORT_XLSXIO size_t xlsxioread_sheet_last_row_index (xlsxioreadersheet sheethandle)
 {
@@ -1716,13 +1916,26 @@ DLL_EXPORT_XLSXIO int xlsxioread_process (xlsxioreader handle, const XLSXIOCHAR*
   if (!getrelscallbackdata.sheetrelid)
     iterate_files_by_contenttype(handle->zip, xltm_content_type, main_sheet_get_sheetfile_callback, &getrelscallbackdata, NULL);
 
+  //zuxlsx: a shared-string table or styles part that is damaged used to load
+  //as far as the damage, silently; the first such failure is kept here and
+  //handed to the worksheet, whose read then reports it
+  int part_error = 0;
+  unsigned long part_error_line = 0;
+  const XML_Char* part_error_name = NULL;
+
   //process shared strings
   struct sharedstringlist* sharedstrings = NULL;
   if (getrelscallbackdata.sharedstringsfile && getrelscallbackdata.sharedstringsfile[0]) {
+    int rc;
     sharedstrings = sharedstringlist_create();
     struct shared_strings_callback_data sharedstringsdata;
     shared_strings_callback_data_initialize(&sharedstringsdata, sharedstrings);
-    if (expat_process_zip_file(handle->zip, getrelscallbackdata.sharedstringsfile, shared_strings_callback_find_sharedstringtable_start, NULL, NULL, &sharedstringsdata, &sharedstringsdata.xmlparser) != 0) {
+    rc = expat_process_zip_file_checked(handle->zip, getrelscallbackdata.sharedstringsfile, shared_strings_callback_find_sharedstringtable_start, NULL, NULL, &sharedstringsdata, &sharedstringsdata.xmlparser, &part_error_line);
+    if (rc > 0) {
+      part_error = rc;
+      part_error_name = getrelscallbackdata.sharedstringsfile;
+    }
+    if (rc != 0) {
       //no shared strings found
       sharedstringlist_destroy(sharedstrings);
       sharedstrings = NULL;
@@ -1739,7 +1952,14 @@ DLL_EXPORT_XLSXIO int xlsxioread_process (xlsxioreader handle, const XLSXIOCHAR*
       //NULL for the parser out-param: expat_process_zip_file() frees the
       //parser itself unless it returns early on XML_STATUS_SUSPENDED, which
       //only the worksheet walk asks for. Taking it back here double-frees it.
-      if (expat_process_zip_file(handle->zip, getrelscallbackdata.stylesfile, numfmt_expat_callback_element_start, numfmt_expat_callback_element_end, NULL, numfmts, NULL) != 0 || numfmts->oom) {
+      unsigned long line = 0;
+      int rc = expat_process_zip_file_checked(handle->zip, getrelscallbackdata.stylesfile, numfmt_expat_callback_element_start, numfmt_expat_callback_element_end, NULL, numfmts, NULL, &line);
+      if (rc > 0 && part_error == 0) {
+        part_error = rc;
+        part_error_line = line;
+        part_error_name = getrelscallbackdata.stylesfile;
+      }
+      if (rc != 0 || numfmts->oom) {
         //styles are optional; a workbook without them simply has no dates
         numfmt_table_destroy(numfmts);
         numfmts = NULL;
@@ -1758,6 +1978,15 @@ DLL_EXPORT_XLSXIO int xlsxioread_process (xlsxioreader handle, const XLSXIOCHAR*
     //use simplified interface by suspending the XML parser when data is found
     xlsxioreadersheet sheethandle = (xlsxioreadersheet)callbackdata;
     sheethandle->date1904 = getrelscallbackdata.date1904;
+    if (part_error) {
+      size_t n = strlen(part_error_name);
+      if (n >= sizeof(sheethandle->part_error_name))
+        n = sizeof(sheethandle->part_error_name) - 1;
+      memcpy(sheethandle->part_error_name, part_error_name, n);
+      sheethandle->part_error_name[n] = 0;
+      sheethandle->part_error = part_error;
+      sheethandle->part_error_line = part_error_line;
+    }
     data_sheet_callback_data_initialize(&sheethandle->processcallbackdata, sharedstrings, numfmts, flags, NULL, NULL, sheethandle);
     if ((sheethandle->zipfile = XML_Char_openzip(sheethandle->handle->zip, getrelscallbackdata.sheetfile, 0)) == NULL) {
       result = 1;
@@ -1878,6 +2107,9 @@ DLL_EXPORT_XLSXIO xlsxioreadersheet xlsxioread_sheet_open (xlsxioreader handle, 
   result->lastcolnr = 0;
   result->paddingcol = 0;
   result->date1904 = 0;
+  result->part_error = 0;
+  result->part_error_line = 0;
+  result->part_error_name[0] = 0;
   xlsxioread_process(handle, sheetname, flags | XLSXIOREAD_NO_CALLBACK, NULL, NULL, result);  /* Note: currently broken when not using XLSXIOREAD_NO_CALLBACK flag */
   return result;
 }
@@ -1958,7 +2190,7 @@ DLL_EXPORT_XLSXIO int xlsxioread_sheet_next_row (xlsxioreadersheet sheethandle)
   }
   sheethandle->paddingcol = 0;
   //go to beginning of next row
-  while ((status = expat_process_zip_file_resume(sheethandle->zipfile, sheethandle->processcallbackdata.xmlparser)) == XML_STATUS_SUSPENDED && sheethandle->processcallbackdata.colnr != 0) {
+  while ((status = sheet_resume(sheethandle)) == XML_STATUS_SUSPENDED && sheethandle->processcallbackdata.colnr != 0) {
   }
   return (status == XML_STATUS_SUSPENDED ? 1 : 0);
 }
@@ -1997,8 +2229,12 @@ DLL_EXPORT_XLSXIO XLSXIOCHAR* xlsxioread_sheet_next_cell (xlsxioreadersheet shee
   }
   //get value
   if (!sheethandle->processcallbackdata.celldata)
-    if (expat_process_zip_file_resume(sheethandle->zipfile, sheethandle->processcallbackdata.xmlparser) != XML_STATUS_SUSPENDED)
+    if (sheet_resume(sheethandle) != XML_STATUS_SUSPENDED) {
+      //zuxlsx: a parse that stops inside a cell leaves its text gathered so
+      //far here; it was set to NULL without being freed
+      free(sheethandle->processcallbackdata.celldata);
       sheethandle->processcallbackdata.celldata = NULL;
+    }
   //insert empty rows if needed
   if (!(sheethandle->processcallbackdata.flags & XLSXIOREAD_SKIP_EMPTY_ROWS) && sheethandle->lastrownr + 1 < sheethandle->processcallbackdata.rownr) {
     sheethandle->paddingrow = sheethandle->lastrownr + 1;

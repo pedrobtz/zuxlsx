@@ -1,4 +1,4 @@
-# read_xlsx(): the column builders of design section 14, and the epoch
+# xlsx_read(): the column builders of design section 14, and the epoch
 # handling of section 11.
 
 test_that("a column takes the type its cells support", {
@@ -9,7 +9,7 @@ test_that("a column takes the type its cells support", {
     c(num("A3", 2.5), '<c r="B3" t="b"><v>0</v></c>', txt("C3", "y"))
   )))
 
-  out <- read_xlsx(path)
+  out <- xlsx_read(path)
   expect_identical(out$n, c(1, 2.5))
   expect_identical(out$b, c(TRUE, FALSE))
   expect_identical(out$s, c("x", "y"))
@@ -25,7 +25,7 @@ test_that("a column mixing types becomes character", {
     c(txt("A3", "two"))
   )))
 
-  expect_identical(read_xlsx(path)$mixed, c("1", "two"))
+  expect_identical(xlsx_read(path)$mixed, c("1", "two"))
 })
 
 test_that("a cell error makes its column character rather than being dropped", {
@@ -36,7 +36,7 @@ test_that("a cell error makes its column character rather than being dropped", {
     c('<c r="A3" t="e"><v>#N/A</v></c>')
   )))
 
-  expect_identical(read_xlsx(path)$v, c("1", "#N/A"))
+  expect_identical(xlsx_read(path)$v, c("1", "#N/A"))
 })
 
 test_that("blank cells keep their row alignment", {
@@ -49,7 +49,7 @@ test_that("blank cells keep their row alignment", {
     c(num("A4", 3), num("B4", 30))
   )))
 
-  out <- read_xlsx(path)
+  out <- xlsx_read(path)
   expect_identical(out$a, c(1, 2, 3))
   expect_identical(out$b, c(10, NA, 30))
 })
@@ -58,7 +58,7 @@ test_that("col_names = FALSE keeps the first row as data", {
   path <- withr::local_tempfile(fileext = ".xlsx")
   write_workbook(path, styled_workbook_parts(list(c(num("A1", 1)), c(num("A2", 2)))))
 
-  out <- read_xlsx(path, col_names = FALSE)
+  out <- xlsx_read(path, col_names = FALSE)
   expect_named(out, "X1")
   expect_identical(out$X1, c(1, 2))
 })
@@ -71,16 +71,16 @@ test_that("duplicate and missing header names are made unique", {
   )))
 
   # Column C has no header, so it falls back to its position.
-  expect_named(read_xlsx(path), c("x", "x_1", "X3", "z"))
+  expect_named(xlsx_read(path), c("x", "x_1", "X3", "z"))
 })
 
 test_that("col_names must be a single TRUE or FALSE", {
   path <- withr::local_tempfile(fileext = ".xlsx")
   write_workbook(path)
 
-  expect_error(read_xlsx(path, col_names = NA), class = "zuxlsx_input_error")
-  expect_error(read_xlsx(path, col_names = "yes"), class = "zuxlsx_input_error")
-  expect_error(read_xlsx(path, col_names = c(TRUE, FALSE)), class = "zuxlsx_input_error")
+  expect_error(xlsx_read(path, col_names = NA), class = "zuxlsx_input_error")
+  expect_error(xlsx_read(path, col_names = "yes"), class = "zuxlsx_input_error")
+  expect_error(xlsx_read(path, col_names = c(TRUE, FALSE)), class = "zuxlsx_input_error")
 })
 
 test_that("a date column is a Date, read against the workbook's epoch", {
@@ -99,7 +99,7 @@ test_that("a date column is a Date, read against the workbook's epoch", {
       )
     }
     write_workbook(path, parts)
-    read_xlsx(path)$d
+    xlsx_read(path)$d
   }
 
   expect_identical(by_epoch(FALSE), as.Date("2024-02-02"))
@@ -116,7 +116,7 @@ test_that("the 1900 system's phantom leap day is accounted for", {
       cells = list(c(txt("A1", "d")), c(num("A2", v, s = 1))),
       formats = c(0L, 14L)
     ))
-    read_xlsx(path)$d
+    xlsx_read(path)$d
   }
 
   expect_identical(serial(1), as.Date("1900-01-01"))
@@ -135,7 +135,7 @@ test_that("a date carrying a time of day becomes POSIXct", {
     formats = c(0L, 14L)
   ))
 
-  out <- read_xlsx(path)$d
+  out <- xlsx_read(path)$d
   expect_s3_class(out, "POSIXct")
   expect_identical(format(out, tz = "UTC"), "2024-02-02 12:00:00")
 })
@@ -145,7 +145,7 @@ test_that("a committed fixture reads, and its 1904 epoch is honoured", {
   cells <- xlsx_cells(test_path("sheets", "blanks.xlsx"), 1)
   expect_true(attr(cells, "date1904"))
 
-  out <- read_xlsx(test_path("sheets", "blanks.xlsx"), 1)
+  out <- xlsx_read(test_path("sheets", "blanks.xlsx"), 1)
   expect_s3_class(out, "data.frame")
   expect_gt(nrow(out), 0L)
 })
@@ -169,7 +169,7 @@ test_that("promotion to character keeps the cell as it was written", {
     c(txt("A5", "a string, which forces the column to character"))
   )))
 
-  out <- read_xlsx(path)$v
+  out <- xlsx_read(path)$v
   expect_identical(out[1:3], c("1.50", "2.0e3", "0.30"))
   # What reformatting from the double would have given instead.
   expect_false(identical(out[1:3], as.character(c(1.50, 2.0e3, 0.30))))
@@ -183,7 +183,78 @@ test_that("a column of only numbers is a double, not text", {
     c(txt("A1", "v")), c(num("A2", "1.50")), c(num("A3", "2.50"))
   )))
 
-  out <- read_xlsx(path)$v
+  out <- xlsx_read(path)$v
   expect_type(out, "double")
   expect_identical(out, c(1.5, 2.5))
+})
+
+test_that("a time on the phantom leap day is NA, and its neighbours stay apart", {
+  # 59.5 is noon on 28 February 1900 and 61.5 noon on 1 March. Anything from
+  # 60 to 61 is a time on 29 February 1900, which never existed.
+  path <- withr::local_tempfile(fileext = ".xlsx")
+  write_workbook(path, styled_workbook_parts(
+    cells = list(
+      c(txt("A1", "d")), c(num("A2", 59.5, s = 1)),
+      c(num("A3", 60.5, s = 1)), c(num("A4", 61.5, s = 1))
+    ),
+    formats = c(0L, 22L)
+  ))
+
+  out <- xlsx_read(path)$d
+  expect_identical(
+    format(out, "%Y-%m-%d %H:%M", tz = "UTC"),
+    c("1900-02-28 12:00", NA, "1900-03-01 12:00")
+  )
+})
+
+test_that("ISO 8601 date cells read as dates", {
+  path <- withr::local_tempfile(fileext = ".xlsx")
+  write_workbook(path, styled_workbook_parts(list(
+    c(txt("A1", "d"), txt("B1", "t")),
+    c('<c r="A2" t="d"><v>2024-01-15</v></c>',
+      '<c r="B2" t="d"><v>2024-02-01T10:00:00</v></c>')
+  )))
+
+  out <- xlsx_read(path)
+  expect_identical(out$d, as.Date("2024-01-15"))
+  expect_identical(
+    format(out$t, tz = "UTC"),
+    "2024-02-01 10:00:00"
+  )
+})
+
+test_that("a table is found wherever it starts, and blank cells do not move it", {
+  # xlsxio pads one blank cell above a table that starts at row 3 or below,
+  # which used to become the header row (#40). And a sheet whose blank
+  # cells reach past its data -- styled empty cells -- reads as its data.
+  table_at <- function(top, left = 1L, extra = NULL) {
+    path <- withr::local_tempfile(fileext = ".xlsx", .local_envir = parent.frame())
+    col <- function(k) LETTERS[left + k - 1L]
+    rows <- paste0(
+      '<row r="', top, '">', txt(paste0(col(1), top), "name"),
+      txt(paste0(col(2), top), "n"), "</row>",
+      '<row r="', top + 1L, '">', txt(paste0(col(1), top + 1L), "a"),
+      num(paste0(col(2), top + 1L), 1), "</row>",
+      extra
+    )
+    parts <- workbook_parts()
+    parts[["xl/worksheets/sheet1.xml"]] <- paste0(
+      '<?xml version="1.0"?>',
+      '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
+      "<sheetData>", rows, "</sheetData></worksheet>"
+    )
+    write_workbook(path, parts)
+    xlsx_read(path)
+  }
+  expected <- data.frame(name = "a", n = 1, stringsAsFactors = FALSE)
+  for (top in c(1L, 2L, 3L, 10L)) {
+    expect_identical(table_at(top), expected, info = top)
+  }
+  # Leading empty columns too.
+  expect_identical(table_at(3L, left = 2L), expected)
+  # Blank cells below and to the right are not data.
+  expect_identical(
+    table_at(1L, extra = '<row r="50"><c r="A50" s="1"/><c r="H50"/></row>'),
+    expected
+  )
 })

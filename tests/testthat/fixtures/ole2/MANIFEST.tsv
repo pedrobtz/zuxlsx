@@ -2,3 +2,6 @@ file	streams	describes	generator
 encrypted-agile.xlsx	EncryptionInfo,EncryptedPackage	password-protected xlsx (Agile), structure only	tools/make-ole2.R
 legacy.xls	Workbook	legacy BIFF8 .xls	tools/make-ole2.R
 unknown-ole2.bin	SomethingElse	OLE2 container that is neither	tools/make-ole2.R
+two-sheets-stored.xlsx	-	plaintext of the two below: inst/extdata/two-sheets.xlsx, parts stored	zip -0 -X (README.md)
+two-sheets-encrypted.xlsx	EncryptionInfo,EncryptedPackage	Agile AES-256 SHA-512 100000 spins, password zuxlsx	msoffcrypto-tool 6.0.0 (README.md)
+two-sheets-encrypted-utf16.xlsx	EncryptionInfo,EncryptedPackage	Agile AES-256 SHA-512 100000 spins, password z\u00fc\u2713\U0001F511	msoffcrypto-tool 6.0.0 (README.md)

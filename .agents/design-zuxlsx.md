@@ -200,12 +200,14 @@ vendored tree: zuxml installs to `<pkg>/lib/`, zukomp to `<pkg>/lib${R_ARCH}/`.
 ever showed up there. `configure` asks for `lib/<r_arch>` first and falls back
 to `lib/`, so it is right for either convention.
 
-`zuxlsx` therefore has a `configure` + `src/Makevars.in` pair. `Remotes:`
-tracks the repositories at `@main` (commit 300cffa; zucrypt joined in #64),
-deliberately and not as a version pin, because none is on CRAN; it must be
-dropped on submission day, not before (`release-checklist.md`). zucrypt's
-archive is the third, `<pkg>/lib/libzucrypt.a` with `zucrypt.h`, resolved the
-same way (section 21d).
+`zuxlsx` therefore has a `configure` + `src/Makevars.in` pair, and
+`DESCRIPTION` pins neither package to a branch. `Remotes:` named all three
+sibling repositories until they reached CRAN (zukomp, zucrypt and zuxml 0.1.0,
+October 2026); it was dropped for the CRAN submission, and the siblings now
+resolve from CRAN.
+
+zucrypt's archive is the third, `<pkg>/lib/libzucrypt.a` with `zucrypt.h`,
+resolved the same way (section 21d).
 
 Verified against the vendored reader in this repo: xlsxio compiles against
 those installed headers, links both archives, and reads the fixtures in
@@ -565,7 +567,7 @@ resolves to "is this number a date or a time" through `cellXfs` and `numFmts`.
 `xlsx_cells()` reports such a cell as type `date` and hands back the serial
 number unchanged.
 
-`read_xlsx()` converts, `xlsx_cells()` does not. The serial number is the
+`xlsx_read()` converts, `xlsx_cells()` does not. The serial number is the
 honest answer at cell level, because the epoch is a property of the workbook
 rather than of the cell.
 
@@ -588,14 +590,53 @@ A column whose serials are whole numbers becomes `Date`; one where any cell
 carries a time of day becomes `POSIXct` in UTC, since coercing to `Date` would
 drop the time silently.
 
+### Status, 2026-10-28: three fixes from the whole-package review
+
+- **`t="d"` cells** used to reach R as type `date` with no number, so a column
+  of them read as all `NA`. `classify_cell()` now parses the ISO 8601 text
+  (`YYYY-MM-DD`, an optional time, an optional `Z`) into the serial an Excel
+  number would carry *in the workbook's own epoch*, the phantom leap day
+  included, so R converts both kinds of date with the same code. Text that is
+  not a date stays a `string` rather than being lost.
+- **Bracketed sections** of a format code were elapsed time if they contained
+  h, m or s anywhere, which made `[$$-en-US]` (US dollars) and `[Magenta]`
+  dates. A bracket is now elapsed time only when it is one of h, m or s
+  repeated (`[h]`, `[mm]`, `[ss]`). Patch 0008.
+- **Built-in ids 27-36, 50-58 and 71-81**, the East Asian and Thai date
+  formats Excel writes without a format code, are dates, as in readxl.
+  Patch 0008.
+
+And `shift_1900()` now makes any serial from 60 up to 61 `NA` -- a time on the
+day that never existed -- rather than only 60 itself, which had collapsed 59.5
+and 60.5 onto one instant.
+
 ---
 
 ## 12. Proposed R API
 
+**Decided, 2026-10-29 (#46): every export carries the `xlsx_` prefix.** The
+first names were `read_xlsx()`, `xlsx_read_cells()` and `zuxlsx_native()`.
+`read_xlsx()` masked `readxl::read_xlsx()` and `openxlsx2::read_xlsx()`, which
+behave differently on the same file, so a user switching packages could get a
+different data frame without any sign of it. The exports are now
+`xlsx_read()`, `xlsx_cells()`, `xlsx_rows()`, `xlsx_stream_cells()`,
+`xlsx_sheets()` and `xlsx_info()` -- the last matching the family's
+`komp_info()` and `crypt_info()`. `xlsx_cells()` shares its name with
+`tidyxl::xlsx_cells()`, which does the same job. The names below and in the
+older status notes are the ones used at the time; the native entry points
+(`C_read_xlsx` and so on) are internal and keep theirs.
+
+**Deferred, 2026-10-29: `col_types`, `na`, `skip`, `n_max` (#27).** Each is a
+new argument whose default keeps today's behaviour, so adding one after
+0.1.0 breaks no caller, and none of them has to be settled before CRAN
+fixes the names. Until then `range` covers `skip` and `n_max`, and
+`xlsx_cells()` is the way to read a column as other than its inferred type.
+Milestone v0.2.0.
+
 Initial high-level API:
 
 ```r
-read_xlsx(
+xlsx_read(
   path,
   sheet = 1,
   col_names = TRUE,
@@ -622,7 +663,7 @@ xlsx_rows(
 Possible low-level streaming API:
 
 ```r
-xlsx_read_cells(
+xlsx_stream_cells(
   path,
   sheet = 1,
   callback
@@ -631,12 +672,12 @@ xlsx_read_cells(
 
 The first release should keep the public API deliberately narrow.
 
-### Status, 2026-09-19: `xlsx_sheets()`, `xlsx_cells()` and `read_xlsx()`
+### Status, 2026-09-19: `xlsx_sheets()`, `xlsx_cells()` and `xlsx_read()`
 
-`read_xlsx(path, sheet, col_names, range)`, `xlsx_cells()`, `xlsx_rows()` and
-`xlsx_read_cells()` are all implemented. Section 12 is complete.
+`xlsx_read(path, sheet, col_names, range)`, `xlsx_cells()`, `xlsx_rows()` and
+`xlsx_stream_cells()` are all implemented. Section 12 is complete.
 
-`xlsx_read_cells(path, sheet, callback, chunk_size)` hands the callback a
+`xlsx_stream_cells(path, sheet, callback, chunk_size)` hands the callback a
 chunk of cells at a time and stops when it returns `FALSE`. A chunk never
 splits a row, so `chunk_size` is a lower bound: the boundary falls at the
 first row end at or after it. A callback that saw half a row could do nothing
@@ -656,8 +697,8 @@ memory after a `gc()`.
 | | elapsed |
 | --- | --- |
 | `xlsx_cells()`, whole sheet | 0.42 s |
-| `xlsx_read_cells()`, read to the end | 0.37 s |
-| `xlsx_read_cells()`, stopping after one chunk | **0.02 s** |
+| `xlsx_stream_cells()`, read to the end | 0.37 s |
+| `xlsx_stream_cells()`, stopping after one chunk | **0.02 s** |
 
 Early termination is the win, and it is a large one: finding something near
 the top of a large worksheet costs a twentieth of reading it.
@@ -677,7 +718,7 @@ sheet still yields its own columns; narrowing it to the data would make the
 result depend on the file rather than the request.
 
 **Blank rows are kept, including directly beneath the header.** A worksheet
-may omit an empty row from its XML, and until `range` existed `read_xlsx()`
+may omit an empty row from its XML, and until `range` existed `xlsx_read()`
 dropped such a row when it fell immediately after the header while preserving
 it anywhere else -- an inconsistency that came from deriving the row span from
 the body rather than from the sheet, and that the readxl fixture
@@ -685,8 +726,8 @@ the body rather than from the sheet, and that the readxl fixture
 worksheets. Keeping every blank row is easier to predict than keeping only the
 interior ones, and `range` is now the way to start further down.
 
-`xlsx_cells()` was built before `read_xlsx()` on purpose. It needs only the
-cell event model of section 13, whereas `read_xlsx()` additionally needs the
+`xlsx_cells()` was built before `xlsx_read()` on purpose. It needs only the
+cell event model of section 13, whereas `xlsx_read()` additionally needs the
 column builders of section 14 and the epoch handling of section 11, so
 building it first would have coupled three unproven things. It also makes the
 `valid/` corpus assertable for the first time: until there was a way to read a
@@ -770,7 +811,7 @@ translation unit, but it is the wrong prefix to keep.
 
 ## 14. Column building
 
-For `read_xlsx()`, avoid constructing one R object per cell where possible.
+For `xlsx_read()`, avoid constructing one R object per cell where possible.
 
 Preferred pipeline:
 
@@ -811,7 +852,7 @@ with explicit handling for date/datetime columns.
 post-pass -- the cell list is materialised before any column is built -- so
 the point about streaming below stands. Kept for the measurement history.*
 
-`read_xlsx()` builds columns in R from the cells `xlsx_cells()` returns, in
+`xlsx_read()` builds columns in R from the cells `xlsx_cells()` returns, in
 `R/read.R`. Promotion is by inspection rather than progressively: a column of
 blanks is logical, booleans stay logical, numbers give a double, dates give
 `Date` or `POSIXct`, and anything mixed or holding a string or a cell error
@@ -839,7 +880,7 @@ the numbers:
 
 ```text
 stored text     '1.50'  '2.0e3'  '0.30'
-read_xlsx gives '1.50'  '2.0e3'  '0.30'
+xlsx_read gives '1.50'  '2.0e3'  '0.30'
 from a double   '1.5'   '2000'   '0.3'
 ```
 
@@ -863,7 +904,7 @@ Measured after:
 Four times less memory, and a third faster, which was not the aim. The earlier
 estimate in this section of 29 MB down to 17 MB was wrong in the conservative
 direction: it had not counted the type factor and the intermediate data frame
-that `read_xlsx()` was also building.
+that `xlsx_read()` was also building.
 
 The epoch arithmetic deliberately stayed in R. It is the fiddliest part of the
 package -- two epochs, one counting a day that never existed -- it is already
@@ -962,6 +1003,65 @@ Useful context should include:
 
 Malformed XLSX input should never cause undefined behavior or process crashes.
 
+### Status, 2026-10-28: a worksheet that ends early is an error
+
+xlsxio's `xlsxioread_sheet_next_row()` returns 0 at the end of a worksheet and
+on an error alike, so a damaged or truncated worksheet used to read as the
+rows before the damage, with `"ok"`. Patch 0008 adds
+`xlsxioread_sheet_finish()`, which every reader calls once the row loop has
+run out, and four statuses come from it:
+
+| Status | Class | Why the worksheet stopped |
+| --- | --- | --- |
+| `sheet_xml` | `zuxlsx_xml_error` | Expat reported a parse error, recorded when it happened |
+| `sheet_range` | `zuxlsx_ooxml_error` | a cell reference past `XFD1048576` |
+| `sheet_shared_string` | `zuxlsx_ooxml_error` | a `t="s"` index that is not a number, is negative, or is past the table |
+| `sheet_zip` | `zuxlsx_zip_error` | the member's size or CRC-32 did not match, which miniz checks when it is closed |
+
+The detail carries the worksheet's name and the XML line rather than a part
+name, which xlsxio resolves internally and does not expose. A sheet whose
+part is never found still reads as empty: a chartsheet is listed among the
+sheets and has no worksheet part, and making that an error broke real
+workbooks in the corpus (`WithChartSheet.xlsx`, `56557.xlsx`). The
+callback reader reports the failure after the chunks it has already handed
+over -- those stay handed over -- and only when the callback did not stop the
+read itself.
+
+`zuxlsx_ooxml_error` therefore now means "well formed, but not a valid
+workbook" rather than only "declares no worksheet".
+
+The corpus run caught two things the hand-built tests did not. A
+shared-string table may hold an empty `<si/>`, which xlsxio stores as a NULL
+entry, so it is the table's size, not a NULL lookup, that says whether an
+index resolves. And `bug69769.xlsx` writes an index as `<v>2 </v>`; XML
+Schema allows whitespace around an integer, and that cell used to read as
+the text "2 " rather than as its string. Both are in patch 0008, as are two shared-string bugs that read as blank or
+wrong text without any error: an empty `<si/>` was never added to the table,
+so every later index resolved one entry off; and a table written with a
+namespace prefix (`<x:sst><x:si>`, as `style-alternate-content.xlsx` and a
+report generator in the corpus write it) was not read at all, so every
+string came back blank. Workbooks
+whose string table xlsxio cannot read at all -- an Excel 2007 beta file with
+`<sstItem>` rather than `<si>` -- used to read every string as blank; they
+are now `zuxlsx_ooxml_error`, which `tools/corpus/expected.tsv` records.
+
+`agile_crypto` and the unrecognised-status fallback carry `zuxlsx_error`
+alone; they used to list it twice.
+
+**Update, 2026-10-28: every part is checked (#38, #39).** The shared-string
+table and the styles part are parsed before the worksheet, through an
+xlsxio function whose "did it parse?" answer upstream had commented out, so
+damage there loaded as far as the damage. Patch 0009 adds a checked variant;
+a part that is not well formed is `zuxlsx_xml_error` naming it, and one that
+fails its size or CRC-32 is `zuxlsx_zip_error` (`part_zip`). The parts read
+to find the worksheets -- `[Content_Types].xml`, `xl/workbook.xml` and its
+relationships, `xl/_rels/workbook.xml.rels` -- go through paths that report
+nothing, so
+`C_xlsx_sheets` validates their CRC-32 with `mz_zip_validate_file()` while
+listing, which every reader does first; they are small, so listing stays
+cheap. A workbook part under another name is not covered. The pinned
+"KNOWN GAP" CRC test now expects the error.
+
 ---
 
 ## 16. Security and robustness
@@ -1007,6 +1107,50 @@ fuzzer found a NULL dereference there (`0007-null-relationship-id-crash`).
 CRC-32 is not detected, and the test says so in its name. Invalid
 shared-string indices, extreme row and column indices, integer overflow in
 cell references and compression bombs remain uncovered.
+
+**Update, 2026-10-28.** Invalid shared-string indices, extreme row and
+column indices and integer overflow in cell references are covered, by patch
+0008 and `test-hostile.R`: a reference past `XFD1048576` is
+`zuxlsx_ooxml_error` and is refused before the padding loops walk towards
+it (one cell at `A99999999999` used to keep the reader busy for minutes), and
+the parsers saturate one past the grid so a long reference cannot wrap
+`size_t`. A shared-string index that does not resolve is
+`zuxlsx_ooxml_error` rather than a blank cell; an empty `<v/>` names no index
+and stays blank. A worksheet's CRC-32 is now checked; the workbook part's,
+read through the sheet-list path, is still the pinned gap. `range` is bounded
+to the grid in R and again in C. The nesting test used to put its nesting
+outside the root element, so it was refused for having two roots; it now
+nests 100,000 deep inside a real workbook and worksheet, and both read.
+Compression bombs are covered too: `helper-zip.R` now writes DEFLATE members
+(memCompress()'s zlib stream with its header and trailer cut off), and
+`test-hostile.R` builds a 50 MB worksheet that deflates to about 50 KB. Read
+honestly it streams through and is then refused on its (deliberately wrong)
+checksum without the uncompressed size ever being held; declaring 2000 bytes
+for it cuts it off at the declared size, which ends the worksheet early and
+is an error. The diagnostic path that re-parses `[Content_Types].xml` and
+`xl/workbook.xml` streams them too, instead of extracting each to the heap at
+its declared size, and it locates members as patch 0005 does, first match
+and tolerant of case and backslashes, so it diagnoses the part the reader
+read.
+
+Under gctorture the tests that build tens of megabytes in R -- the bomb, the
+DIFAT container, 100,000-deep nesting, the many-segment decryption and the
+hash-and-key grid -- skip, through `ZUXLSX_LIGHT_TESTS`, and the damage sweeps
+run a seventh of their cases: they test limits, not protection, and at a
+collection per twenty allocations they took the job past two hours.
+
+**Update, 2026-10-28: DOCTYPE (#47).** zuxlsx links raw Expat, so it gets
+zuxml's compiled-in policy -- `XML_GE 0`, no `XML_DTD`, so no entity is
+expanded and none is fetched -- but not the DOCTYPE refusal zuxml applies at
+its own seam. An internal subset's `&e;` therefore reached a cell as literal
+text. Patch 0010 installs a start-DOCTYPE handler on every parser xlsxio
+creates, and `check_part()` in `src/zuxlsx.c` does the same for the parts
+listing validates (now parsed as well as CRC-checked, so a broken
+`xl/_rels/workbook.xml.rels` is an error naming it rather than worksheets
+that read as empty). Parts xlsxio never reads are not checked: POI's
+`xlsx-corrupted.xlsx` has a root `_rels/.rels` that is the word
+"CORRUPTED", and its data is intact and reads. `encinfo.c` already refused one. Either way a DOCTYPE is
+`zuxlsx_xml_error`, in any part.
 
 No configurable limits exist yet. Nothing in the reader caps a part size, a
 string length or a sheet count; the defenses that hold today come from Expat's
@@ -1289,7 +1433,7 @@ character string, astral-plane and right-to-left text, XML-escaped characters,
 and worksheets read independently of one another.
 
 Separately, `test-corpus.R` asserts the *content* of the seven committed
-workbooks for the first time. Until `read_xlsx()` existed they could only be
+workbooks for the first time. Until `xlsx_read()` existed they could only be
 checked for opening, which left the real-producer corpus -- the part that
 actually tests interoperability -- almost unexercised.
 
@@ -1302,7 +1446,7 @@ nothing asserted its contents.
 
 The cause was trusting xlsxio's row padding, which inserts a single row for an
 omitted range however wide it is: a sheet with data on rows 1, 2 and 5 arrives
-as rows 1, 2, 4, 5. `read_xlsx()` now spans the range of row numbers the cells
+as rows 1, 2, 4, 5. `xlsx_read()` now spans the range of row numbers the cells
 themselves carry, which is independent of that padding. The quirk is pinned by
 a characterisation test rather than patched in xlsxio, since nothing above the
 cell layer needs the padding to be right.
@@ -1319,6 +1463,21 @@ header, the names come out `X1`, `X2`, ..., and the real header is read as
 data, which usually promotes its column to character. Traced against the
 vendored reader with this package's flags; no test starts a table below row 2
 without `range`.
+
+**Fixed, 2026-10-28 (#40).** Without `range`, the extent now comes from
+non-blank cells only, as in readxl: empty rows above
+and below the table and empty columns either side are not part of it, and a
+sheet whose styled empty cells run far past its data reads as its data.
+`xlsx_cells()` still reports padding blanks, and its documentation says so.
+`xlsx_rows()` runs from row 1, so `rows[[n]]` is row n.
+
+**Interrupts (#42).** Every row loop checks for an interrupt every thousand
+rows, under `R_UnwindProtect`: the cleanup closes the reader and worksheet,
+wipes the plaintext and frees the cells as the interrupt -- or a
+`setTimeLimit()` limit, which is signalled at the same check -- unwinds. The
+continuation is made before any reader opens and kept in the cell bag's
+protected slot, so the check never allocates while the C stack owns an open
+handle.
 
 ### 17.4d Strict OOXML, 2026-09-20: found by looking, not by erroring
 
@@ -1834,14 +1993,14 @@ compiled with hidden visibility), and zucrypt's own namespace can be loaded
 alongside -- two private copies of the backend, which do not interfere.
 TF-PSA-Crypto's Apache-2.0 licence is installed as
 `inst/licenses/tf-psa-crypto-LICENSE` and recorded in `inst/COPYRIGHTS`.
-`zuxlsx_native()` reports its version, from a call into the archive.
+`xlsx_info()` reports its version, from a call into the archive.
 
 **The backend's lifetime** belongs to the DLL: `zuc_init()` in
 `R_init_zuxlsx()` and `zuc_shutdown()` in `R_unload_zuxlsx()`, which
 `.onUnload` makes run. Not per call: every decryption would pay for it, and
 nothing gains. A failed `zuc_init()` is remembered rather than raised, since
 `R_init_` must not longjmp; decryption then reports `ZUC_ERR_NOT_READY` and
-`zuxlsx_native()` reports `NA`.
+`xlsx_info()` reports `NA`.
 
 **No R below the `.Call`.** `agile.c` includes no R header. Every zucrypt
 handle is created and freed within one call, and every buffer that held key
@@ -1919,9 +2078,32 @@ allocation failure part way through cannot leak them. `cfb_streams()` in
 It works over a buffer rather than a `FILE *`, unlike `ole2_kind()`, because
 decryption needs the whole package in memory regardless -- 21b's "decryption
 cannot stream" -- and because #25 wants reading from memory anyway.
-`ole2_kind()` keeps reading only the header and directory from the file,
-which is what a classifier should cost; replacing it with this reader is a
-decision for #25.
+`ole2_kind()` kept reading only the header and directory from the file,
+which is what a classifier should cost; replacing it with this reader was
+left as a decision for #25.
+
+**Update, 2026-10-28: replaced.** The review of 6327d52 (#89) found that the
+two readers disagreed. `ole2_kind()` consulted only the header's 109 DIFAT
+entries, sized the file with a `long` from `ftell` (32 bits on Windows), and
+counted streams inside a storage, while `cfb.c` follows DIFAT sectors, works
+in 64 bits and looks at the root only. A large encrypted workbook could
+therefore be classified as "some other OLE2 document" although it could be
+decrypted, and streams in a storage were "needs a password" without one and
+unsupported with one. `resolve_source()` now reads an OLE2 file once and
+`ole2_classify()` asks `cfb_open()` and `cfb_has_stream()`; the same bytes
+are then decrypted. Reading the whole container to classify it costs memory
+only for OLE2 files, which is never the normal path. Making the switch
+showed that `tools/make-ole2.R` wrote `ENDOFCHAIN` where [MS-CFB] wants
+`NOSTREAM` for an absent sibling or child, which a reader that follows the
+tree refuses; the generator is fixed and its fixtures regenerated, and every
+file in `fixtures/ole2/` is now pinned in `SHA256SUMS`, which
+`tools/vendor/verify` checks (#83).
+
+Both places that open the file directly, the signature check and
+`read_file()`, go through `zuxlsx_fopen_utf8()` in `src/utf8file.c`, which
+converts the UTF-8 path to UTF-16 and calls `_wfopen` on Windows as miniz
+does for the archive (#90). It is its own translation unit because
+`<windows.h>` and R's headers do not mix.
 
 Where it is stricter than some readers, deliberately:
 
@@ -2009,8 +2191,8 @@ spliced copies, with no report.
 
 ### 21g. Step 4, `password =` on the readers: done, 2026-09-29
 
-All five readers -- `read_xlsx()`, `xlsx_cells()`, `xlsx_rows()`,
-`xlsx_read_cells()` and `xlsx_sheets()` -- take `password = NULL`. With no
+All five readers -- `xlsx_read()`, `xlsx_cells()`, `xlsx_rows()`,
+`xlsx_stream_cells()` and `xlsx_sheets()` -- take `password = NULL`. With no
 password nothing changes: an encrypted package is still reported, now with a
 message that says to pass one. With a password, `resolve_source()` in
 `src/zuxlsx.c` reads the file into C memory, runs steps 1 to 3
@@ -2018,12 +2200,19 @@ message that says to pass one. With a password, `resolve_source()` in
 `xlsxioread_open_memory()`, which patch 0001 already implements on
 `mz_zip_reader_init_mem()`. No patch was needed.
 
+`resolve_source()` reports a cryptographic backend failure as a C
+`zuc_status`, and each entry point turns it into the condition's detail with
+`source_detail()`. It handed back a `SEXP *` at first, and rchk cannot follow
+a `SEXP` whose address is taken: it skipped the variable in all four entry
+points and called its own result incomplete (found 2026-10-28, when CI moved
+onto r-actions).
+
 **The plaintext never becomes an R object and never touches the disk.** It
 lives in `malloc`'d memory owned by an external pointer whose finalizer wipes
 it with `zuc_secure_zero()` before freeing it, and each reader disposes of
 it explicitly as soon as the reader is closed. miniz reads it in place, so it
 must outlive the reader. Three of the readers close the reader before any R
-allocation, so that holds by construction. `xlsx_read_cells()` keeps the
+allocation, so that holds by construction. `xlsx_stream_cells()` keeps the
 reader open across R callbacks, so there the plaintext moves into
 `reader_handle` and one finalizer closes the reader and *then* wipes the
 buffer -- two finalizers would run in no guaranteed order. This answers 21b's
@@ -2034,8 +2223,8 @@ usual.
 **The failure diagnostics look inside the plaintext.** `file_is_xlsb()` and
 `first_malformed_part()` take a buffer as well as a path, so an encrypted
 `.xlsb`, or an encrypted package whose `xl/workbook.xml` is broken, is
-reported as exactly that. `ole2_kind()` still classifies the file on disk,
-before any decryption, which is right: it is asking about the container.
+reported as exactly that. The container is classified before any
+decryption, which is right: it is asking about the container.
 
 **Policy.** A password is ignored for a workbook that is not encrypted, and
 changes nothing for a legacy `.xls` or an unrecognised OLE2 container. A
@@ -2044,7 +2233,24 @@ wrong password is `zuxlsx_password_error` from every reader, a subclass of
 now reachable from exported functions and documented in
 `?"zuxlsx-conditions"`, so their provisional status in 21d ends here.
 
-**Known cost: two decryptions per read.** `resolve_sheet()` lists the
+**Hash and key sizes.** The committed fixtures are SHA-512 with AES-256. The
+tests' `agile_encrypt()` takes `hash` and `key_bits`, and every combination
+the decryptor accepts -- SHA-1, SHA-256, SHA-384, SHA-512 with 128, 192 and
+256-bit keys -- round-trips, including those where the hash is shorter than
+the key and the derived key is padded with 0x36 (#82). That encryptor reads
+the same specification the decryptor does, so an independently produced
+SHA-1/AES-128 workbook is still wanted as a fixture.
+
+**The plaintext on an unwind.** `xlsx_stream_cells()` calls R while the
+decrypted package is open. The callback now runs under `R_UnwindProtect`,
+whose cleanup closes the reader and wipes the plaintext as the stack
+unwinds, rather than at whatever GC next runs the finalizer (#80). Shared
+strings and Expat's buffers are freed by xlsxio without being wiped; the
+"wiped when the read ends" claim is about the package, not every copy of a
+cell's text.
+
+**Known cost: two decryptions per read** (accepted for 0.1.0 on
+2026-10-28, #107, milestone v0.1.1). `resolve_sheet()` lists the
 worksheets through `C_xlsx_sheets` before every read, to check a name or map
 a position, and each call decrypts. On the fixture that is 140 ms instead of
 70, almost all of it the spin loop. Resolving the sheet in C, in the same

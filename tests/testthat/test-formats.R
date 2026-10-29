@@ -16,7 +16,7 @@ test_that("an OLE2 file is reported as a format, not as a broken archive", {
 
   expect_error(xlsx_sheets(path), class = "zuxlsx_unsupported_format_error")
   expect_error(xlsx_cells(path), class = "zuxlsx_unsupported_format_error")
-  expect_error(read_xlsx(path), class = "zuxlsx_unsupported_format_error")
+  expect_error(xlsx_read(path), class = "zuxlsx_unsupported_format_error")
 })
 
 test_that("an OLE2 file is still a zuxlsx_error", {
@@ -57,7 +57,7 @@ test_that("an xlsb is reported as a format, not as an empty workbook", {
   write_workbook(path, parts)
 
   expect_error(xlsx_sheets(path), class = "zuxlsx_unsupported_format_error")
-  expect_error(read_xlsx(path), class = "zuxlsx_unsupported_format_error")
+  expect_error(xlsx_read(path), class = "zuxlsx_unsupported_format_error")
 })
 
 test_that("a ZIP that is neither a workbook nor an xlsb is still an ooxml error", {

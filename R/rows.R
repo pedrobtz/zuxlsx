@@ -3,19 +3,16 @@
 #' Returns a worksheet row by row, as the text of each cell, without inferring
 #' a type for any column. This is the row-oriented counterpart to
 #' [xlsx_cells()], and is the shape to reach for when a worksheet is not
-#' rectangular enough for [read_xlsx()] -- a report with stacked blocks, or a
+#' rectangular enough for [xlsx_read()] -- a report with stacked blocks, or a
 #' file whose header is several rows deep.
 #'
-#' @param path Path to an `.xlsx` file.
-#' @param sheet The worksheet to read: either its name, or its position in the
-#'   workbook.
-#'
-#' @return A list with one character vector per row, from the first row of the
-#'   worksheet to the last. Every vector is as long as the widest row, so the
-#'   nth element of each is the nth column. Blank cells are `NA`.
-#' @inheritParams xlsx_sheets
+#' @return A list with one character vector per row, from row 1 of the
+#'   worksheet to the last row holding a cell, so the nth element is row n.
+#'   Every vector is as long as the widest row, so the nth element of each is
+#'   column n. Blank cells, and rows with none, are `NA`.
+#' @inheritParams xlsx_cells
 #' @export
-#' @seealso [xlsx_cells()] for typed cells, [read_xlsx()] for a data frame.
+#' @seealso [xlsx_cells()] for typed cells, [xlsx_read()] for a data frame.
 #' @examples
 #' path <- system.file("extdata", "two-sheets.xlsx", package = "zuxlsx")
 #' rows <- xlsx_rows(path)
@@ -25,26 +22,17 @@
 #' rows[[1]]
 #' rows[[2]]
 xlsx_rows <- function(path, sheet = 1, password = NULL) {
-  cells <- xlsx_cells(path, sheet, password)
+  cells <- xlsx_cells(path, sheet, password = password)
   if (nrow(cells) == 0L) {
     return(list())
   }
 
-  # Rows are spanned rather than taken from the cells present, for the same
-  # reason read_xlsx() spans them: an omitted row has to stay a row.
-  rows <- seq.int(min(cells$row), max(cells$row))
-  width <- max(cells$col)
-
-  blank <- as.character(cells$type) == "blank"
+  # Rows run from 1, as columns do, so that rows[[n]][m] is the cell in row n,
+  # column m: an omitted row stays a row, and so do leading empty ones. One
+  # matrix filled by position keeps this linear in the number of cells.
   value <- cells$value
-  value[blank] <- NA_character_
-
-  out <- vector("list", length(rows))
-  for (i in seq_along(rows)) {
-    in_row <- cells$row == rows[i]
-    line <- rep(NA_character_, width)
-    line[cells$col[in_row]] <- value[in_row]
-    out[[i]] <- line
-  }
-  out
+  value[cells$type == "blank"] <- NA_character_
+  grid <- matrix(NA_character_, nrow = max(cells$row), ncol = max(cells$col))
+  grid[cbind(cells$row, cells$col)] <- value
+  lapply(seq_len(nrow(grid)), function(i) grid[i, ])
 }

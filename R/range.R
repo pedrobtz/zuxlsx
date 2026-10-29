@@ -1,24 +1,18 @@
 # A1-style cell references, and the rectangles they describe.
 #
+# A worksheet ends at XFD1048576: 1048576 rows and 16384 columns.
+#
 # Excel addresses a column by letters in a bijective base-26 system: A to Z,
 # then AA, AB and so on. It is not ordinary base 26 -- there is no zero digit,
 # so "A" is 1 rather than 0 and "AA" is 27 rather than 26.
 
-# "A" -> 1, "Z" -> 26, "AA" -> 27. Returns NA for anything that is not a run
-# of letters.
+MAX_ROWS <- 1048576
+MAX_COLS <- 16384
+
+# "A" -> 1, "Z" -> 26, "AA" -> 27, for one run of letters.
 column_number <- function(letters_in) {
-  vapply(
-    letters_in,
-    function(one) {
-      if (!grepl("^[A-Za-z]+$", one)) {
-        return(NA_real_)
-      }
-      digits <- utf8ToInt(toupper(one)) - utf8ToInt("A") + 1L
-      sum(digits * 26^rev(seq_along(digits) - 1L))
-    },
-    numeric(1),
-    USE.NAMES = FALSE
-  )
+  digits <- utf8ToInt(toupper(letters_in)) - utf8ToInt("A") + 1L
+  sum(digits * 26^rev(seq_along(digits) - 1L))
 }
 
 # Splits one corner of a range. Each part may be absent: "B2" bounds both
@@ -34,9 +28,10 @@ parse_corner <- function(corner) {
   )
 }
 
-# Turns "B2:D10" into the rectangle it means, as a list of four bounds. A
-# bound that the range does not constrain is NA, so "A:C" limits columns and
-# leaves every row in, and "2:10" does the opposite.
+# Turns "B2:D10" into the rectangle it means: min_row, max_row, min_col and
+# max_col, the vector C_read_xlsx takes. A bound that the range does not
+# constrain is NA, so "A:C" limits columns and leaves every row in, and "2:10"
+# does the opposite.
 #
 # Corners are normalised, so "D10:B2" is the same rectangle as "B2:D10".
 parse_range <- function(range, call = sys.call(-1L)) {
@@ -45,7 +40,9 @@ parse_range <- function(range, call = sys.call(-1L)) {
       "zuxlsx_input_error",
       paste0(
         "`range` must be an A1-style cell range such as \"B2:D10\", ",
-        "\"A:C\" or \"2:10\", not ", encodeString(range, quote = "\""), "."
+        "\"A:C\" or \"2:10\", not ",
+        encodeString(range, quote = '"'),
+        "."
       ),
       call = call
     )
@@ -75,11 +72,21 @@ parse_range <- function(range, call = sys.call(-1L)) {
   if (isTRUE(from$row == 0) || isTRUE(to$row == 0)) {
     bad()
   }
+  rows <- c(from$row, to$row)
+  cols <- c(from$col, to$col)
+  if (
+    any(rows > MAX_ROWS, na.rm = TRUE) || any(cols > MAX_COLS, na.rm = TRUE)
+  ) {
+    zuxlsx_stop(
+      "zuxlsx_input_error",
+      paste0(
+        "`range` ",
+        encodeString(range, quote = '"'),
+        " reaches past XFD1048576, the last cell a worksheet can have."
+      ),
+      call = call
+    )
+  }
 
-  list(
-    min_row = min(from$row, to$row),
-    max_row = max(from$row, to$row),
-    min_col = min(from$col, to$col),
-    max_col = max(from$col, to$col)
-  )
+  c(min(rows), max(rows), min(cols), max(cols))
 }

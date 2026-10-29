@@ -10,7 +10,12 @@ xlsx_rows(path, sheet = 1, password = NULL)
 \item{path}{Path to an \code{.xlsx} file.}
 
 \item{sheet}{The worksheet to read: either its name, or its position in the
-workbook.}
+workbook.
+
+Cells the worksheet leaves out between the ones it writes come back as
+\code{"blank"}, and so may a few the file never names: the reader pads to keep
+positions aligned. \code{\link[=xlsx_read]{xlsx_read()}} ignores blank cells when it decides where
+a table starts and ends.}
 
 \item{password}{The password of a password-protected workbook, or \code{NULL}
 (the default) for one without. The workbook is decrypted in memory and
@@ -20,15 +25,16 @@ reported as such. Ignored for a workbook that is not encrypted. R cannot
 erase a string, so the password may stay in memory after the call.}
 }
 \value{
-A list with one character vector per row, from the first row of the
-worksheet to the last. Every vector is as long as the widest row, so the
-nth element of each is the nth column. Blank cells are \code{NA}.
+A list with one character vector per row, from row 1 of the
+worksheet to the last row holding a cell, so the nth element is row n.
+Every vector is as long as the widest row, so the nth element of each is
+column n. Blank cells, and rows with none, are \code{NA}.
 }
 \description{
 Returns a worksheet row by row, as the text of each cell, without inferring
 a type for any column. This is the row-oriented counterpart to
 \code{\link[=xlsx_cells]{xlsx_cells()}}, and is the shape to reach for when a worksheet is not
-rectangular enough for \code{\link[=read_xlsx]{read_xlsx()}} -- a report with stacked blocks, or a
+rectangular enough for \code{\link[=xlsx_read]{xlsx_read()}} -- a report with stacked blocks, or a
 file whose header is several rows deep.
 }
 \examples{
@@ -41,5 +47,5 @@ rows[[1]]
 rows[[2]]
 }
 \seealso{
-\code{\link[=xlsx_cells]{xlsx_cells()}} for typed cells, \code{\link[=read_xlsx]{read_xlsx()}} for a data frame.
+\code{\link[=xlsx_cells]{xlsx_cells()}} for typed cells, \code{\link[=xlsx_read]{xlsx_read()}} for a data frame.
 }

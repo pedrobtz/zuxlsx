@@ -4,55 +4,51 @@ Everything here that could be done early has been. What remains is either
 blocked on something outside this repository, or would break installation if
 done before submission day.
 
-## Blocked: the siblings must be on CRAN first
+## Cleared: the siblings are on CRAN
 
-`LinkingTo: zucrypt, zukomp, zuxml`, and **CRAN ignores `Remotes:`** -- it is a
-devtools and remotes field, not an R one. A submission made while any of the three
-is only on GitHub fails at incoming checks, before a human sees it, because
-the declared dependencies cannot be installed from CRAN.
+`LinkingTo: zucrypt, zukomp, zuxml`, and **CRAN ignores `Remotes:`** -- it is
+a devtools and remotes field, not an R one -- so a submission made while any
+of the three was only on GitHub would have failed at incoming checks.
 
-So the order is fixed: `zuxml`, `zukomp` and `zucrypt` are accepted, then
-zuxlsx is submitted. zucrypt joined the list on 2026-09-29, when decryption
-moved into 0.1.0 (design §21c); zucrypt freezes its ABI 1 on this package's
-`src/agile.c` (pedrobtz/zucrypt#43). Nothing in this package can shorten that.
-
-Check with:
+That block is gone: zukomp 0.1.0 (2026-10-16), zucrypt 0.1.0 (2026-10-23) and
+zuxml 0.1.0 (2026-10-27) are all on CRAN, and each CRAN build installs its
+`lib/` archive. On 2026-10-28 `R CMD check --as-cran` passed against those
+three CRAN builds, with `Remotes:` removed, in the C locale: only the
+"New submission" NOTE.
 
 ```r
 p <- rownames(available.packages(repos = "https://cloud.r-project.org"))
 c("zuxml", "zukomp", "zucrypt") %in% p
 ```
 
-## Do these on submission day, not before
+## Done for submission (2026-10-28)
 
-The first two break the GitHub install path, so they are last.
+- `Remotes:` is dropped from `DESCRIPTION`. With all three siblings on CRAN,
+  `setup-r-dependencies` and `pak::pak("pedrobtz/zuxlsx")` resolve them from
+  there; development no longer builds against their `main`.
+- The README's install instructions say `install.packages("zuxlsx")`, with
+  the GitHub install kept as the development version.
+- CI is the shared `pedrobtz/r-actions` workflows: `R-CMD-check.yaml` (with
+  Windows R-devel and `nosuggests`), `native-checks.yaml` (sanitizers,
+  valgrind, rchk, gctorture, LTO, analyzers, CRAN's special checks) and
+  `vendor.yaml`.
+- `cran-comments.md` names all three `LinkingTo` packages, TF-PSA-Crypto's
+  licence, the one NOTE and the CI test environments.
+- `Language: en-GB` and `inst/WORDLIST`; `spelling::spell_check_package()`
+  is clean.
 
-1. **Drop `Remotes:` from `DESCRIPTION`.** Until the siblings are on CRAN it
-   is the only thing that lets `pak::pak("pedrobtz/zuxlsx")` find them, and
-   removing it early breaks continuous integration here as well, since
-   `setup-r-dependencies` resolves through it.
+What is left is the submission itself: a green full-profile run on the
+commit being submitted, then `devtools::submit_cran()`.
 
-2. **Change the README install instructions** from
-   `pak::pak("pedrobtz/zuxlsx")` to `install.packages("zuxlsx")`. Doing this
-   before acceptance documents something that does not work.
+**Status, 2026-10-29.** Stages 8 and 9 are closed (#110 to #114). The
+exports are `xlsx_*` (#46); `col_types`, `na`, `skip` and `n_max` are
+deferred to v0.2.0 (#27). Local checks on the submission branch: `verify`,
+both fixture generators' `--check`, the layering check, spelling and
+`urlchecker` are clean, and `--as-cran` against the CRAN siblings in the C
+locale gives only the "New submission" NOTE.
 
-3. **Re-run the checks after those two edits**, not before -- dropping
-   `Remotes:` changes how the dependencies resolve, so the checks that matter
-   are the ones after the edit:
-   - `R CMD check --as-cran` locally, against the siblings' CRAN releases;
-   - win-builder (R-devel and R-release), which is CRAN's own Windows build
-     rather than a GitHub runner's approximation of it;
-   - a CRAN-like container (R-hub's clang or gcc-16 images, with
-     `-pedantic`), since the vendored xlsxio is compiled by nothing but this
-     package's own checks, and none of them uses CRAN's r-devel compilers
-     today (#44).
-
-   All three at 0 errors, 0 warnings, and no NOTE beyond "New submission".
-
-This whole file is Stage 10 of [roadmap.md](roadmap.md), which also requires
-Stages 8 (hardening) and 9 (API freeze) to be closed first. Stage 11
-(password-protected workbooks) is complete apart from what it handed to
-Stage 8.
+This file is Stage 10 of [roadmap.md](roadmap.md). Stages 8 (hardening) and 9
+(API freeze and docs) are the ones it waited on, and both are closed.
 
 ## Already done
 
@@ -70,8 +66,28 @@ Stage 8.
 - `urlchecker::url_check()` is clean; all URLs are https and none redirect.
 - LICENSE year is current.
 
+## Decided, 2026-10-28, after the whole-package review
+
+The review of 6327d52 was filed as issues labelled `review` and fixed in
+#110. Three of its points were decisions rather than defects:
+
+- **`xlsx_stream_cells(path, sheet = 1, callback, ...)` keeps its argument
+  order** (#109). Every reader takes `(path, sheet = 1, ...)`, and
+  `callback = f` reads better named. Reordering after CRAN would need a
+  deprecation cycle, so this is final.
+- **Decrypting twice per read is accepted for 0.1.0** (#107, milestone
+  v0.1.1). It costs time only, and resolving the sheet in C changes nothing
+  users can see, so it can land in any release.
+- **An independent SHA-1/AES-128 fixture is deferred** (#82, milestone
+  v0.1.1). SHA-512/AES-256, what Excel has written since 2013, is proven by
+  two independently produced fixtures; the rest are covered by round trips
+  through the test encryptor.
+
 ## Worth re-checking at the time
 
+- That `locale.yaml` is green: it runs the tests in the C and Latin-1
+  locales, as CRAN's Debian clang machine does. A non-ASCII password literal
+  once failed only there (#72).
 - `tools/vendor/verify` and `tools/fixtures/make-extdata.R --check`, so the
   vendored tree and the generated fixture still match what is recorded.
 - That the siblings' *CRAN* builds install the archives where `configure`

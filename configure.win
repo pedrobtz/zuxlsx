@@ -48,10 +48,27 @@ ZUCRYPT_LIB=$(lib_dir zucrypt)
 [ -n "${ZUKOMP_LIB}" ] && [ -f "${ZUKOMP_LIB}/libzukomp.a" ] || fail zukomp libzukomp.a
 [ -n "${ZUCRYPT_LIB}" ] && [ -f "${ZUCRYPT_LIB}/libzucrypt.a" ] || fail zucrypt libzucrypt.a
 
+# The paths are substituted into single-quoted strings in Makevars, so a
+# single quote cannot be represented there at all; and &, | and \ mean
+# something to sed's replacement, so they are escaped rather than left to
+# corrupt the result.
+for d in "${ZUXML_LIB}" "${ZUKOMP_LIB}" "${ZUCRYPT_LIB}"; do
+  case "$d" in
+    *"'"*)
+      echo "configure: cannot link from a library path containing a single" >&2
+      echo "  quote: $d" >&2
+      exit 1
+      ;;
+  esac
+done
+sed_escape() {
+  printf '%s\n' "$1" | sed -e 's/[&|\\]/\\&/g'
+}
+
 sed \
-  -e "s|@ZUXML_LIB@|${ZUXML_LIB}|g" \
-  -e "s|@ZUKOMP_LIB@|${ZUKOMP_LIB}|g" \
-  -e "s|@ZUCRYPT_LIB@|${ZUCRYPT_LIB}|g" \
+  -e "s|@ZUXML_LIB@|$(sed_escape "${ZUXML_LIB}")|g" \
+  -e "s|@ZUKOMP_LIB@|$(sed_escape "${ZUKOMP_LIB}")|g" \
+  -e "s|@ZUCRYPT_LIB@|$(sed_escape "${ZUCRYPT_LIB}")|g" \
   src/Makevars.in > src/Makevars.win
 
 echo "configure: linking ${ZUXML_LIB}/libzuxml.a, ${ZUKOMP_LIB}/libzukomp.a"

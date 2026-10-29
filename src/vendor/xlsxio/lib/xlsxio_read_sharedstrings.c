@@ -11,6 +11,22 @@
 #define wcscasecmp _wcsicmp
 #endif
 
+//zuxlsx: element names compared without their namespace prefix, as the
+//worksheet parser compares them, so a table written as <x:sst><x:si>
+//is read rather than skipped. Without this every string in such a
+//workbook read as blank.
+static int zu_icmp_local (const XML_Char* value, const XML_Char* name)
+{
+  const XML_Char* p = value;
+  const XML_Char* colon = NULL;
+  if (!value)
+    return 1;
+  for (; *p; p++)
+    if (*p == ':')
+      colon = p;
+  return XML_Char_icmp(colon ? colon + 1 : value, name);
+}
+
 struct sharedstringlist* sharedstringlist_create ()
 {
   struct sharedstringlist* sharedstrings;
@@ -124,7 +140,7 @@ void shared_strings_callback_skip_tag_end (void* callbackdata, const XML_Char* n
 void shared_strings_callback_find_sharedstringtable_start (void* callbackdata, const XML_Char* name, const XML_Char** atts)
 {
   struct shared_strings_callback_data* data = (struct shared_strings_callback_data*)callbackdata;
-  if (XML_Char_icmp(name, X("sst")) == 0) {
+  if (zu_icmp_local(name, X("sst")) == 0) {
     XML_SetElementHandler(data->xmlparser, shared_strings_callback_find_shared_stringitem_start, NULL);
   }
 }
@@ -132,7 +148,7 @@ void shared_strings_callback_find_sharedstringtable_start (void* callbackdata, c
 void shared_strings_callback_find_sharedstringtable_end (void* callbackdata, const XML_Char* name)
 {
   struct shared_strings_callback_data* data = (struct shared_strings_callback_data*)callbackdata;
-  if (XML_Char_icmp(name, X("sst")) == 0) {
+  if (zu_icmp_local(name, X("sst")) == 0) {
     XML_SetElementHandler(data->xmlparser, shared_strings_callback_find_sharedstringtable_start, NULL);
   }
 }
@@ -140,19 +156,21 @@ void shared_strings_callback_find_sharedstringtable_end (void* callbackdata, con
 void shared_strings_callback_find_shared_stringitem_start (void* callbackdata, const XML_Char* name, const XML_Char** atts)
 {
   struct shared_strings_callback_data* data = (struct shared_strings_callback_data*)callbackdata;
-  if (XML_Char_icmp(name, X("si")) == 0) {
+  if (zu_icmp_local(name, X("si")) == 0) {
     if (data->text)
       free(data->text);
     data->text = NULL;
     data->textlen = 0;
-    XML_SetElementHandler(data->xmlparser, shared_strings_callback_find_shared_string_start, shared_strings_callback_find_sharedstringtable_end);
+    //zuxlsx: the end handler has to be the item's own, or an empty <si/>
+    //is never added and every later index resolves one entry off
+    XML_SetElementHandler(data->xmlparser, shared_strings_callback_find_shared_string_start, shared_strings_callback_find_shared_stringitem_end);
   }
 }
 
 void shared_strings_callback_find_shared_stringitem_end (void* callbackdata, const XML_Char* name)
 {
   struct shared_strings_callback_data* data = (struct shared_strings_callback_data*)callbackdata;
-  if (XML_Char_icmp(name, X("si")) == 0) {
+  if (zu_icmp_local(name, X("si")) == 0) {
     sharedstringlist_add_buffer(data->sharedstrings, data->text, data->textlen);
     if (data->text)
       free(data->text);
@@ -167,10 +185,10 @@ void shared_strings_callback_find_shared_stringitem_end (void* callbackdata, con
 void shared_strings_callback_find_shared_string_start (void* callbackdata, const XML_Char* name, const XML_Char** atts)
 {
   struct shared_strings_callback_data* data = (struct shared_strings_callback_data*)callbackdata;
-  if (XML_Char_icmp(name, X("t")) == 0) {
+  if (zu_icmp_local(name, X("t")) == 0) {
     XML_SetElementHandler(data->xmlparser, NULL, shared_strings_callback_find_shared_string_end);
     XML_SetCharacterDataHandler(data->xmlparser, shared_strings_callback_string_data);
-  } else if (XML_Char_icmp(name, X("rPh")) == 0) {
+  } else if (zu_icmp_local(name, X("rPh")) == 0) {
     data->skiptag = XML_Char_dup(name);
     data->skiptagcount = 1;
     data->skip_start = shared_strings_callback_find_shared_string_start;
@@ -184,7 +202,7 @@ void shared_strings_callback_find_shared_string_start (void* callbackdata, const
 void shared_strings_callback_find_shared_string_end (void* callbackdata, const XML_Char* name)
 {
   struct shared_strings_callback_data* data = (struct shared_strings_callback_data*)callbackdata;
-  if (XML_Char_icmp(name, X("t")) == 0) {
+  if (zu_icmp_local(name, X("t")) == 0) {
     XML_SetElementHandler(data->xmlparser, shared_strings_callback_find_shared_string_start, shared_strings_callback_find_shared_stringitem_end);
     XML_SetCharacterDataHandler(data->xmlparser, NULL);
   } else {

@@ -33,38 +33,7 @@ xlsx_sheets <- function(path, password = NULL) {
 #'   start when the package loaded.
 #' @export
 #' @examples
-#' zuxlsx_native()
-zuxlsx_native <- function() {
+#' xlsx_info()
+xlsx_info <- function() {
   zuxlsx_unwrap(.Call(C_zuxlsx_native))
-}
-
-# Normalises `path` for the native layer, or raises zuxlsx_input_error.
-check_path <- function(path, call = sys.call(-1L)) {
-  if (!is.character(path) || length(path) != 1L || is.na(path)) {
-    zuxlsx_stop(
-      "zuxlsx_input_error",
-      "`path` must be a single non-missing string.",
-      call = call
-    )
-  }
-  path <- path.expand(path)
-  if (!file.exists(path)) {
-    zuxlsx_stop(
-      "zuxlsx_input_error",
-      paste0("`path` does not exist: ", path),
-      path = path,
-      call = call
-    )
-  }
-  # A directory reaches the reader as an unopenable archive otherwise, which
-  # would be reported as a ZIP error rather than as the wrong kind of path.
-  if (dir.exists(path)) {
-    zuxlsx_stop(
-      "zuxlsx_input_error",
-      paste0("`path` is a directory, not a file: ", path),
-      path = path,
-      call = call
-    )
-  }
-  normalizePath(path, winslash = "/", mustWork = TRUE)
 }

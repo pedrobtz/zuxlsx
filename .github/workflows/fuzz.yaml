@@ -1,0 +1,54 @@
+# libFuzzer over this package's own hostile-input C: the CFB reader and the
+# EncryptionInfo parser (tools/fuzz/ole2_fuzz.c), from r-actions' fuzz.yml.
+# The xlsxio path has its own structure-aware fuzzer in tools/fuzz/run, which
+# needs R to generate mutants and runs by hand (design section 18).
+#
+# Expat is compiled from zuxml's vendored sources, the ones libzuxml.a is
+# built from; zucrypt contributes only the header agile.h includes.
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'src/cfb.*'
+      - 'src/encinfo.*'
+      - 'src/agile.h'
+      - 'tools/fuzz/**'
+      - 'tests/testthat/fixtures/ole2/**'
+      - '.github/workflows/fuzz.yaml'
+  pull_request:
+    paths:
+      - 'src/cfb.*'
+      - 'src/encinfo.*'
+      - 'src/agile.h'
+      - 'tools/fuzz/**'
+      - 'tests/testthat/fixtures/ole2/**'
+      - '.github/workflows/fuzz.yaml'
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+
+name: fuzz.yaml
+
+permissions: read-all
+
+jobs:
+  ole2:
+    uses: pedrobtz/r-actions/.github/workflows/fuzz.yml@v1
+    with:
+      harness: tools/fuzz/ole2_fuzz.c
+      sources: >-
+        src/cfb.c src/encinfo.c
+        .github-packages/zuxml/src/zux_expat_random.c
+        .github-packages/zuxml/src/vendor/expat/xmlparse.c
+        .github-packages/zuxml/src/vendor/expat/xmltok.c
+        .github-packages/zuxml/src/vendor/expat/xmlrole.c
+      github-packages: |
+        pedrobtz/zuxml
+        pedrobtz/zucrypt
+      cflags: >-
+        -g -O1 -fno-omit-frame-pointer
+        -I.github-packages/zuxml/src
+        -I.github-packages/zuxml/src/vendor/expat
+        -I.github-packages/zucrypt/inst/include
+      seed-corpus: tests/testthat/fixtures/ole2
+      max-total-time: ${{ github.event_name == 'schedule' && 900 || 120 }}

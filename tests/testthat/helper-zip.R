@@ -2,8 +2,8 @@
 # do not depend on an external zip program. CRAN guarantees neither `zip` nor
 # Python, and utils::zip() shells out to the system one.
 #
-# Stored (uncompressed) entries only, no data descriptors, no ZIP64. That is
-# the smallest thing miniz will open and walk. Building the bytes by hand is
+# Stored entries by default, DEFLATE on request, no data descriptors, no ZIP64.
+# That is the smallest thing miniz will open and walk. Building the bytes by hand is
 # not incidental: the adversarial tests need to write a central directory that
 # disagrees with the local headers, declare a size an entry does not have, or
 # name the same member twice, and no ZIP library will produce those on request.
@@ -22,11 +22,22 @@ as_raw_contents <- function(x) if (is.raw(x)) x else charToRaw(x)
 # One member of an archive. `declared_size` and `declared_crc` override what
 # goes into the headers without changing the bytes actually stored, which is
 # how the lying-header tests are built.
-zip_entry <- function(name, contents, declared_size = NULL, declared_crc = NULL) {
+#
+# `deflate = TRUE` stores the contents compressed. memCompress()'s "gzip" is
+# zlib's format, so the two-byte header and the four-byte Adler-32 trailer
+# are cut off to leave the raw DEFLATE stream a ZIP member holds.
+zip_entry <- function(name, contents, declared_size = NULL, declared_crc = NULL,
+                      deflate = FALSE) {
   data_raw <- as_raw_contents(contents)
+  stored <- data_raw
+  if (deflate) {
+    z <- memCompress(data_raw, "gzip")
+    stored <- z[3:(length(z) - 4L)]
+  }
   list(
     name = name,
-    data = data_raw,
+    data = stored,
+    method = if (deflate) 8L else 0L,
     size = if (is.null(declared_size)) length(data_raw) else declared_size,
     crc = if (is.null(declared_crc)) crc32_le(data_raw) else declared_crc
   )
@@ -51,7 +62,7 @@ write_zip <- function(path,
 
     local_header <- c(
       as.raw(c(0x50, 0x4b, 0x03, 0x04)), # signature
-      le(20, 2), le(0, 2), le(0, 2),     # version needed, flags, method 0=stored
+      le(20, 2), le(0, 2), le(e$method %||% 0L, 2), # version, flags, method
       le(0, 2), le(0, 2),                # mod time, mod date
       e$crc, le(n_stored, 4), le(e$size, 4),
       le(length(name_raw), 2), le(0, 2)  # name length, extra length
@@ -59,7 +70,7 @@ write_zip <- function(path,
     central <- c(
       as.raw(c(0x50, 0x4b, 0x01, 0x02)), # signature
       le(20, 2), le(20, 2),              # version made by, version needed
-      le(0, 2), le(0, 2),                # flags, method
+      le(0, 2), le(e$method %||% 0L, 2), # flags, method
       le(0, 2), le(0, 2),                # mod time, mod date
       e$crc, le(n_stored, 4), le(e$size, 4),
       le(length(name_raw), 2), le(0, 2), le(0, 2), # name, extra, comment
@@ -308,7 +319,7 @@ read_literals <- function(literals) {
     list(txt("A1", "v")),
     lapply(seq_along(literals), function(i) num(paste0("A", i + 1L), literals[i]))
   )))
-  read_xlsx(path)$v
+  xlsx_read(path)$v
 }
 
 
@@ -496,4 +507,18 @@ find_zip_signature <- function(bytes, sig) {
     hit <- hit & bytes[seq.int(1L + k, n - 3L + k)] == sig[k + 1L]
   }
   which(hit)
+}
+
+
+# --- Limit tests under gctorture ----------------------------------------------
+#
+# native-checks.yaml's gctorture job sets ZUXLSX_LIGHT_TESTS. There every R
+# allocation forces a collection, so a test that builds tens of megabytes in R
+# to check a size limit costs hours and adds nothing: it is checking a limit,
+# not that a SEXP is protected, and the C paths it reaches are reached by the
+# small cases too. Such tests skip there and run everywhere else.
+light_tests <- function() identical(Sys.getenv("ZUXLSX_LIGHT_TESTS"), "true")
+
+skip_if_light <- function() {
+  skip_if(light_tests(), "a limit test, skipped under ZUXLSX_LIGHT_TESTS")
 }
