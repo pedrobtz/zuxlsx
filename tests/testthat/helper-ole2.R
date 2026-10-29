@@ -260,7 +260,12 @@ flip <- function(x, at) {
 # An EncryptedPackage stream with its eight-byte length prefix rewritten. The
 # length is a double so that values past 2^31 can be written.
 with_length <- function(package, n) {
-  package[1:8] <- as.raw(floor(n / 256^(0:7)) %% 256)
+  # As two 32-bit halves: %% on a double above 2^53 warns of lost accuracy,
+  # and the tests ask for lengths up to 2^64 (#70). Each half is exact.
+  hi <- floor(n / 2^32)
+  lo <- n - hi * 2^32
+  le4 <- function(x) as.raw(floor(x / 256^(0:3)) %% 256)
+  package[1:8] <- c(le4(lo), le4(hi %% 2^32))
   package
 }
 
