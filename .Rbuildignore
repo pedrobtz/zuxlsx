@@ -13,3 +13,4 @@
 ^tools/fuzz$
 ^tools/bench$
 ^vignettes/articles$
+^CRAN-SUBMISSION$
