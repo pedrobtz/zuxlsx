@@ -23,20 +23,20 @@
 #' @inheritParams xlsx_cells
 #' @export
 #' @seealso [xlsx_cells()], which reads a whole worksheet at once, and
-#'   [read_xlsx()], which builds columns from it.
+#'   [xlsx_read()], which builds columns from it.
 #' @examples
 #' path <- system.file("extdata", "two-sheets.xlsx", package = "zuxlsx")
 #'
 #' # Count the cells of each type without holding the worksheet.
 #' totals <- 0
-#' xlsx_read_cells(path, 1, function(cells) {
+#' xlsx_stream_cells(path, 1, function(cells) {
 #'   totals <<- totals + table(cells$type)
 #' })
 #' totals
 #'
 #' # Stop as soon as something is found. The rest of the sheet is not parsed.
 #' first <- NULL
-#' xlsx_read_cells(path, 1, function(cells) {
+#' xlsx_stream_cells(path, 1, function(cells) {
 #'   hit <- cells[cells$type == "date", ]
 #'   if (nrow(hit) > 0) {
 #'     first <<- hit[1, ]
@@ -44,7 +44,7 @@
 #'   }
 #' })
 #' first
-xlsx_read_cells <- function(
+xlsx_stream_cells <- function(
   path,
   sheet = 1,
   callback,

@@ -525,7 +525,7 @@ resolves to "is this number a date or a time" through `cellXfs` and `numFmts`.
 `xlsx_cells()` reports such a cell as type `date` and hands back the serial
 number unchanged.
 
-`read_xlsx()` converts, `xlsx_cells()` does not. The serial number is the
+`xlsx_read()` converts, `xlsx_cells()` does not. The serial number is the
 honest answer at cell level, because the epoch is a property of the workbook
 rather than of the cell.
 
@@ -572,10 +572,29 @@ and 60.5 onto one instant.
 
 ## 12. Proposed R API
 
+**Decided, 2026-10-29 (#46): every export carries the `xlsx_` prefix.** The
+first names were `read_xlsx()`, `xlsx_read_cells()` and `zuxlsx_native()`.
+`read_xlsx()` masked `readxl::read_xlsx()` and `openxlsx2::read_xlsx()`, which
+behave differently on the same file, so a user switching packages could get a
+different data frame without any sign of it. The exports are now
+`xlsx_read()`, `xlsx_cells()`, `xlsx_rows()`, `xlsx_stream_cells()`,
+`xlsx_sheets()` and `xlsx_info()` -- the last matching the family's
+`komp_info()` and `crypt_info()`. `xlsx_cells()` shares its name with
+`tidyxl::xlsx_cells()`, which does the same job. The names below and in the
+older status notes are the ones used at the time; the native entry points
+(`C_read_xlsx` and so on) are internal and keep theirs.
+
+**Deferred, 2026-10-29: `col_types`, `na`, `skip`, `n_max` (#27).** Each is a
+new argument whose default keeps today's behaviour, so adding one after
+0.1.0 breaks no caller, and none of them has to be settled before CRAN
+fixes the names. Until then `range` covers `skip` and `n_max`, and
+`xlsx_cells()` is the way to read a column as other than its inferred type.
+Milestone v0.2.0.
+
 Initial high-level API:
 
 ```r
-read_xlsx(
+xlsx_read(
   path,
   sheet = 1,
   col_names = TRUE,
@@ -602,7 +621,7 @@ xlsx_rows(
 Possible low-level streaming API:
 
 ```r
-xlsx_read_cells(
+xlsx_stream_cells(
   path,
   sheet = 1,
   callback
@@ -611,12 +630,12 @@ xlsx_read_cells(
 
 The first release should keep the public API deliberately narrow.
 
-### Status, 2026-09-19: `xlsx_sheets()`, `xlsx_cells()` and `read_xlsx()`
+### Status, 2026-09-19: `xlsx_sheets()`, `xlsx_cells()` and `xlsx_read()`
 
-`read_xlsx(path, sheet, col_names, range)`, `xlsx_cells()`, `xlsx_rows()` and
-`xlsx_read_cells()` are all implemented. Section 12 is complete.
+`xlsx_read(path, sheet, col_names, range)`, `xlsx_cells()`, `xlsx_rows()` and
+`xlsx_stream_cells()` are all implemented. Section 12 is complete.
 
-`xlsx_read_cells(path, sheet, callback, chunk_size)` hands the callback a
+`xlsx_stream_cells(path, sheet, callback, chunk_size)` hands the callback a
 chunk of cells at a time and stops when it returns `FALSE`. A chunk never
 splits a row, so `chunk_size` is a lower bound: the boundary falls at the
 first row end at or after it. A callback that saw half a row could do nothing
@@ -636,8 +655,8 @@ memory after a `gc()`.
 | | elapsed |
 | --- | --- |
 | `xlsx_cells()`, whole sheet | 0.42 s |
-| `xlsx_read_cells()`, read to the end | 0.37 s |
-| `xlsx_read_cells()`, stopping after one chunk | **0.02 s** |
+| `xlsx_stream_cells()`, read to the end | 0.37 s |
+| `xlsx_stream_cells()`, stopping after one chunk | **0.02 s** |
 
 Early termination is the win, and it is a large one: finding something near
 the top of a large worksheet costs a twentieth of reading it.
@@ -657,7 +676,7 @@ sheet still yields its own columns; narrowing it to the data would make the
 result depend on the file rather than the request.
 
 **Blank rows are kept, including directly beneath the header.** A worksheet
-may omit an empty row from its XML, and until `range` existed `read_xlsx()`
+may omit an empty row from its XML, and until `range` existed `xlsx_read()`
 dropped such a row when it fell immediately after the header while preserving
 it anywhere else -- an inconsistency that came from deriving the row span from
 the body rather than from the sheet, and that the readxl fixture
@@ -665,8 +684,8 @@ the body rather than from the sheet, and that the readxl fixture
 worksheets. Keeping every blank row is easier to predict than keeping only the
 interior ones, and `range` is now the way to start further down.
 
-`xlsx_cells()` was built before `read_xlsx()` on purpose. It needs only the
-cell event model of section 13, whereas `read_xlsx()` additionally needs the
+`xlsx_cells()` was built before `xlsx_read()` on purpose. It needs only the
+cell event model of section 13, whereas `xlsx_read()` additionally needs the
 column builders of section 14 and the epoch handling of section 11, so
 building it first would have coupled three unproven things. It also makes the
 `valid/` corpus assertable for the first time: until there was a way to read a
@@ -739,7 +758,7 @@ One boundary detail worth keeping: `xlsxioread_sheet_next_cell()` returns
 
 ## 14. Column building
 
-For `read_xlsx()`, avoid constructing one R object per cell where possible.
+For `xlsx_read()`, avoid constructing one R object per cell where possible.
 
 Preferred pipeline:
 
@@ -775,7 +794,7 @@ with explicit handling for date/datetime columns.
 
 ### Status, 2026-09-19: implemented, but as a post-pass rather than streaming
 
-`read_xlsx()` builds columns in R from the cells `xlsx_cells()` returns, in
+`xlsx_read()` builds columns in R from the cells `xlsx_cells()` returns, in
 `R/read.R`. Promotion is by inspection rather than progressively: a column of
 blanks is logical, booleans stay logical, numbers give a double, dates give
 `Date` or `POSIXct`, and anything mixed or holding a string or a cell error
@@ -803,7 +822,7 @@ the numbers:
 
 ```text
 stored text     '1.50'  '2.0e3'  '0.30'
-read_xlsx gives '1.50'  '2.0e3'  '0.30'
+xlsx_read gives '1.50'  '2.0e3'  '0.30'
 from a double   '1.5'   '2000'   '0.3'
 ```
 
@@ -827,7 +846,7 @@ Measured after:
 Four times less memory, and a third faster, which was not the aim. The earlier
 estimate in this section of 29 MB down to 17 MB was wrong in the conservative
 direction: it had not counted the type factor and the intermediate data frame
-that `read_xlsx()` was also building.
+that `xlsx_read()` was also building.
 
 The epoch arithmetic deliberately stayed in R. It is the fiddliest part of the
 package -- two epochs, one counting a day that never existed -- it is already
@@ -1328,7 +1347,7 @@ character string, astral-plane and right-to-left text, XML-escaped characters,
 and worksheets read independently of one another.
 
 Separately, `test-corpus.R` asserts the *content* of the seven committed
-workbooks for the first time. Until `read_xlsx()` existed they could only be
+workbooks for the first time. Until `xlsx_read()` existed they could only be
 checked for opening, which left the real-producer corpus -- the part that
 actually tests interoperability -- almost unexercised.
 
@@ -1341,14 +1360,14 @@ nothing asserted its contents.
 
 The cause was trusting xlsxio's row padding, which inserts a single row for an
 omitted range however wide it is: a sheet with data on rows 1, 2 and 5 arrives
-as rows 1, 2, 4, 5. `read_xlsx()` now spans the range of row numbers the cells
+as rows 1, 2, 4, 5. `xlsx_read()` now spans the range of row numbers the cells
 themselves carry, which is independent of that padding. The quirk is pinned by
 a characterisation test rather than patched in xlsxio, since nothing above the
 cell layer needs the padding to be right.
 
 **Correction, 2026-10-28 (#40).** That last clause was wrong. The padding
 also emits one blank cell above a table that starts at row 3 or below, and
-`read_xlsx()` took the extent from every cell, blanks included, so such a
+`xlsx_read()` took the extent from every cell, blanks included, so such a
 table read with that padding row as its header. Without `range`, the
 extent now comes from non-blank cells only, as in readxl: empty rows above
 and below the table and empty columns either side are not part of it, and a
@@ -1753,14 +1772,14 @@ compiled with hidden visibility), and zucrypt's own namespace can be loaded
 alongside -- two private copies of the backend, which do not interfere.
 TF-PSA-Crypto's Apache-2.0 licence is installed as
 `inst/licenses/tf-psa-crypto-LICENSE` and recorded in `inst/COPYRIGHTS`.
-`zuxlsx_native()` reports its version, from a call into the archive.
+`xlsx_info()` reports its version, from a call into the archive.
 
 **The backend's lifetime** belongs to the DLL: `zuc_init()` in
 `R_init_zuxlsx()` and `zuc_shutdown()` in `R_unload_zuxlsx()`, which
 `.onUnload` makes run. Not per call: every decryption would pay for it, and
 nothing gains. A failed `zuc_init()` is remembered rather than raised, since
 `R_init_` must not longjmp; decryption then reports `ZUC_ERR_NOT_READY` and
-`zuxlsx_native()` reports `NA`.
+`xlsx_info()` reports `NA`.
 
 **No R below the `.Call`.** `agile.c` includes no R header. Every zucrypt
 handle is created and freed within one call, and every buffer that held key
@@ -1951,8 +1970,8 @@ spliced copies, with no report.
 
 ### 21g. Step 4, `password =` on the readers: done, 2026-09-29
 
-All five readers -- `read_xlsx()`, `xlsx_cells()`, `xlsx_rows()`,
-`xlsx_read_cells()` and `xlsx_sheets()` -- take `password = NULL`. With no
+All five readers -- `xlsx_read()`, `xlsx_cells()`, `xlsx_rows()`,
+`xlsx_stream_cells()` and `xlsx_sheets()` -- take `password = NULL`. With no
 password nothing changes: an encrypted package is still reported, now with a
 message that says to pass one. With a password, `resolve_source()` in
 `src/zuxlsx.c` reads the file into C memory, runs steps 1 to 3
@@ -1972,7 +1991,7 @@ lives in `malloc`'d memory owned by an external pointer whose finalizer wipes
 it with `zuc_secure_zero()` before freeing it, and each reader disposes of
 it explicitly as soon as the reader is closed. miniz reads it in place, so it
 must outlive the reader. Three of the readers close the reader before any R
-allocation, so that holds by construction. `xlsx_read_cells()` keeps the
+allocation, so that holds by construction. `xlsx_stream_cells()` keeps the
 reader open across R callbacks, so there the plaintext moves into
 `reader_handle` and one finalizer closes the reader and *then* wipes the
 buffer -- two finalizers would run in no guaranteed order. This answers 21b's
@@ -2001,7 +2020,7 @@ the key and the derived key is padded with 0x36 (#82). That encryptor reads
 the same specification the decryptor does, so an independently produced
 SHA-1/AES-128 workbook is still wanted as a fixture.
 
-**The plaintext on an unwind.** `xlsx_read_cells()` calls R while the
+**The plaintext on an unwind.** `xlsx_stream_cells()` calls R while the
 decrypted package is open. The callback now runs under `R_UnwindProtect`,
 whose cleanup closes the reader and wipes the plaintext as the stack
 unwinds, rather than at whatever GC next runs the finalizer (#80). Shared
@@ -2037,7 +2056,7 @@ content rather than only on opening. Outstanding are `strict_ooxml.xlsx` and
 17.3, which remain an open decision.
 
 Known limitations rather than missing items: column building is a post-pass
-rather than streaming (section 14), `xlsx_read_cells()` is unimplemented
+rather than streaming (section 14), `xlsx_stream_cells()` is unimplemented
 (section 12), and `zuxlsx_xml_error` and `zuxlsx_type_error` remain unraised
 (section 15).
 
@@ -2054,7 +2073,7 @@ via `0006-strict-ooxml-relationship-types`, and ZIP64 archives have their own
 tests.
 
 Of the limitations listed above, only one still holds: column building is
-still a post-pass. `xlsx_read_cells()` shipped, and `zuxlsx_xml_error` is
+still a post-pass. `xlsx_stream_cells()` shipped, and `zuxlsx_xml_error` is
 raised with the part and line. `zuxlsx_type_error` is still unraised and
 probably always will be -- a column that cannot hold its cells becomes
 character rather than failing.

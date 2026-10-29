@@ -185,7 +185,7 @@ test_that("a relationship with no Id does not crash the process", {
   # The worksheet is listed but cannot be reached. It reads as empty, the
   # way a chartsheet -- listed, with no worksheet part -- has to.
   expect_identical(xlsx_sheets(path), "Sheet1")
-  expect_s3_class(read_xlsx(path), "data.frame")
+  expect_s3_class(xlsx_read(path), "data.frame")
   expect_identical(nrow(xlsx_cells(path, 1)), 0L)
 })
 
@@ -203,7 +203,7 @@ test_that("a relationship with an empty Id does not crash either", {
   )
   write_workbook(path, parts)
 
-  expect_s3_class(read_xlsx(path), "data.frame")
+  expect_s3_class(xlsx_read(path), "data.frame")
 })
 
 test_that("a worksheet that breaks off is an error, not a shorter sheet", {
@@ -229,11 +229,11 @@ test_that("a worksheet that breaks off is an error, not a shorter sheet", {
     parts[["xl/worksheets/sheet1.xml"]] <- damaged
     write_workbook(path, parts)
 
-    expect_error(read_xlsx(path, col_names = FALSE), class = "zuxlsx_xml_error")
+    expect_error(xlsx_read(path, col_names = FALSE), class = "zuxlsx_xml_error")
     expect_error(xlsx_cells(path), class = "zuxlsx_xml_error")
     expect_error(xlsx_rows(path), class = "zuxlsx_xml_error")
     expect_error(
-      xlsx_read_cells(path, 1, function(cells) NULL),
+      xlsx_stream_cells(path, 1, function(cells) NULL),
       class = "zuxlsx_xml_error"
     )
   }
@@ -242,7 +242,7 @@ test_that("a worksheet that breaks off is an error, not a shorter sheet", {
   parts <- workbook_parts()
   parts[["xl/worksheets/sheet1.xml"]] <- intact
   write_workbook(path, parts)
-  expect_identical(read_xlsx(path, col_names = FALSE)$X1, c(1, 2, 3, 4))
+  expect_identical(xlsx_read(path, col_names = FALSE)$X1, c(1, 2, 3, 4))
 })
 
 test_that("a worksheet that breaks off is reported after the chunks before it", {
@@ -262,7 +262,7 @@ test_that("a worksheet that breaks off is reported after the chunks before it", 
 
   seen <- 0L
   expect_error(
-    xlsx_read_cells(path, 1, function(cells) seen <<- seen + nrow(cells),
+    xlsx_stream_cells(path, 1, function(cells) seen <<- seen + nrow(cells),
                     chunk_size = 2L),
     class = "zuxlsx_xml_error"
   )
@@ -318,7 +318,7 @@ test_that("a damaged shared-string table or styles part is an error naming it", 
   for (path in c(truncated_strings, broken_styles)) {
     cond <- tryCatch(xlsx_cells(path), error = identity)
     expect_s3_class(cond, "zuxlsx_xml_error")
-    expect_error(read_xlsx(path), class = "zuxlsx_xml_error")
+    expect_error(xlsx_read(path), class = "zuxlsx_xml_error")
   }
   expect_identical(
     .Call(C_xlsx_cells, normalizePath(truncated_strings), "Sheet1", NULL)$value$part,
@@ -349,6 +349,6 @@ test_that("a flipped byte in a deflated worksheet is an error", {
   entries[[sheet]]$data <- data
   write_zip(path, entries)
 
-  cond <- tryCatch(read_xlsx(path, col_names = FALSE), error = identity)
+  cond <- tryCatch(xlsx_read(path, col_names = FALSE), error = identity)
   expect_true(inherits(cond, "zuxlsx_zip_error") || inherits(cond, "zuxlsx_xml_error"))
 })

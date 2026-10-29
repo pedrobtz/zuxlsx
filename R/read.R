@@ -43,17 +43,17 @@
 #' path <- system.file("extdata", "two-sheets.xlsx", package = "zuxlsx")
 #'
 #' # Each column takes the type its cells support.
-#' readings <- read_xlsx(path)
+#' readings <- xlsx_read(path)
 #' readings
 #' vapply(readings, function(x) class(x)[1], character(1))
 #'
 #' # A worksheet by name, and part of one by range.
-#' read_xlsx(path, "notes")
-#' read_xlsx(path, range = "B1:C3")
+#' xlsx_read(path, "notes")
+#' xlsx_read(path, range = "B1:C3")
 #'
 #' # Without a header row, columns are named by position.
-#' read_xlsx(path, range = "A2:B4", col_names = FALSE)
-read_xlsx <- function(
+#' xlsx_read(path, range = "A2:B4", col_names = FALSE)
+xlsx_read <- function(
   path,
   sheet = 1,
   col_names = TRUE,

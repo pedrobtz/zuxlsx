@@ -26,11 +26,11 @@ library(zuxlsx)
 path <- system.file("extdata", "two-sheets.xlsx", package = "zuxlsx")
 
 xlsx_sheets(path)                      # "readings" "notes"
-read_xlsx(path)                        # first worksheet as a data frame
-read_xlsx(path, sheet = "readings", range = "A1:B3")
+xlsx_read(path)                        # first worksheet as a data frame
+xlsx_read(path, sheet = "readings", range = "A1:B3")
 ```
 
-`read_xlsx()` gives each column the type its cells support: logical, double,
+`xlsx_read()` gives each column the type its cells support: logical, double,
 character, `Date` or `POSIXct`. A column that cannot hold its cells becomes
 character rather than failing. `range` takes A1 notation, and either corner
 may name a cell, a column or a row, so `"B2:D10"`, `"A:C"` and `"2:10"` are
@@ -44,7 +44,7 @@ A password-protected workbook is read by passing its password, to any of the
 readers:
 
 ```r
-read_xlsx("protected.xlsx", password = "s3cret")
+xlsx_read("protected.xlsx", password = "s3cret")
 ```
 
 It is decrypted in memory and never written to disk. zuxlsx decrypts agile
@@ -60,7 +60,7 @@ xlsx_rows(path)      # a worksheet row by row as text, padded to a rectangle
 
 # A chunk at a time; returning FALSE stops the read, so finding something
 # near the top of a large worksheet does not pay for the rest.
-xlsx_read_cells(path, callback = function(cells) { str(cells); FALSE })
+xlsx_stream_cells(path, callback = function(cells) { str(cells); FALSE })
 ```
 
 ## Installation

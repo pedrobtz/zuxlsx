@@ -35,4 +35,7 @@ Suggests:
     withr,
     zucrypt
 Config/testthat/edition: 3
+Config/Needs/website: 
+    knitr,
+    rmarkdown
 Config/roxygen2/version: 8.1.0

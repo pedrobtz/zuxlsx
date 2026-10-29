@@ -3,7 +3,7 @@
 #' Returns a worksheet row by row, as the text of each cell, without inferring
 #' a type for any column. This is the row-oriented counterpart to
 #' [xlsx_cells()], and is the shape to reach for when a worksheet is not
-#' rectangular enough for [read_xlsx()] -- a report with stacked blocks, or a
+#' rectangular enough for [xlsx_read()] -- a report with stacked blocks, or a
 #' file whose header is several rows deep.
 #'
 #' @return A list with one character vector per row, from row 1 of the
@@ -12,7 +12,7 @@
 #'   column n. Blank cells, and rows with none, are `NA`.
 #' @inheritParams xlsx_cells
 #' @export
-#' @seealso [xlsx_cells()] for typed cells, [read_xlsx()] for a data frame.
+#' @seealso [xlsx_cells()] for typed cells, [xlsx_read()] for a data frame.
 #' @examples
 #' path <- system.file("extdata", "two-sheets.xlsx", package = "zuxlsx")
 #' rows <- xlsx_rows(path)

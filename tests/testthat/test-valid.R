@@ -46,7 +46,7 @@ test_that("a formula cell reports its cached value", {
     )
   )))
 
-  out <- read_xlsx(path)
+  out <- xlsx_read(path)
   expect_identical(out$n, 3)
   expect_identical(out$s, "ab")
 })
@@ -66,7 +66,7 @@ test_that("sparse rows keep their spacing", {
   )
   write_workbook(path, parts)
 
-  expect_identical(read_xlsx(path)$v, c(1, NA, NA, 2))
+  expect_identical(xlsx_read(path)$v, c(1, NA, NA, 2))
 })
 
 test_that("a sparse row keeps its column spacing", {
@@ -81,7 +81,7 @@ test_that("a sparse row keeps its column spacing", {
   )
   write_workbook(path, parts)
 
-  out <- read_xlsx(path)
+  out <- xlsx_read(path)
   expect_identical(names(out), c("a", "X2", "X3", "d"))
   expect_identical(out$a, 1)
   expect_identical(out$d, 4)
@@ -126,7 +126,7 @@ test_that("a large shared string table resolves at both ends", {
   )
   write_workbook(path, parts)
 
-  expect_identical(read_xlsx(path)$v, strings[picks])
+  expect_identical(xlsx_read(path)$v, strings[picks])
 })
 
 test_that("awkward text survives unchanged", {
@@ -152,7 +152,7 @@ test_that("awkward text survives unchanged", {
     lapply(seq_along(values), function(i) txt(paste0("A", i + 1L), values[i]))
   )))
 
-  out <- read_xlsx(path)$v
+  out <- xlsx_read(path)$v
   expect_identical(out, expected)
   expect_true(all(Encoding(out[1:3]) == "UTF-8"))
 })
@@ -166,7 +166,7 @@ test_that("a long single string is not truncated", {
     c(txt("A1", "v")), c(txt("A2", long))
   )))
 
-  expect_identical(nchar(read_xlsx(path)$v), 33000L)
+  expect_identical(nchar(xlsx_read(path)$v), 33000L)
 })
 
 test_that("worksheets of one workbook are read independently", {
@@ -186,18 +186,18 @@ test_that("worksheets of one workbook are read independently", {
   )
   write_workbook(path, parts)
 
-  expect_identical(read_xlsx(path, 1), data.frame(v = 1))
-  expect_identical(read_xlsx(path, 2), data.frame(w = "z", stringsAsFactors = FALSE))
+  expect_identical(xlsx_read(path, 1), data.frame(v = 1))
+  expect_identical(xlsx_read(path, 2), data.frame(w = "z", stringsAsFactors = FALSE))
   # Reading one must not disturb the other, in either order.
-  expect_identical(read_xlsx(path, 2)$w, "z")
-  expect_identical(read_xlsx(path, 1)$v, 1)
+  expect_identical(xlsx_read(path, 2)$w, "z")
+  expect_identical(xlsx_read(path, 1)$v, 1)
 })
 
 test_that("a row gap is reconstructed from row numbers, not from padding", {
-  # Characterisation of a quirk read_xlsx() deliberately does not rely on:
+  # Characterisation of a quirk xlsx_read() deliberately does not rely on:
   # xlsxio pads an omitted row range with a single row however wide it is, so
   # a sheet with data on rows 1, 2 and 5 arrives as rows 1, 2, 4, 5. Every
-  # cell carries its true row number, which is what read_xlsx() spans instead.
+  # cell carries its true row number, which is what xlsx_read() spans instead.
   path <- withr::local_tempfile(fileext = ".xlsx")
   parts <- workbook_parts()
   parts[["xl/worksheets/sheet1.xml"]] <- paste0(
@@ -212,6 +212,6 @@ test_that("a row gap is reconstructed from row numbers, not from padding", {
 
   # What the cell layer reports: one padding row, not two.
   expect_identical(xlsx_cells(path, 1)$row, c(1, 2, 4, 5))
-  # What read_xlsx() makes of it: the gap restored to its true width.
-  expect_identical(read_xlsx(path)$v, c(1, NA, NA, 2))
+  # What xlsx_read() makes of it: the gap restored to its true width.
+  expect_identical(xlsx_read(path)$v, c(1, NA, NA, 2))
 })
