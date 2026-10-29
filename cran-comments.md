@@ -11,12 +11,16 @@ Through GitHub Actions, using the reusable workflows in
 
 * macOS, Windows and Ubuntu, R release
 * Windows, R devel
-* Ubuntu, R oldrel-1 and R 4.1 (the minimum in `Depends:`)
+* Ubuntu and Windows, R 4.1 (the minimum in `Depends:`; multiarch on
+  Windows), and Ubuntu, R oldrel-1
 * the r-devel Linux containers `clang23`, `ubuntu-clang` and `ubuntu-gcc16`
 * `nosuggests`: the suite with no suggested package installed
 * AddressSanitizer and UBSan (gcc and clang), valgrind, rchk, gctorture, LTO
   and gcc's `-fanalyzer`
 * CRAN's additional checks: rcnst, rlibro and vnu
+* the test suite in the C and Latin-1 locales
+* libFuzzer with ASan/UBSan over the package's own CFB and EncryptionInfo
+  parsers
 
 And locally on macOS with R 4.5.2, `--as-cran`, against the CRAN releases of
 zuxml, zukomp and zucrypt, in the C, ISO-8859-1 and UTF-8 locales.
