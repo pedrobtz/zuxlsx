@@ -5,7 +5,7 @@
 # request for (#44).
 on:
   schedule:
-    - cron: "17 5 * * 1"
+    - cron: "15 4 * * 1"
   workflow_dispatch:
 
 name: siblings-main.yaml

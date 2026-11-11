@@ -6,15 +6,8 @@
 # Expat is compiled from zuxml's vendored sources, the ones libzuxml.a is
 # built from; zucrypt contributes only the header agile.h includes.
 on:
-  push:
-    branches: [main, master]
-    paths:
-      - 'src/cfb.*'
-      - 'src/encinfo.*'
-      - 'src/agile.h'
-      - 'tools/fuzz/**'
-      - 'tests/testthat/fixtures/ole2/**'
-      - '.github/workflows/fuzz.yaml'
+  # No `push:`: a pull request already checks its merge with main,
+  # and the schedule checks main (r-actions README, "Pushes to main").
   pull_request:
     paths:
       - 'src/cfb.*'
@@ -24,7 +17,7 @@ on:
       - 'tests/testthat/fixtures/ole2/**'
       - '.github/workflows/fuzz.yaml'
   schedule:
-    - cron: "23 4 * * *"
+    - cron: "5 4 * * *"
   workflow_dispatch:
 
 name: fuzz.yaml

@@ -3,22 +3,10 @@
 # pull-request half checks that a change under src/vendor/ came with a
 # manifest change, the only way the tree stays reproducible from upstream.
 on:
-  push:
-    branches: [main, master]
-    paths:
-      - 'src/vendor/**'
-      - 'src/Makevars.in'
-      - 'tools/vendor/**'
-      - 'tools/patches/**'
-      - 'inst/COPYRIGHTS'
-      - 'tests/testthat/fixtures/**'
-      - 'inst/extdata/**'
-      - 'tools/make-ole2.R'
-      - 'tools/fixtures/**'
-      - 'tools/check-layering.sh'
-      - 'src/*.c'
-      - 'src/*.h'
-      - '.github/workflows/vendor.yaml'
+  # No `push:`: a pull request already checks its merge with main,
+  # and the schedule checks main (r-actions README, "Pushes to main").
+  schedule:
+    - cron: "20 4 * * 1"
   pull_request:
   workflow_dispatch:
 

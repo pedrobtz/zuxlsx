@@ -9,8 +9,8 @@
 # files, which does not vary by operating system; R-CMD-check.yaml is what
 # covers platforms.
 on:
-  push:
-    branches: [main, master]
+  # No `push:`: a pull request already checks its merge with main,
+  # and the schedule checks main (r-actions README, "Pushes to main").
   pull_request:
 
 name: corpus.yaml
