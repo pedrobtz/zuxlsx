@@ -5,17 +5,10 @@
 # coverage.yml is the one r-actions call holding a write token, so it is
 # pinned to a commit with the tag in a comment rather than following @v1.
 on:
-  push:
-    branches: [main, master]
-    # The badge path prevents a push loop when this workflow commits an
-    # updated badge; the rest are prose.
-    paths-ignore:
-      - ".github/badges/coverage.svg"
-      - '**.md'
-      - 'vignettes/**'
-      - '_pkgdown.yml'
-      - '.agents/**'
-      - 'docs/**'
+  # No `push:`: a pull request already checks its merge with main,
+  # and the schedule checks main (r-actions README, "Pushes to main").
+  schedule:
+    - cron: "0 4 * * 1"
   pull_request:
     paths-ignore:
       - '**.md'

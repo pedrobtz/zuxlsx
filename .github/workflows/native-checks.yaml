@@ -6,13 +6,10 @@
 # cran-special is rcnst, rlibro and vnu. None of these runs in a locale that is
 # not UTF-8; locale.yaml does (#72).
 on:
-  push:
-    branches: [main, master]
-    paths-ignore:
-      - '**.md'
-      - '.agents/**'
-      - 'docs/**'
-      - '_pkgdown.yml'
+  # No `push:`: a pull request already checks its merge with main,
+  # and the schedule checks main (r-actions README, "Pushes to main").
+  schedule:
+    - cron: "10 4 * * 1"
   pull_request:
   workflow_dispatch:
 
