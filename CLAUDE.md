@@ -3,6 +3,16 @@
 This file provides guidance to Claude Code (claude.ai/code) when working
 with code in this repository.
 
+## Shared conventions
+
+The portfolio’s shared rules are synced into `.claude/shared/` from
+`pedrobtz/packages:claude/shared/`. Never edit them here. Where this
+file and a shared file disagree, this file wins for this package.
+
+@.claude/shared/workflow.md @.claude/shared/r-package.md
+@.claude/shared/ci.md @.claude/shared/native-code.md
+@.claude/shared/correctness.md @.claude/shared/assurance.md
+
 ## What this is
 
 `zuxlsx` is an R package for **reading `.xlsx` workbooks** with no
@@ -11,48 +21,75 @@ system XML or ZIP dependency, built on the sibling `zu*` packages:
 `zucrypt` (TF-PSA-Crypto, for decrypting password-protected workbooks),
 with vendored `xlsxio` supplying the OOXML logic.
 
-## Current state: 0.1.0, ready to submit to CRAN
+Out of scope or not done: writing workbooks, `.xlsb`, standard (Office
+2007) and extensible encryption, evaluating formulas (the cached value
+is returned), and configurable limits on part size or sheet count.
+Today’s defenses are Expat’s and miniz’s own, plus the specification’s
+spin-count ceiling (#26, \#41). Column building is a post-pass rather
+than streaming; design §14’s status note says why.
 
-The reading API of design §12 is implemented. The siblings are on CRAN
-and `Remotes:` is gone; what is left before submission is in
+### The design doc is the spec
+
+[.agents/design-zuxlsx.md](https://pedrobtz.github.io/zuxlsx/.agents/design-zuxlsx.md)
+is binding, not background. §1–§23 cover the dependency model, the miniz
+ZIP backend adaptation, the streaming pipeline, the cell/column
+abstractions, the error classes, and the test corpus layout, and a final
+section, *Position in the `zu*` family*, holds the table shared by all
+five repositories’ designs. Read the relevant section before writing
+code. If implementation shows the design is wrong, **change the design
+doc in the same commit** rather than diverging silently.
+
+[.agents/roadmap.md](https://pedrobtz.github.io/zuxlsx/.agents/roadmap.md)
+is where status lives: stages with exit criteria, each open criterion an
+issue, and the v0.1.0 cut line. Check which stage is current before
+starting work. Record status there rather than as another dated block in
+the design; the design’s accumulated status blocks are what the
+roadmap’s closing review is about.
+
+## Current state
+
+0.1.0 was submitted to CRAN on 2026-10-29 (commit `bf5aac2`, recorded in
+`CRAN-SUBMISSION`); `Stage 10 — CRAN release` (#61) stays open until it
+is accepted. What remained before submission is in
 [.agents/release-checklist.md](https://pedrobtz.github.io/zuxlsx/.agents/release-checklist.md).
-About 1,500 expectations pass, shuffled, in UTF-8, C and Latin-1
-locales, and `R CMD check --as-cran` against the CRAN siblings gives
-only the “New submission” NOTE. The whole-package review of 2026-10-28
-is filed as issues labelled `review`.
+The reading API of design §12 is implemented. The siblings are on CRAN
+and `Remotes:` is gone. About 1,500 expectations pass, shuffled, in
+UTF-8, C and Latin-1 locales, and `R CMD check --as-cran` against the
+CRAN siblings gives only the “New submission” NOTE. The whole-package
+review of 2026-10-28 is filed as issues labelled `review`.
 
 What is exported:
 
-- `xlsx_read(path, sheet = 1, col_names = TRUE, range = NULL, password = NULL)`
-  — a worksheet as a data frame. Column types are inferred by promotion:
+- `xlsx_read(path, sheet = 1, col_names = TRUE, range = NULL, password = NULL)`:
+  a worksheet as a data frame. Column types are inferred by promotion:
   blanks are logical, booleans stay logical, numbers give a double,
   anything mixed or holding a string or a cell error becomes character,
   and a column of dates becomes `Date` or `POSIXct`. `range` is A1
   notation and either corner may name a cell, a column or a row, so
   `"B2:D10"`, `"A:C"` and `"2:10"` all work.
-- `xlsx_cells(path, sheet = 1, password = NULL)` — one row per cell:
+- `xlsx_cells(path, sheet = 1, password = NULL)`: one row per cell:
   position, type, text, numeric value. The view underneath
   [`xlsx_read()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_read.md),
   for sheets that are not rectangular.
-- `xlsx_rows(path, sheet = 1, password = NULL)` — a worksheet row by row
+- `xlsx_rows(path, sheet = 1, password = NULL)`: a worksheet row by row
   as text, padded so the nth element of each row is the nth column.
-- `xlsx_stream_cells(path, sheet = 1, callback, chunk_size = 10000L, password = NULL)`
-  — chunked streaming read; returning `FALSE` stops it. **The only entry
+- `xlsx_stream_cells(path, sheet = 1, callback, chunk_size = 10000L, password = NULL)`:
+  chunked streaming read; returning `FALSE` stops it. **The only entry
   point that calls R while the archive and the parser are open**, which
   is why both are owned by external pointers with registered finalizers
   rather than by the C stack.
-- `xlsx_sheets(path, password = NULL)` — worksheet names, in workbook
+- `xlsx_sheets(path, password = NULL)`: worksheet names, in workbook
   order.
-- [`xlsx_info()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_info.md)
-  — reports `xlsxio` 0.2.36, `expat_2.8.4`, miniz `11.3.2`,
-  TF-PSA-Crypto `1.1.1`. It calls `XML_ExpatVersion()`, `mz_version()`
-  and `zuc_get_info()` rather than reading macros, so a header on the
+- [`xlsx_info()`](https://pedrobtz.github.io/zuxlsx/reference/xlsx_info.md):
+  reports `xlsxio` 0.2.36, `expat_2.8.4`, miniz `11.3.2`, TF-PSA-Crypto
+  `1.1.1`. It calls `XML_ExpatVersion()`, `mz_version()` and
+  `zuc_get_info()` rather than reading macros, so a header on the
   include path without the archive behind it fails at link time.
 
 Both Excel epochs are handled, chosen per workbook by `date1904`, and
 the 1900 system’s phantom 29 February is accounted for: serial 60 is
 `NA`, serial 61 is 1 March 1900. Errors are ten classed conditions under
-`zuxlsx_error` — see
+`zuxlsx_error`; see
 [`?"zuxlsx-conditions"`](https://pedrobtz.github.io/zuxlsx/reference/zuxlsx-conditions.md)
 and design §15. A legacy `.xls` (OLE2, not ZIP), an `.xlsb` and a
 non-agile encrypted workbook are reported as
@@ -67,290 +104,62 @@ is refused by name
 ([src/encinfo.c](https://pedrobtz.github.io/zuxlsx/src/encinfo.c),
 §21f), the package is decrypted over `libzucrypt.a` after its HMAC is
 checked ([src/agile.c](https://pedrobtz.github.io/zuxlsx/src/agile.c),
-§21d), and xlsxio reads the plaintext from memory (§21g). The plaintext
-is never an R object and never on disk, and is wiped when the read ends.
-Known cost: `resolve_sheet()` makes every read decrypt twice (#68).
+§21d), and xlsxio reads the plaintext from memory (§21g). Known cost:
+`resolve_sheet()` makes every read decrypt twice (#68).
 `decrypt_ole2()`, `agile_decrypt()`, `cfb_streams()` and
-`encryption_info()` are internal, for the tests. zucrypt freezes its ABI
-1 on this code; findings go on pedrobtz/zucrypt#43.
+`encryption_info()` are internal, for the tests.
 
-Out of scope or not done: writing workbooks, `.xlsb`, standard (Office
-2007) and extensible encryption, evaluating formulas (the cached value
-is returned), and configurable limits on part size or sheet count —
-today’s defenses are Expat’s and miniz’s own, plus the specification’s
-spin-count ceiling (#26, \#41). Column building is a post-pass rather
-than streaming; design §14’s status note says why.
+**Deviation from `workflow.md` (Releasing to CRAN).** `CRAN-SUBMISSION`
+is committed, but the repository has no `cran-release.yaml` (checked
+2026-11-11), so nothing tags the release or opens the `.9000` bump pull
+request on its own; `pkg-post-cran` does both after acceptance.
 
-The build:
+## Versions and dependents
 
-- [configure](https://pedrobtz.github.io/zuxlsx/configure) /
-  [configure.win](https://pedrobtz.github.io/zuxlsx/configure.win)
-  resolve `system.file("lib", package = ...)` for `zuxml`, `zukomp` and
-  `zucrypt` (arch-specific `lib/x64` first, then `lib`) and substitute
-  them into
-  [src/Makevars.in](https://pedrobtz.github.io/zuxlsx/src/Makevars.in).
-  `LinkingTo` puts the *headers* on the path by itself
-  (`CLINK_CPPFLAGS`); there is no equivalent for a library, and the
-  alternatives are worse — `$(shell …)` would force
-  `SystemRequirements: GNU make`, and an `Imports:` entry would add a
-  runtime dependency that nothing needs, since the archives are linked
-  statically.
-- `DESCRIPTION` has `LinkingTo: zucrypt, zukomp, zuxml` and **no
-  `Imports:`**, which is what design §3 asks for.
-- **There is no `Remotes:`.** zuxml, zukomp and zucrypt all reached CRAN
-  in October 2026 (0.1.0 each), and `Remotes:` was dropped for the CRAN
-  submission, so CI and a GitHub install resolve the siblings from CRAN.
-  To build against a sibling’s unreleased `main`, install it first with
-  `pak::pak("pedrobtz/<pkg>")`. The full sequence is in
-  [.agents/release-checklist.md](https://pedrobtz.github.io/zuxlsx/.agents/release-checklist.md).
-- `src/Makevars` is generated and `.gitignore`d. `cleanup` removes it.
-
-The native layer is
-[src/zuxlsx.c](https://pedrobtz.github.io/zuxlsx/src/zuxlsx.c) — every
-`.Call` entry point, the cell reader and the column builders in one
-translation unit — plus
-[src/init.c](https://pedrobtz.github.io/zuxlsx/src/init.c) for
-registration and the zucrypt backend’s lifetime (`zuc_init()` on load,
-`zuc_shutdown()` on unload),
-[src/agile.c](https://pedrobtz.github.io/zuxlsx/src/agile.c), the
-decryption core,
-[src/cfb.c](https://pedrobtz.github.io/zuxlsx/src/cfb.c), which reads
-stream contents out of a CFB container in memory and also decides what
-kind of OLE2 file a file is,
-[src/encinfo.c](https://pedrobtz.github.io/zuxlsx/src/encinfo.c), which
-parses `EncryptionInfo`, and
-[src/utf8file.c](https://pedrobtz.github.io/zuxlsx/src/utf8file.c),
-which opens a UTF-8 path with `_wfopen` on Windows. None includes an R
-header, so the first three can be fuzzed outside R (#45).
-
-Vendored, and the corpora:
-
-- [src/vendor/xlsxio/](https://pedrobtz.github.io/zuxlsx/src/vendor/xlsxio/)
-  — xlsxio 0.2.36, **reader only** (`xlsxio_read.c`,
-  `xlsxio_read_sharedstrings.c`, headers, `LICENSE.txt`). The writer is
-  not bundled; writing is out of scope (§21). Upstream CRLF line endings
-  are kept deliberately.
-
-- [tools/patches/xlsxio/](https://pedrobtz.github.io/zuxlsx/tools/patches/xlsxio/)
-  — **ten patches**, applied in order, reproducing the committed copy
-  byte for byte from the pristine 0.2.36 tarball:
-
-  | Patch | What it does |
-  |----|----|
-  | `0001-miniz-zip-backend` | design §5’s “main adaptation cost”: a `USE_MINIZ` backend beside xlsxio’s minizip/minizip-ng/libzip ones, mapping `unzOpen`/`unzLocateFile`/`unzReadCurrentFile` onto `mz_zip_reader_init_file` / `_locate_file_v2` / `_extract_iter_read` |
-  | `0002-namespace-insensitive-relationship-id` | looks a worksheet’s relationship id up as `id` rather than `r:id`, so a workbook binding the relationships namespace to another prefix still resolves |
-  | `0003-expose-cell-type-and-number-format` | reports a cell’s OOXML type and whether its number format is a date — without it xlsxio hands back text and nothing else, and no typing or date handling is possible |
-  | `0004-expose-workbook-date-epoch` | reports the workbook’s `date1904` setting |
-  | `0005-tolerant-part-name-lookup` | matches archive members the way OOXML consumers compare part names |
-  | `0006-strict-ooxml-relationship-types` | accepts strict OOXML relationship namespaces as well as transitional ones |
-  | `0007-null-relationship-id-crash` | a missing relationship `Id` reached `strcasecmp` as `NULL`; found by the fuzzer, reported upstream |
-  | `0008-report-why-a-worksheet-ended` | `xlsxioread_sheet_finish()`: a worksheet that ends on a parse error, a reference past `XFD1048576`, a dangling shared-string index or a bad CRC is reported rather than read short; also corrects 0003’s bracket and built-in date rules |
-  | `0009-report-damaged-shared-strings-and-styles` | a shared-string table or styles part that is broken XML or fails its CRC is reported by name, rather than loaded as far as the damage |
-  | `0010-refuse-doctype` | every parser xlsxio creates refuses a DOCTYPE, which no workbook part carries |
-
-  Provenance is in
-  [tools/vendor/manifest.tsv](https://pedrobtz.github.io/zuxlsx/tools/vendor/manifest.tsv),
-  [tools/vendor/checksums.sha256](https://pedrobtz.github.io/zuxlsx/tools/vendor/checksums.sha256)
-  and
-  [inst/COPYRIGHTS](https://pedrobtz.github.io/zuxlsx/inst/COPYRIGHTS);
-  **`tools/vendor/verify` checks all of it offline and is the thing to
-  run after touching anything under `src/vendor/`.**
-
-- [tests/testthat/sheets/](https://pedrobtz.github.io/zuxlsx/tests/testthat/sheets/)
-  — seven readxl interoperability workbooks (inline strings, missing
-  parts, nonstandard namespace prefix, UTF-8 sheet names, blanks), MIT,
-  with provenance and checksums in `MANIFEST.tsv` there, all verified
-  byte for byte against readxl at commit `47f8aeac`. `test-corpus.R`
-  asserts their content, not just that they open.
-
-- [tests/testthat/fixtures/ole2/](https://pedrobtz.github.io/zuxlsx/tests/testthat/fixtures/ole2/)
-  — OLE2 containers for the format classifier: synthetic ones reproduced
-  by `tools/make-ole2.R --check`, and three real Agile-encrypted files
-  (one with a non-BMP password) that cannot be reproduced byte for byte
-  because the encryption draws a random salt.
-
-- [tools/corpus/](https://pedrobtz.github.io/zuxlsx/tools/corpus/) — 363
-  Apache POI files (351 `.xlsx`, 11 `.xlsb`, one with no extension),
-  fetched rather than committed, run in CI only. It reports outcomes
-  that *changed* against `expected.tsv`; errors are often the correct
-  result there.
-
-- [tools/fuzz/](https://pedrobtz.github.io/zuxlsx/tools/fuzz/) —
-  structure-aware mutation under ASan/UBSan, outside R because R is not
-  built with a sanitiser. It found the crash that `0007` fixes.
-
-- [tools/bench/](https://pedrobtz.github.io/zuxlsx/tools/bench/) —
-  timings against readxl and openxlsx2; see **Commands**.
-
-- [.agents/reference-native-api.md](https://pedrobtz.github.io/zuxlsx/.agents/reference-native-api.md)
-  — function map of the xlsxio reader, Expat and miniz ZIP APIs the
-  vendored code uses.
-
-The `utopp/pkg-xlsx` prototype at
-`/Users/pbtz/Documents/repos/gh/utopp/pkg-xlsx` is where the vendored
-tree came from. It also holds a `USE_MINIZ` patch for `xlsxio_write.c`
-and research notes (`ROADMAP.md`, `calamine.md`, `libs.md`); none of
-that was copied, so go back for it if writing is ever in scope.
-
-## The design doc is the spec
-
-[.agents/design-zuxlsx.md](https://pedrobtz.github.io/zuxlsx/.agents/design-zuxlsx.md)
-is binding, not background — §1–§23 cover the dependency model, the
-miniz ZIP backend adaptation, the streaming pipeline, the cell/column
-abstractions, the error classes, and the test corpus layout, and a final
-section, *Position in the `zu*` family*, holds the table shared by all
-five repositories’ designs. Read the relevant section before writing
-code. If implementation shows the design is wrong, **change the design
-doc in the same commit** rather than diverging silently.
-
-[.agents/roadmap.md](https://pedrobtz.github.io/zuxlsx/.agents/roadmap.md)
-is where status lives: stages with exit criteria, each open criterion an
-issue, and the v0.1.0 cut line. Check which stage is current before
-starting work. Record status there rather than as another dated block in
-the design — the design’s accumulated status blocks are what the
-roadmap’s closing review is about.
-
-## Where the design doc and reality disagreed (resolved 2026-09-18)
-
-The doc was written before `zuxml` and `zukomp` reached v1, and three of
-its assumptions did not hold against the packages as shipped at v1.
-**Both sibling PRs merged on 2026-09-18 and this is now settled**; the
-history is kept because it explains why two v1 packages were widened,
-and because a future reader hitting a link error will want it.
-
-- **§3/§7 “`LinkingTo` only, no `R_GetCCallable()`” is not how those
-  packages work.** `zuxml/inst/include/zuxml.h` and
-  `zukomp/inst/include/zukomp-r.h` document the opposite contract:
-  `Imports:` + `LinkingTo:`, resolving a versioned function table at
-  runtime (`zuxml_api_get()` →
-  `R_GetCCallable("zuxml", "zuxml_api_v2")`; `zukomp_api()` →
-  `zukomp_get_api`). That is the supported path.
-- **§4’s `libzuxml.a` / `libzukomp.a` did not exist at v1**, and neither
-  package installed `expat.h` or `miniz.h`; `inst/include/` held only
-  `zuxml.h`, `zukomp.h`, `zukomp-r.h`. So xlsxio could not be handed the
-  raw Expat API as §4 assumes. **Both archives and both vendored headers
-  are installed today** — see *What the siblings install now* below.
-- **§5 assumes miniz’s ZIP reader is available through `zukomp`. At v1
-  it was not.** `zukomp/src/Makevars` compiles miniz with
-  `-DMINIZ_NO_ARCHIVE_APIS -DMINIZ_NO_ARCHIVE_WRITING_APIS -DMINIZ_NO_STDIO`,
-  and zukomp’s own `test-abi.R` asserts no `mz_zip_*` symbol is
-  exported. zukomp gives raw DEFLATE/zlib/gzip over memory buffers only
-  — no central directory, no local headers, no entry lookup.
-
-Both are now installable straight from GitHub `main`; see **Commands**
-below.
-
-**The vendored xlsxio makes this concrete.** It `#include`s `<expat.h>`
-and calls
-`XML_ParserCreate`/`XML_GetBuffer`/`XML_ParseBuffer`/`XML_StopParser`
-directly, and under `USE_MINIZ` it calls `mz_zip_*` directly. Neither
-symbol set was reachable through `LinkingTo: zuxml, zukomp` at v1, which
-is what the two sibling PRs below changed.
-
-**Decided (2026-09-17): widen the siblings to match the design, rather
-than changing the design. Both merged 2026-09-18.**
-
-- **pedrobtz/zuxml#7** — installs `expat.h`/`expat_external.h` and ships
-  `libzuxml.a` (the Expat objects, no R glue), installed to `<pkg>/lib/`
-  by its `src/install.libs.R`. `XML_StopParser`/`XML_ResumeParser` are
-  in it, which is what xlsxio’s row/cell and sheet-list iterators need.
-- **pedrobtz/zukomp#10** — ships `libzukomp.a` with miniz’s ZIP reader,
-  plus `miniz.h`; its `src/install.libs.R` installs the archive to
-  `<pkg>/lib${R_ARCH}/`. It compiles `miniz.c` a *second* time rather
-  than widening the trim, so `zukomp.so` still exports no `mz_zip_*`
-  symbol and `test-abi.R` needed no relaxing. `MINIZ_NO_TIME` also had
-  to go for the archive build, or `mz_zip_archive_file_stat.m_time` is
-  miniz’s `m_padding`.
-
-Proven end to end before the PRs were opened: `src/vendor/xlsxio/`
-compiles against those installed headers, links both archives, and reads
-the fixtures in
-[tests/testthat/sheets/](https://pedrobtz.github.io/zuxlsx/tests/testthat/sheets/)
-— inline strings, UTF-8 sheet names, and a workbook with no
-`sharedStrings.xml` part.
-
-`configure` resolves `system.file("lib", package = ...)` into
-`Makevars.in`, which keeps this `LinkingTo`-only, with no `Imports:` and
-no GNU make. Required defines: `-DXML_STATIC` (Windows) and
-`-DMINIZ_NO_ZLIB_COMPATIBLE_NAMES` (everywhere — miniz would otherwise
-`#define` `compress`/`crc32`/`adler32` over any translation unit that
-also sees R’s headers). **Both archive paths in `PKG_LIBS` are
-single-quoted**; unquoted, any library path containing a space (the norm
-on Windows) reaches the linker as two nonexistent arguments.
-
-Rejected alternatives, for the record: vendoring Expat and miniz here as
-well (compiles today, but duplicates the siblings and contradicts
-§3/§6), and retargeting xlsxio onto the `zux_parser_*` wrapper API
-(blocked on `zuxml` having no `XML_StopParser` equivalent).
-
-## What the siblings install now
-
-Current as of 2026-09-22, and the contract this package is built on. An
-installed `zuxml` carries:
-
-    zuxml/include/expat.h          zuxml/include/zuxml.h
-    zuxml/include/expat_external.h zuxml/lib/libzuxml.a
-
-`LinkingTo: zuxml` puts that `include` directory on the compiler’s path,
-and `libzuxml.a` holds the Expat objects only — no R glue, so nothing
-collides inside `zuxlsx.so`. `zukomp` is the same shape for miniz
-(`include/miniz.h`, `lib${R_ARCH}/libzukomp.a` — plain `lib/` everywhere
-but Windows, where it is `lib/x64/`), and ships `licenses/miniz-LICENSE`
-besides. `zucrypt` installs `include/zucrypt.h`, `include/zucrypt-r.h`
-and `lib/libzucrypt.a`, compiled with hidden visibility so its symbols
-stay local to `zuxlsx.so` (design §21d). Neither header exists under the
-siblings’ `inst/include/` in *source* form: zuxml copies them out of its
-vendored tree during `src/install.libs.R`, so the header always matches
-the objects in the archive. Looking at a sibling’s git tree and
-concluding the header is missing is the mistake to avoid.
-
-The feature policy comes with it. zuxml compiles Expat with `XML_GE 0`
-and never defines `XML_DTD`, so entity references beyond the five
-built-ins are parse errors here too, and defining `XML_GE=1` in this
-package’s `PKG_CPPFLAGS` would declare billion-laughs limiters that
-`libzuxml.a` does not define. zuxml’s `vignette("linking")` and its
-`CLAUDE.md` are the reference; `zuxml/tools/zuxmltest/` is a minimal
-package in exactly this shape.
-
-**Do not test for a version.** zuxml 0.1.0 exists both with and without
-the archive, so `./configure` checks for the file on disk, and any
-message about it should say that rather than naming a version.
+The current version’s parent issue is \#50, `v0.1.0`. zuxlsx links
+statically against `zuxml`, `zukomp` and `zucrypt` (all 0.1.0 on CRAN
+since October 2026) through `LinkingTo:` alone. No sibling depends on
+zuxlsx, and it has no C ABI of its own. zucrypt freezes its ABI 1 on the
+decryption code here; findings go on pedrobtz/zucrypt#43.
 
 ## Commands
 
-Nothing native builds until `zuxml` and `zukomp` are installed **from
-GitHub** — an older installed copy may predate the archives, and
-`./configure` stops with a message when it cannot find one. Version
-numbers do not settle it (zuxml 0.1.0 exists both ways); the file on
-disk does. `@main` is fine and is what `DESCRIPTION` asks for; a
-*feature* branch suffix is not, since those are deleted on merge.
+Nothing native builds until `zuxml`, `zukomp` and `zucrypt` are
+installed in a version that ships their static archives. An older
+installed copy may predate the archives, and `./configure` stops with a
+message when it cannot find one. Version numbers do not settle it (zuxml
+0.1.0 exists both ways); the file on disk does. CI and a plain install
+resolve the siblings from CRAN. To build against a sibling’s unreleased
+`main`, install it first; a *feature* branch suffix is not fine, since
+those are deleted on merge:
 
 ``` sh
 Rscript -e 'pak::pak(c("pedrobtz/zuxml", "pedrobtz/zukomp", "pedrobtz/zucrypt"))'
 ```
 
+The full sequence is in
+[.agents/release-checklist.md](https://pedrobtz.github.io/zuxlsx/.agents/release-checklist.md).
+The link test on its own:
+
 ``` sh
-Rscript -e 'devtools::document()'      # roxygen -> NAMESPACE + man/
-Rscript -e 'devtools::load_all()'      # compile + load for interactive work
-Rscript -e 'devtools::test()'
-Rscript -e 'devtools::test(filter = "linking")'               # tests/testthat/test-linking.R
-Rscript -e 'devtools::check()'         # target 0 errors / 0 warnings / 0 notes
+Rscript -e 'devtools::test(filter = "linking")'  # tests/testthat/test-linking.R
 ```
 
-To check the link itself rather than trust it — which archive was used,
-and whether anything was left undefined:
-
-`configure` refuses to run without `R_HOME` (it needs it to find the
-*same* R whose library holds the two archives), so pass it explicitly
-when running the script by hand rather than through `R CMD INSTALL`.
-That regenerates `src/Makevars`, so this is a build input being
-rewritten, not a read-only check; `./cleanup` removes it.
+To check the link itself rather than trust it (which archive was used,
+and whether anything was left undefined): `configure` refuses to run
+without `R_HOME` (it needs it to find the *same* R whose library holds
+the archives), so pass it explicitly when running the script by hand
+rather than through `R CMD INSTALL`. That regenerates `src/Makevars`, so
+this is a build input being rewritten, not a read-only check;
+`./cleanup` removes it.
 
 ``` sh
 Rscript -e 'zuxlsx::zuxlsx_native()'   # versions actually linked in
 R_HOME="$(Rscript -e 'cat(R.home())')" ./configure && grep PKG_LIBS src/Makevars
 nm -gu src/zuxlsx.so | grep -E 'XML_|mz_zip|zuc_'   # must print nothing
-./tools/vendor/verify                  # vendored tree + fixtures vs their manifests
+./tools/vendor/verify                  # vendored tree + fixtures vs manifests
+./tools/check-layering.sh              # the R-free C includes no R header
+Rscript tools/make-ole2.R --check      # synthetic OLE2 fixtures reproduce
 ```
 
 Offline, `check()` emits a spurious
@@ -369,13 +178,13 @@ provenance, so they are cached outside the repository and are never
 fixtures:
 
 ``` sh
-./tools/bench/fetch-workbooks xlsx100mb        # -> ${ZUXLSX_BENCH_DIR:-~/.cache/zuxlsx-bench}
-Rscript tools/bench/bench-read.R               # xlsx100mb, sheet 1
-Rscript tools/bench/bench-read.R xlsx100mb 4   # workbook (id or path), sheet (index or name)
+./tools/bench/fetch-workbooks xlsx100mb      # ${ZUXLSX_BENCH_DIR:-~/.cache/zuxlsx-bench}
+Rscript tools/bench/bench-read.R             # xlsx100mb, sheet 1
+Rscript tools/bench/bench-read.R xlsx100mb 4 # workbook (id or path), sheet
 ```
 
 It times two things over `bench::mark()`: listing the worksheets, and
-reading one sheet. Listing is where the streaming design shows up — on a
+reading one sheet. Listing is where the streaming design shows up: on a
 105 MB workbook zuxlsx is ~2.5 ms against readxl’s 1.6 s and openxlsx2’s
 19 s, because it is the only one of the three that stops after
 `xl/workbook.xml`. Reading is ~15% faster than readxl at a quarter of
@@ -383,34 +192,184 @@ its R-level allocation. It does not check the three against each other;
 [tools/corpus/sweep.R](https://pedrobtz.github.io/zuxlsx/tools/corpus/sweep.R)
 is what compares values.
 
-CI is the shared `pedrobtz/r-actions` workflows:
-[R-CMD-check.yaml](https://pedrobtz.github.io/zuxlsx/.github/workflows/R-CMD-check.yaml)
-(macOS/Windows/Ubuntu release, Windows devel, Ubuntu oldrel-1 and 4.1,
-the r-devel containers, `nosuggests`),
-[native-checks.yaml](https://pedrobtz.github.io/zuxlsx/.github/workflows/native-checks.yaml)
-(ASan/UBSan, valgrind, rchk, gctorture, LTO, analyzers, CRAN’s special
-checks; the last only in the full profile, so label a PR `full-ci` to
-run it) and
-[vendor.yaml](https://pedrobtz.github.io/zuxlsx/.github/workflows/vendor.yaml),
-plus this repo’s own
-[corpus.yaml](https://pedrobtz.github.io/zuxlsx/.github/workflows/corpus.yaml)
-and
-[pkgdown.yaml](https://pedrobtz.github.io/zuxlsx/.github/workflows/pkgdown.yaml).
+## Architecture
 
-## Conventions inherited from the `zu*` siblings
+The build:
 
-These are established in `zukomp` and `zuxml` (see `../zukomp/CLAUDE.md`
-and `../zuxml/CLAUDE.md`, checked out beside this repository) and should
-hold here unless the design doc says otherwise. The per-package facts —
-prefixes, info functions, archive paths — are in the family table at the
-end of the design doc.
+- [configure](https://pedrobtz.github.io/zuxlsx/configure) /
+  [configure.win](https://pedrobtz.github.io/zuxlsx/configure.win)
+  resolve `system.file("lib", package = ...)` for `zuxml`, `zukomp` and
+  `zucrypt` (arch-specific `lib/x64` first, then `lib`) and substitute
+  them into
+  [src/Makevars.in](https://pedrobtz.github.io/zuxlsx/src/Makevars.in).
+  `LinkingTo` puts the *headers* on the path by itself
+  (`CLINK_CPPFLAGS`); there is no equivalent for a library, and the
+  alternatives are worse: `$(shell …)` would force
+  `SystemRequirements: GNU make`, and an `Imports:` entry would add a
+  runtime dependency that nothing needs, since the archives are linked
+  statically.
+- `DESCRIPTION` has `LinkingTo: zucrypt, zukomp, zuxml` and **no
+  `Imports:`**, which is what design §3 asks for.
+- **There is no `Remotes:`.** zuxml, zukomp and zucrypt all reached CRAN
+  in October 2026 (0.1.0 each), and `Remotes:` was dropped for the CRAN
+  submission.
+- `src/Makevars` is generated and `.gitignore`d. `cleanup` removes it.
+
+The native layer is
+[src/zuxlsx.c](https://pedrobtz.github.io/zuxlsx/src/zuxlsx.c) (every
+`.Call` entry point, the cell reader and the column builders in one
+translation unit), plus
+[src/init.c](https://pedrobtz.github.io/zuxlsx/src/init.c) for
+registration and the zucrypt backend’s lifetime (`zuc_init()` on load,
+`zuc_shutdown()` on unload),
+[src/agile.c](https://pedrobtz.github.io/zuxlsx/src/agile.c), the
+decryption core,
+[src/cfb.c](https://pedrobtz.github.io/zuxlsx/src/cfb.c), which reads
+stream contents out of a CFB container in memory and also decides what
+kind of OLE2 file a file is,
+[src/encinfo.c](https://pedrobtz.github.io/zuxlsx/src/encinfo.c), which
+parses `EncryptionInfo`, and
+[src/utf8file.c](https://pedrobtz.github.io/zuxlsx/src/utf8file.c),
+which opens a UTF-8 path with `_wfopen` on Windows. None includes an R
+header, so the first three can be fuzzed outside R (#45).
+
+Corpora and supporting trees:
+
+- [tests/testthat/sheets/](https://pedrobtz.github.io/zuxlsx/tests/testthat/sheets/):
+  seven readxl interoperability workbooks (inline strings, missing
+  parts, nonstandard namespace prefix, UTF-8 sheet names, blanks), MIT,
+  with provenance and checksums in `MANIFEST.tsv` there, all verified
+  byte for byte against readxl at commit `47f8aeac`. `test-corpus.R`
+  asserts their content, not just that they open.
+- [tests/testthat/fixtures/ole2/](https://pedrobtz.github.io/zuxlsx/tests/testthat/fixtures/ole2/):
+  OLE2 containers for the format classifier: synthetic ones reproduced
+  by `tools/make-ole2.R --check`, and three real Agile-encrypted files
+  (one with a non-BMP password) that cannot be reproduced byte for byte
+  because the encryption draws a random salt.
+- [tools/corpus/](https://pedrobtz.github.io/zuxlsx/tools/corpus/): 363
+  Apache POI files (351 `.xlsx`, 11 `.xlsb`, one with no extension),
+  fetched rather than committed, run in CI only. It reports outcomes
+  that *changed* against `expected.tsv`; errors are often the correct
+  result there.
+- [tools/fuzz/](https://pedrobtz.github.io/zuxlsx/tools/fuzz/):
+  structure-aware mutation under ASan/UBSan, outside R because R is not
+  built with a sanitiser. It found the crash that patch `0007` fixes.
+- [tools/bench/](https://pedrobtz.github.io/zuxlsx/tools/bench/):
+  timings against readxl and openxlsx2; see Commands.
+- [.agents/reference-native-api.md](https://pedrobtz.github.io/zuxlsx/.agents/reference-native-api.md):
+  function map of the xlsxio reader, Expat and miniz ZIP APIs the
+  vendored code uses.
+
+The `utopp/pkg-xlsx` prototype at
+`/Users/pbtz/Documents/repos/gh/utopp/pkg-xlsx` is where the vendored
+tree came from. It also holds a `USE_MINIZ` patch for `xlsxio_write.c`
+and research notes (`ROADMAP.md`, `calamine.md`, `libs.md`); none of
+that was copied, so go back for it if writing is ever in scope.
+
+### Where the design doc and reality disagreed (resolved 2026-09-18)
+
+The doc was written before `zuxml` and `zukomp` reached v1, and three of
+its assumptions did not hold against the packages as shipped at v1.
+**Both sibling PRs merged on 2026-09-18 and this is now settled**; the
+history is kept because it explains why two v1 packages were widened,
+and because a future reader hitting a link error will want it.
+
+- **§3/§7 “`LinkingTo` only, no `R_GetCCallable()`” is not how those
+  packages work.** `zuxml/inst/include/zuxml.h` and
+  `zukomp/inst/include/zukomp-r.h` document the opposite contract:
+  `Imports:` + `LinkingTo:`, resolving a versioned function table at
+  runtime (`zuxml_api_get()` →
+  `R_GetCCallable("zuxml", "zuxml_api_v2")`; `zukomp_api()` →
+  `zukomp_get_api`). That is the supported path.
+- **§4’s `libzuxml.a` / `libzukomp.a` did not exist at v1**, and neither
+  package installed `expat.h` or `miniz.h`; `inst/include/` held only
+  `zuxml.h`, `zukomp.h`, `zukomp-r.h`. So xlsxio could not be handed the
+  raw Expat API as §4 assumes. **Both archives and both vendored headers
+  are installed today**; see What the siblings install now below.
+- **§5 assumes miniz’s ZIP reader is available through `zukomp`. At v1
+  it was not.** `zukomp/src/Makevars` compiles miniz with
+  `-DMINIZ_NO_ARCHIVE_APIS -DMINIZ_NO_ARCHIVE_WRITING_APIS -DMINIZ_NO_STDIO`,
+  and zukomp’s own `test-abi.R` asserts no `mz_zip_*` symbol is
+  exported. zukomp gives raw DEFLATE/zlib/gzip over memory buffers only:
+  no central directory, no local headers, no entry lookup.
+
+**The vendored xlsxio makes this concrete.** It `#include`s `<expat.h>`
+and calls
+`XML_ParserCreate`/`XML_GetBuffer`/`XML_ParseBuffer`/`XML_StopParser`
+directly, and under `USE_MINIZ` it calls `mz_zip_*` directly. Neither
+symbol set was reachable through `LinkingTo: zuxml, zukomp` at v1, which
+is what the two sibling PRs below changed.
+
+**Decided (2026-09-17): widen the siblings to match the design, rather
+than changing the design. Both merged 2026-09-18.**
+
+- **pedrobtz/zuxml#7** installs `expat.h`/`expat_external.h` and ships
+  `libzuxml.a` (the Expat objects, no R glue), installed to `<pkg>/lib/`
+  by its `src/install.libs.R`. `XML_StopParser`/`XML_ResumeParser` are
+  in it, which is what xlsxio’s row/cell and sheet-list iterators need.
+- **pedrobtz/zukomp#10** ships `libzukomp.a` with miniz’s ZIP reader,
+  plus `miniz.h`; its `src/install.libs.R` installs the archive to
+  `<pkg>/lib${R_ARCH}/`. It compiles `miniz.c` a *second* time rather
+  than widening the trim, so `zukomp.so` still exports no `mz_zip_*`
+  symbol and `test-abi.R` needed no relaxing. `MINIZ_NO_TIME` also had
+  to go for the archive build, or `mz_zip_archive_file_stat.m_time` is
+  miniz’s `m_padding`.
+
+Proven end to end before the PRs were opened: `src/vendor/xlsxio/`
+compiles against those installed headers, links both archives, and reads
+the fixtures in
+[tests/testthat/sheets/](https://pedrobtz.github.io/zuxlsx/tests/testthat/sheets/):
+inline strings, UTF-8 sheet names, and a workbook with no
+`sharedStrings.xml` part.
+
+Rejected alternatives, for the record: vendoring Expat and miniz here as
+well (compiles today, but duplicates the siblings and contradicts
+§3/§6), and retargeting xlsxio onto the `zux_parser_*` wrapper API
+(blocked on `zuxml` having no `XML_StopParser` equivalent).
+
+### What the siblings install now
+
+Current as of 2026-09-22, and the contract this package is built on. An
+installed `zuxml` carries:
+
+``` text
+zuxml/include/expat.h          zuxml/include/zuxml.h
+zuxml/include/expat_external.h zuxml/lib/libzuxml.a
+```
+
+`LinkingTo: zuxml` puts that `include` directory on the compiler’s path,
+and `libzuxml.a` holds the Expat objects only, no R glue, so nothing
+collides inside `zuxlsx.so`. `zukomp` is the same shape for miniz
+(`include/miniz.h`, `lib${R_ARCH}/libzukomp.a`: plain `lib/` everywhere
+but Windows, where it is `lib/x64/`), and ships `licenses/miniz-LICENSE`
+besides. `zucrypt` installs `include/zucrypt.h`, `include/zucrypt-r.h`
+and `lib/libzucrypt.a`, compiled with hidden visibility so its symbols
+stay local to `zuxlsx.so` (design §21d). Neither header exists under the
+siblings’ `inst/include/` in *source* form: zuxml copies them out of its
+vendored tree during `src/install.libs.R`, so the header always matches
+the objects in the archive. Looking at a sibling’s git tree and
+concluding the header is missing is the mistake to avoid.
+
+The feature policy comes with it. zuxml compiles Expat with `XML_GE 0`
+and never defines `XML_DTD`, so entity references beyond the five
+built-ins are parse errors here too. zuxml’s `vignette("linking")` and
+its `CLAUDE.md` are the reference; `zuxml/tools/zuxmltest/` is a minimal
+package in exactly this shape.
+
+## Invariants that are easy to break
+
+These follow `zukomp` and `zuxml` (see `../zukomp/CLAUDE.md` and
+`../zuxml/CLAUDE.md`, checked out beside this repository) unless the
+design doc says otherwise. The per-package facts (prefixes, info
+functions, archive paths) are in the family table at the end of the
+design doc.
 
 - **Naming by layer.** R exports get a short package-specific prefix:
   `komp_` in zukomp, `xml_` in zuxml, `crypt_` in zucrypt, and `xlsx_`
   here, for every export (#46). Entry points and registration get the
   package name (`R_init_zuxlsx`). **zuxlsx has no C ABI**: it installs
   no header and registers no callable table. Its internal C names must
-  not use `zu_`, which is zukomp’s public C namespace — and several
+  not use `zu_`, which is zukomp’s public C namespace, and several
   already do: `zu_cell_type`/`ZU_CELL_*` in `src/zuxlsx.c`, and in the
   vendored `xlsxio_read.c` patch 0005’s `zu_locate_member()` and patch
   0010’s `zu_parse_*`/`zu_refuse_doctype()`, with patch 0008’s
@@ -418,11 +377,23 @@ end of the design doc.
   so nothing collides today; rename them when next touched.
   Internal-only symbols are never installed. Nothing that reads as
   another library’s ABI (`unz*`, `mz_zip_*`, Expat’s `XML_*`) may be
-  re-exported.
+  re-exported; the `nm -gu` check in Commands must print nothing.
 - **`src/Makevars` is portable make only**, with `OBJECTS` listed
-  explicitly — no GNU-make conditionals or `$(wildcard)` (that would
+  explicitly: no GNU-make conditionals or `$(wildcard)` (that would
   force `SystemRequirements: GNU make`), and no `-W*`/optimisation
   overrides (CRAN policy).
+- **Required defines:** `-DXML_STATIC` (Windows) and
+  `-DMINIZ_NO_ZLIB_COMPATIBLE_NAMES` (everywhere: miniz would otherwise
+  `#define` `compress`/`crc32`/`adler32` over any translation unit that
+  also sees R’s headers). Defining `XML_GE=1` in this package’s
+  `PKG_CPPFLAGS` would declare billion-laughs limiters that `libzuxml.a`
+  does not define.
+- **Both archive paths in `PKG_LIBS` are single-quoted**; unquoted, any
+  library path containing a space (the norm on Windows) reaches the
+  linker as two nonexistent arguments.
+- **Do not test for a version.** zuxml 0.1.0 exists both with and
+  without the archive, so `./configure` checks for the file on disk, and
+  any message about it should say that rather than naming a version.
 - **No `Rf_error()` below the outermost `.Call`.** C layers return a
   status enum; `Rf_error()` and `R_CheckUserInterrupt()` both longjmp
   past any `free()`. Heap state that must survive such a jump belongs to
@@ -430,36 +401,135 @@ end of the design doc.
   `R_alloc` under `vmaxget`/`vmaxset`. This matters more here than in
   `zukomp`: an XLSX read holds a ZIP handle, a parser and column
   builders live at once.
-- **Tests assert on condition classes, never message text**
-  (`expect_error(..., class = "zuxlsx_zip_error")`); wording is covered
-  by snapshots. Tests are self-sufficient (inputs built inside each
-  `test_that()`), self-contained (`withr::local_*()`), and must pass
-  under `devtools::test(shuffle = TRUE)`.
+- **The R-free C stays R-free.** `cfb.c`, `encinfo.c`, `agile.c`,
+  `utf8file.c` and their headers include no R header and call no R API,
+  so `tools/fuzz` can compile them without R (#45).
+  `tools/check-layering.sh` enforces it; one convenient `Rf_` call
+  breaks it.
+- **Decrypted plaintext is never an R object and never on disk**, and is
+  wiped when the read ends.
+
+## Testing
+
 - **Two kinds of test input, and they are not interchangeable.** A
   workbook shaped for one assertion is *built in the test*, through the
   byte-by-byte writers in `helper-zip.R` (`write_workbook()`,
   `styled_workbook_parts()`, `grid_workbook()`,
-  `strict_workbook_parts()`) — the adversarial cases need a central
+  `strict_workbook_parts()`). The adversarial cases need a central
   directory that disagrees with the local headers, or a member declared
   at a size it cannot back, and no ZIP library will produce those on
   request. A file that proves *interoperability* is committed, with
   provenance in a `MANIFEST.tsv` and, where it can be reproduced, a
   `tools/` generator supporting `--check`. CRAN guarantees no Python and
   no external tooling, so nothing may be produced at test time by an
-  external program. Design §17.4’s `valid/` `unusual-valid/` `invalid/`
-  `hostile/` categories are `test-valid.R`, `test-unusual.R`,
+  external program.
+- **Design §17.4’s categories** `valid/`, `unusual-valid/`, `invalid/`
+  and `hostile/` are `test-valid.R`, `test-unusual.R`,
   `test-malformed.R` and `test-hostile.R`.
-- **Vendored third-party code under `src/vendor/` is never edited in
-  place** — patches live in `tools/patches/`, provenance in
-  `tools/vendor/manifest.tsv`, per-file checksums in
-  `tools/vendor/checksums.sha256`. `tools/vendor/fetch` re-derives the
-  tree from the upstream tarball, `record` rewrites the checksums, and
-  **`verify` checks offline that the committed tree, both manifests,
-  `src/Makevars.in`’s defines and `inst/COPYRIGHTS` all agree** — run it
-  after touching anything under `src/vendor/`, `tools/patches/` or the
-  fixtures. It exists precisely because a hand edit to `xlsxio_read.c`
-  once shipped undocumented while three files claimed the patch set
-  reproduced the tree byte for byte.
+- **Conformance.** The readxl workbooks in `tests/testthat/sheets/` and
+  the Apache POI corpus in `tools/corpus/` (CI only) are the external
+  oracles; see Architecture.
+- **Helpers.** `helper-zip.R` (workbook writers), `helper-agile.R`,
+  `helper-cfb.R`, `helper-ole2.R`, `helper-conditions.R` and
+  `helper-corpus.R`.
+- **Condition classes** are `zuxlsx_<kind>_error` under `zuxlsx_error`,
+  for example `expect_error(..., class = "zuxlsx_zip_error")`.
+- **Locales.** The suite passes in UTF-8, C and Latin-1. A literal
+  mixing a BMP character with a `\U` escape beyond it is double-encoded
+  by R’s parser in a non-UTF-8 locale (#72), and
+  [`withr::local_locale()`](https://withr.r-lib.org/reference/with_locale.html)
+  cannot catch it, because the literal is parsed before the test runs.
+
+## Continuous integration
+
+Shared `pedrobtz/r-actions` workflows:
+
+- [R-CMD-check.yaml](https://pedrobtz.github.io/zuxlsx/.github/workflows/R-CMD-check.yaml):
+  macOS, Windows and Ubuntu release, Windows devel, Ubuntu oldrel-1 and
+  R 4.1, the r-devel containers, `nosuggests`.
+- [native-checks.yaml](https://pedrobtz.github.io/zuxlsx/.github/workflows/native-checks.yaml):
+  ASan/UBSan, valgrind, rchk, gctorture, LTO, analyzers, CRAN’s special
+  checks; the last only in the full profile, so label a PR `full-ci` to
+  run it.
+- [vendor.yaml](https://pedrobtz.github.io/zuxlsx/.github/workflows/vendor.yaml):
+  `tools/vendor/verify`, and on a pull request, that a change under
+  `src/vendor/` came with a manifest change.
+- [fuzz.yaml](https://pedrobtz.github.io/zuxlsx/.github/workflows/fuzz.yaml):
+  libFuzzer over the CFB reader and the `EncryptionInfo` parser
+  (`tools/fuzz/ole2_fuzz.c`), nightly as well. Expat is compiled from
+  zuxml’s vendored sources. The xlsxio path’s structure-aware fuzzer,
+  `tools/fuzz/run`, needs R to generate mutants and runs by hand (design
+  §18).
+- [coverage.yaml](https://pedrobtz.github.io/zuxlsx/.github/workflows/coverage.yaml):
+  `coverage.yml`, pinned to the v1.18.0 commit; on a push it commits the
+  badge to `.github/badges/coverage.svg`.
+
+This repository’s own:
+
+- [corpus.yaml](https://pedrobtz.github.io/zuxlsx/.github/workflows/corpus.yaml):
+  the Apache POI corpus (design §17.2–§17.3), separate from R CMD check
+  because it fetches 20 MB over the network and has a failure mode the
+  package’s own suite must never inherit. One platform is enough.
+- [locale.yaml](https://pedrobtz.github.io/zuxlsx/.github/workflows/locale.yaml):
+  the suite with the whole R process started in C and Latin-1 locales,
+  as CRAN’s Debian clang machine runs it (#72).
+- [siblings-main.yaml](https://pedrobtz.github.io/zuxlsx/.github/workflows/siblings-main.yaml):
+  a weekly canary, not a gate. R CMD check against the siblings’ GitHub
+  `main`; every other job builds against the CRAN releases (#44).
+- [pkgdown.yaml](https://pedrobtz.github.io/zuxlsx/.github/workflows/pkgdown.yaml).
+
+## Vendored native code
+
+[src/vendor/xlsxio/](https://pedrobtz.github.io/zuxlsx/src/vendor/xlsxio/)
+is xlsxio 0.2.36 (MIT, Brecht Sanders), **reader only**
+(`xlsxio_read.c`, `xlsxio_read_sharedstrings.c`, headers,
+`LICENSE.txt`). The writer is not bundled; writing is out of scope
+(§21). Upstream CRLF line endings are kept deliberately.
+
+[tools/patches/xlsxio/](https://pedrobtz.github.io/zuxlsx/tools/patches/xlsxio/)
+holds **ten patches**, applied in order, reproducing the committed copy
+byte for byte from the pristine 0.2.36 tarball:
+
+- `0001-miniz-zip-backend`: design §5’s “main adaptation cost”, a
+  `USE_MINIZ` backend beside xlsxio’s minizip/minizip-ng/libzip ones,
+  mapping `unzOpen`/`unzLocateFile`/`unzReadCurrentFile` onto
+  `mz_zip_reader_init_file` / `_locate_file_v2` / `_extract_iter_read`.
+- `0002-namespace-insensitive-relationship-id`: looks a worksheet’s
+  relationship id up as `id` rather than `r:id`, so a workbook binding
+  the relationships namespace to another prefix still resolves.
+- `0003-expose-cell-type-and-number-format`: reports a cell’s OOXML type
+  and whether its number format is a date. Without it xlsxio hands back
+  text and nothing else, and no typing or date handling is possible.
+- `0004-expose-workbook-date-epoch`: reports the workbook’s `date1904`
+  setting.
+- `0005-tolerant-part-name-lookup`: matches archive members the way
+  OOXML consumers compare part names.
+- `0006-strict-ooxml-relationship-types`: accepts strict OOXML
+  relationship namespaces as well as transitional ones.
+- `0007-null-relationship-id-crash`: a missing relationship `Id` reached
+  `strcasecmp` as `NULL`; found by the fuzzer, reported upstream.
+- `0008-report-why-a-worksheet-ended`: `xlsxioread_sheet_finish()`. A
+  worksheet that ends on a parse error, a reference past `XFD1048576`, a
+  dangling shared-string index or a bad CRC is reported rather than read
+  short; also corrects 0003’s bracket and built-in date rules.
+- `0009-report-damaged-shared-strings-and-styles`: a shared-string table
+  or styles part that is broken XML or fails its CRC is reported by
+  name, rather than loaded as far as the damage.
+- `0010-refuse-doctype`: every parser xlsxio creates refuses a DOCTYPE,
+  which no workbook part carries.
+
+**Never edit `src/vendor/` in place.** Patches live in `tools/patches/`,
+provenance in
+[tools/vendor/manifest.tsv](https://pedrobtz.github.io/zuxlsx/tools/vendor/manifest.tsv),
+per-file checksums in
+[tools/vendor/checksums.sha256](https://pedrobtz.github.io/zuxlsx/tools/vendor/checksums.sha256).
+`tools/vendor/fetch` re-derives the tree from the upstream tarball,
+`record` rewrites the checksums, and **`verify` checks offline that the
+committed tree, both manifests, `src/Makevars.in`’s defines and
+`inst/COPYRIGHTS` all agree**. Run it after touching anything under
+`src/vendor/`, `tools/patches/` or the fixtures. It exists because a
+hand edit to `xlsxio_read.c` once shipped undocumented while three files
+claimed the patch set reproduced the tree byte for byte.
 
 ## Licensing
 
@@ -469,8 +539,8 @@ and [inst/COPYRIGHTS](https://pedrobtz.github.io/zuxlsx/inst/COPYRIGHTS)
 (design §20). `DESCRIPTION` carries Pedro Baltazar as `aut`/`cre`/`cph`
 and Brecht Sanders as `cph` for xlsxio. Expat, miniz and TF-PSA-Crypto
 are *linked*, not vendored here, but static linking still redistributes
-them, so their licences are installed in `inst/licenses/` – as is
-xlsxio’s, since R installs nothing outside `inst/` – and described in
+them, so their licences are installed in `inst/licenses/` (as is
+xlsxio’s, since R installs nothing outside `inst/`) and described in
 `inst/COPYRIGHTS`. TF-PSA-Crypto is Apache-2.0 (dual with
 GPL-2.0-or-later upstream; taken under Apache-2.0). Design §20 asks for
 this to be reviewed again before a CRAN submission.
