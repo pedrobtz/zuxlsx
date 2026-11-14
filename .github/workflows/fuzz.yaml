@@ -17,7 +17,7 @@ on:
       - 'tests/testthat/fixtures/ole2/**'
       - '.github/workflows/fuzz.yaml'
   schedule:
-    - cron: "5 4 * * *"
+    - cron: "5 4 * * 4"  # weekly, Thursdays
   workflow_dispatch:
 
 name: fuzz.yaml
