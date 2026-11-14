@@ -1,12 +1,12 @@
 Package: zuxlsx
-Title: Read 'xlsx' Workbooks Without System Dependencies
+Title: Read XLSX Workbooks Without System Dependencies
 Version: 0.1.0
 Authors@R: c(
     person("Pedro", "Baltazar", , "pedrobtz@gmail.com",
            role = c("aut", "cre", "cph")),
     person("Brecht", "Sanders", role = "cph",
            comment = "xlsxio, bundled in src/vendor/xlsxio"))
-Description: Reads spreadsheet data from 'xlsx' workbooks using a bundled
+Description: Reads spreadsheet data from XLSX workbooks using a bundled
     copy of the 'xlsxio' reader (<https://github.com/brechtsanders/xlsxio>),
     so that no system XML or ZIP library is required. The 'Expat' parser,
     the 'miniz' ZIP reader and the 'TF-PSA-Crypto' cryptography used to open
