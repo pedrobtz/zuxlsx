@@ -1,8 +1,17 @@
+## Resubmission
+
+This is a resubmission. In response to the review of 0.1.0:
+
+* Removed the single quotes around the file format name 'xlsx' in the Title
+  and Description, which now read "XLSX". Single quotes remain only around
+  software and package names ('xlsxio', 'Expat', 'miniz', 'TF-PSA-Crypto',
+  'zuxml', 'zukomp' and 'zucrypt').
+
 ## R CMD check results
 
 0 errors | 0 warnings | 1 note
 
-* This is a new submission.
+* This is a new submission (resubmission of 0.1.0).
 
 ## Test environments
 
